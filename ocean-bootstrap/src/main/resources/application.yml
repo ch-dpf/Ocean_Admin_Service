@@ -32,3 +32,13 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+ocean:
+  security:
+    authorization-server:
+      issuer: ${OAUTH2_ISSUER:http://localhost:${SERVER_PORT:8080}}
+      audience: ${OAUTH2_AUDIENCE:ocean-admin-api}
+      key-id: ${OAUTH2_KEY_ID:ocean-admin-signing}
+      key-store: ${OAUTH2_KEYSTORE_LOCATION}
+      key-store-type: ${OAUTH2_KEYSTORE_TYPE:PKCS12}
+      key-alias: ${OAUTH2_KEY_ALIAS:ocean-admin}
+      key-store-password: ${OAUTH2_KEYSTORE_PASSWORD}

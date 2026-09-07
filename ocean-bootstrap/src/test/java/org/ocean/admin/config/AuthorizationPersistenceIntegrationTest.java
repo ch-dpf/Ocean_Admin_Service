@@ -3,6 +3,8 @@ package org.ocean.admin.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 import org.flywaydb.core.Flyway;
@@ -10,8 +12,17 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.postgresql.ds.PGSimpleDataSource;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
+import org.springframework.security.oauth2.core.OAuth2RefreshToken;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsent;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
@@ -29,6 +40,9 @@ class AuthorizationPersistenceIntegrationTest {
             new PostgreSQLContainer<>("postgres:16-alpine");
 
     private RegisteredClientRepository repository;
+    private OAuth2AuthorizationService authorizationService;
+    private OAuth2AuthorizationConsentService consentService;
+    private JdbcTemplate jdbcTemplate;
 
     @BeforeAll
     void migrateAndCreateRepository() {
@@ -43,8 +57,11 @@ class AuthorizationPersistenceIntegrationTest {
         dataSource.setUser(postgres.getUsername());
         dataSource.setPassword(postgres.getPassword());
 
-        repository = new AuthorizationPersistenceConfiguration()
-                .registeredClientRepository(dataSource);
+        jdbcTemplate = new JdbcTemplate(dataSource);
+        AuthorizationPersistenceConfiguration persistence = new AuthorizationPersistenceConfiguration();
+        repository = persistence.registeredClientRepository(dataSource);
+        authorizationService = persistence.authorizationService(dataSource, repository);
+        consentService = persistence.authorizationConsentService(dataSource, repository);
     }
 
     @Test
@@ -86,5 +103,80 @@ class AuthorizationPersistenceIntegrationTest {
         assertThat(byClientId.getTokenSettings().isReuseRefreshTokens()).isFalse();
         assertThat(byClientId.getTokenSettings().getAccessTokenTimeToLive())
                 .isEqualTo(Duration.ofMinutes(15));
+    }
+
+    @Test
+    void loadsActiveIamUserWithRolesAndPermissions() {
+        UUID userId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO ocean_platform.iam_user (
+                    id, username, username_normalized, password_hash, status
+                ) VALUES (?, ?, ?, ?, 'ACTIVE')
+                """, userId, "Alice", "alice", "{noop}test-password");
+        jdbcTemplate.update("""
+                INSERT INTO ocean_platform.iam_user_role (user_id, role_id, platform_id)
+                VALUES (?, '20000000-0000-0000-0000-000000000002',
+                           '10000000-0000-0000-0000-000000000001')
+                """, userId);
+
+        UserDetails user = new JdbcIamUserDetailsService(jdbcTemplate)
+                .loadUserByUsername(" ALICE ");
+
+        assertThat(user.getUsername()).isEqualTo("Alice");
+        assertThat(user.isEnabled()).isTrue();
+        assertThat(user.isAccountNonExpired()).isTrue();
+        assertThat(user.isAccountNonLocked()).isTrue();
+        assertThat(user.getAuthorities())
+                .extracting("authority")
+                .contains("ROLE_PLATFORM_ADMIN", "admin:user:read", "admin:user:write");
+    }
+
+    @Test
+    void persistsAuthorizationTokensAndConsentUsingSecurity71JdbcServices() {
+        RegisteredClient client = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId("jdbc-contract-" + UUID.randomUUID())
+                .clientName("JDBC Contract Client")
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri("https://client.example.test/callback")
+                .scope("openid")
+                .clientSettings(ClientSettings.builder().requireProofKey(true).build())
+                .build();
+        repository.save(client);
+
+        Instant issuedAt = Instant.now();
+        OAuth2AccessToken accessToken = new OAuth2AccessToken(
+                OAuth2AccessToken.TokenType.BEARER,
+                "access-" + UUID.randomUUID(),
+                issuedAt,
+                issuedAt.plus(Duration.ofMinutes(15)),
+                Set.of("openid"));
+        OAuth2RefreshToken refreshToken = new OAuth2RefreshToken(
+                "refresh-" + UUID.randomUUID(),
+                issuedAt,
+                issuedAt.plus(Duration.ofDays(7)));
+        OAuth2Authorization authorization = OAuth2Authorization.withRegisteredClient(client)
+                .id(UUID.randomUUID().toString())
+                .principalName("alice")
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .authorizedScopes(Set.of("openid"))
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .build();
+        authorizationService.save(authorization);
+
+        OAuth2AuthorizationConsent consent = OAuth2AuthorizationConsent
+                .withId(client.getId(), "alice")
+                .scope("openid")
+                .build();
+        consentService.save(consent);
+
+        assertThat(authorizationService.findById(authorization.getId())).isNotNull();
+        assertThat(authorizationService.findByToken(
+                        accessToken.getTokenValue(), OAuth2TokenType.ACCESS_TOKEN))
+                .extracting(OAuth2Authorization::getId)
+                .isEqualTo(authorization.getId());
+        assertThat(consentService.findById(client.getId(), "alice"))
+                .isEqualTo(consent);
     }
 }

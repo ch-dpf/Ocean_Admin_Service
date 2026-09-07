@@ -1,5 +1,9 @@
 # Ocean Admin Service 架构说明
 
+## 技术基线
+
+项目基线为 Java 21、Spring Boot 4.1.1、Spring Security Authorization Server 7.1.1、MyBatis-Plus 3.5.17 和 springdoc-openapi 3.0.3。依赖版本由 Spring Boot BOM 与 MyBatis-Plus BOM 统一管理，并通过 Maven Enforcer 校验 Java 版本和依赖收敛。
+
 ## 当前边界
 
 当前只建设三个平台侧领域：
@@ -38,7 +42,6 @@ ocean-business-cloud
 
 - JWT 必须使用非对称密钥并校验 `iss`、`aud`、`exp` 和 `nbf`。
 - 浏览器客户端使用 Authorization Code + PKCE。
-- 活跃会话存放 Redis，数据库保留管理状态和刷新令牌哈希。
+- 活跃会话和短期撤销状态存放 Redis；OAuth 协议状态存放 PostgreSQL，令牌材料必须采用字段级加密或经验证的自定义摘要持久化方案保护。
 - 密码、令牌、Cookie、Authorization 和密钥不得写入审计表。
 - 平台角色只能授予其所属平台，由数据库触发器和应用服务双重校验。
-

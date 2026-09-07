@@ -5,8 +5,8 @@
 ## 技术基线
 
 - Java 21
-- Spring Boot 3.2.4
-- Spring Security / OAuth2 Authorization Server / Resource Server
+- Spring Boot 4.1.1
+- Spring Security 7.1.1 / OAuth 2.1 Authorization Server / Resource Server
 - PostgreSQL + Flyway
 - Redis
 - MyBatis-Plus
@@ -24,12 +24,22 @@ ocean-bootstrap       应用启动、配置和 Flyway
 
 ## 初始化
 
-生产环境必须通过环境变量提供数据库密码：
+运行环境必须提供数据库密码和持久化的 OAuth2 签名密钥。以下命令只用于生成本地开发密钥，生产环境应由 KMS、HSM 或受控密钥库提供：
+
+```powershell
+keytool -genkeypair -alias ocean-admin -keyalg RSA -keysize 3072 -storetype PKCS12 -keystore ocean-admin.p12 -validity 3650
+```
+
+启动应用：
 
 ```powershell
 $env:DB_URL='jdbc:postgresql://localhost:5432/ocean_admin'
 $env:DB_USERNAME='ocean_admin'
 $env:DB_PASSWORD='replace-me'
+$env:OAUTH2_ISSUER='http://localhost:8080'
+$env:OAUTH2_KEYSTORE_LOCATION='file:./ocean-admin.p12'
+$env:OAUTH2_KEYSTORE_PASSWORD='replace-me'
+$env:OAUTH2_KEY_ALIAS='ocean-admin'
 mvn -pl ocean-bootstrap -am spring-boot:run
 ```
 

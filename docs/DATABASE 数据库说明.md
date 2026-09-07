@@ -35,4 +35,5 @@ ocean_platform
 - 审计表保存用户名和平台编码快照，不对 IAM 建强外键。
 - 当 `audit_event` 达到千万级或需要差异化留存时，再改为按月分区。
 - 已执行的 Flyway 文件不得修改，只能追加新版本。
-- OAuth2 三张协议表遵循 Spring Authorization Server 1.2.3 JDBC Schema；`iam_oauth_client.registered_client_id` 关联平台归属元数据与协议客户端。
+- OAuth2 三张协议表的字段集合与 Spring Security Authorization Server 7.1.1 官方 JDBC Schema 保持一致；按 PostgreSQL 官方适配要求使用 `TIMESTAMPTZ` 和 `TEXT`。
+- 授权和同意记录通过外键归属于注册客户端；令牌等值查询使用非空部分 HASH 索引；`iam_oauth_client.registered_client_id` 关联平台归属元数据与协议客户端。
