@@ -1,0 +1,301 @@
+CREATE SCHEMA IF NOT EXISTS ocean_platform;
+
+CREATE OR REPLACE FUNCTION ocean_platform.set_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$;
+
+CREATE TABLE ocean_platform.iam_platform (
+    id              UUID PRIMARY KEY,
+    platform_code   VARCHAR(64) NOT NULL,
+    platform_name   VARCHAR(128) NOT NULL,
+    entry_url       VARCHAR(500),
+    icon_url        VARCHAR(500),
+    description     VARCHAR(500),
+    status          VARCHAR(20) NOT NULL DEFAULT 'ENABLED',
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ,
+    CONSTRAINT ck_iam_platform_status CHECK (status IN ('ENABLED', 'DISABLED'))
+);
+
+CREATE UNIQUE INDEX uk_iam_platform_code
+    ON ocean_platform.iam_platform(platform_code)
+    WHERE deleted_at IS NULL;
+
+CREATE TABLE ocean_platform.iam_user (
+    id                    UUID PRIMARY KEY,
+    username              VARCHAR(64) NOT NULL,
+    username_normalized   VARCHAR(64) NOT NULL,
+    password_hash         VARCHAR(255) NOT NULL,
+    real_name             VARCHAR(100),
+    email                 VARCHAR(255),
+    phone                 VARCHAR(32),
+    avatar_url            VARCHAR(500),
+    status                VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    valid_from            TIMESTAMPTZ,
+    valid_until           TIMESTAMPTZ,
+    permanent_valid       BOOLEAN NOT NULL DEFAULT TRUE,
+    max_login_devices     INTEGER NOT NULL DEFAULT 1,
+    failed_attempts       INTEGER NOT NULL DEFAULT 0,
+    lock_level            INTEGER NOT NULL DEFAULT 0,
+    locked_until          TIMESTAMPTZ,
+    password_changed_at   TIMESTAMPTZ,
+    last_login_at         TIMESTAMPTZ,
+    last_login_ip         VARCHAR(64),
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at            TIMESTAMPTZ,
+    version               BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT ck_iam_user_status CHECK (status IN ('ACTIVE', 'DISABLED', 'LOCKED')),
+    CONSTRAINT ck_iam_user_devices CHECK (max_login_devices BETWEEN 1 AND 20),
+    CONSTRAINT ck_iam_user_validity CHECK (valid_until IS NULL OR valid_from IS NULL OR valid_until > valid_from)
+);
+
+CREATE UNIQUE INDEX uk_iam_user_username
+    ON ocean_platform.iam_user(username_normalized)
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_iam_user_status ON ocean_platform.iam_user(status) WHERE deleted_at IS NULL;
+
+CREATE TABLE ocean_platform.iam_oauth_client (
+    id                     UUID PRIMARY KEY,
+    platform_id            UUID NOT NULL REFERENCES ocean_platform.iam_platform(id),
+    client_id              VARCHAR(128) NOT NULL UNIQUE,
+    client_secret_hash     VARCHAR(255),
+    client_type            VARCHAR(20) NOT NULL,
+    grant_types            VARCHAR(500) NOT NULL,
+    scopes                 VARCHAR(1000) NOT NULL,
+    access_token_seconds   INTEGER NOT NULL DEFAULT 900,
+    refresh_token_seconds  INTEGER NOT NULL DEFAULT 604800,
+    pkce_required          BOOLEAN NOT NULL DEFAULT TRUE,
+    status                 VARCHAR(20) NOT NULL DEFAULT 'ENABLED',
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_oauth_client_type CHECK (client_type IN ('PUBLIC', 'CONFIDENTIAL')),
+    CONSTRAINT ck_oauth_client_status CHECK (status IN ('ENABLED', 'DISABLED')),
+    CONSTRAINT ck_oauth_client_secret CHECK (client_type = 'PUBLIC' OR client_secret_hash IS NOT NULL)
+);
+
+CREATE TABLE ocean_platform.iam_oauth_redirect_uri (
+    id            UUID PRIMARY KEY,
+    oauth_client_id UUID NOT NULL REFERENCES ocean_platform.iam_oauth_client(id) ON DELETE CASCADE,
+    redirect_uri  VARCHAR(1000) NOT NULL,
+    UNIQUE (oauth_client_id, redirect_uri)
+);
+
+CREATE TABLE ocean_platform.iam_role (
+    id           UUID PRIMARY KEY,
+    platform_id  UUID REFERENCES ocean_platform.iam_platform(id),
+    role_code    VARCHAR(100) NOT NULL,
+    role_name    VARCHAR(100) NOT NULL,
+    scope_type   VARCHAR(20) NOT NULL,
+    status       VARCHAR(20) NOT NULL DEFAULT 'ENABLED',
+    description  VARCHAR(500),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_iam_role_scope CHECK (scope_type IN ('GLOBAL', 'PLATFORM')),
+    CONSTRAINT ck_iam_role_status CHECK (status IN ('ENABLED', 'DISABLED')),
+    CONSTRAINT ck_iam_role_platform CHECK (
+        (scope_type = 'GLOBAL' AND platform_id IS NULL)
+        OR (scope_type = 'PLATFORM' AND platform_id IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX uk_iam_role_scope_code
+    ON ocean_platform.iam_role(COALESCE(platform_id, '00000000-0000-0000-0000-000000000000'::uuid), role_code);
+
+CREATE TABLE ocean_platform.iam_permission (
+    id               UUID PRIMARY KEY,
+    platform_id      UUID REFERENCES ocean_platform.iam_platform(id),
+    permission_code  VARCHAR(150) NOT NULL UNIQUE,
+    permission_name  VARCHAR(100) NOT NULL,
+    resource         VARCHAR(100) NOT NULL,
+    action           VARCHAR(50) NOT NULL,
+    status           VARCHAR(20) NOT NULL DEFAULT 'ENABLED',
+    description      VARCHAR(500),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_iam_permission_status CHECK (status IN ('ENABLED', 'DISABLED'))
+);
+
+CREATE TABLE ocean_platform.iam_user_role (
+    user_id      UUID NOT NULL REFERENCES ocean_platform.iam_user(id) ON DELETE CASCADE,
+    role_id      UUID NOT NULL REFERENCES ocean_platform.iam_role(id) ON DELETE CASCADE,
+    platform_id  UUID REFERENCES ocean_platform.iam_platform(id),
+    valid_from   TIMESTAMPTZ,
+    valid_until  TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, role_id),
+    CONSTRAINT ck_iam_user_role_validity CHECK (valid_until IS NULL OR valid_from IS NULL OR valid_until > valid_from)
+);
+
+CREATE INDEX idx_iam_user_role_platform ON ocean_platform.iam_user_role(platform_id, user_id);
+
+CREATE TABLE ocean_platform.iam_role_permission (
+    role_id        UUID NOT NULL REFERENCES ocean_platform.iam_role(id) ON DELETE CASCADE,
+    permission_id  UUID NOT NULL REFERENCES ocean_platform.iam_permission(id) ON DELETE CASCADE,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (role_id, permission_id)
+);
+
+CREATE OR REPLACE FUNCTION ocean_platform.validate_user_role_scope()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    expected_scope VARCHAR(20);
+    expected_platform UUID;
+BEGIN
+    SELECT scope_type, platform_id
+      INTO expected_scope, expected_platform
+      FROM ocean_platform.iam_role
+     WHERE id = NEW.role_id;
+
+    IF expected_scope = 'GLOBAL' AND NEW.platform_id IS NOT NULL THEN
+        RAISE EXCEPTION 'GLOBAL role must not have platform_id';
+    END IF;
+    IF expected_scope = 'PLATFORM' AND NEW.platform_id IS DISTINCT FROM expected_platform THEN
+        RAISE EXCEPTION 'PLATFORM role must be assigned in its owning platform';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_validate_user_role_scope
+BEFORE INSERT OR UPDATE ON ocean_platform.iam_user_role
+FOR EACH ROW EXECUTE FUNCTION ocean_platform.validate_user_role_scope();
+
+CREATE TABLE ocean_platform.iam_auth_session (
+    session_id          UUID PRIMARY KEY,
+    user_id             UUID NOT NULL REFERENCES ocean_platform.iam_user(id),
+    platform_id         UUID NOT NULL REFERENCES ocean_platform.iam_platform(id),
+    oauth_client_id     UUID REFERENCES ocean_platform.iam_oauth_client(id),
+    device_id           VARCHAR(200),
+    device_name         VARCHAR(200),
+    client_ip           VARCHAR(64),
+    user_agent          VARCHAR(1000),
+    refresh_token_hash  VARCHAR(255),
+    token_family_id     UUID,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_active_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at          TIMESTAMPTZ NOT NULL,
+    refresh_expires_at  TIMESTAMPTZ,
+    revoked_at          TIMESTAMPTZ,
+    revoke_reason       VARCHAR(200)
+);
+
+CREATE INDEX idx_iam_session_user_active
+    ON ocean_platform.iam_auth_session(user_id, expires_at)
+    WHERE revoked_at IS NULL;
+CREATE INDEX idx_iam_session_family
+    ON ocean_platform.iam_auth_session(token_family_id)
+    WHERE token_family_id IS NOT NULL;
+
+CREATE TABLE ocean_platform.iam_security_policy (
+    id                      SMALLINT PRIMARY KEY DEFAULT 1,
+    min_password_length     INTEGER NOT NULL DEFAULT 8,
+    require_uppercase       BOOLEAN NOT NULL DEFAULT TRUE,
+    require_lowercase       BOOLEAN NOT NULL DEFAULT TRUE,
+    require_digit           BOOLEAN NOT NULL DEFAULT TRUE,
+    require_special         BOOLEAN NOT NULL DEFAULT FALSE,
+    max_failed_attempts     INTEGER NOT NULL DEFAULT 5,
+    lock_base_minutes       INTEGER NOT NULL DEFAULT 5,
+    lock_max_minutes        INTEGER NOT NULL DEFAULT 720,
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_single_security_policy CHECK (id = 1)
+);
+
+CREATE TABLE ocean_platform.audit_event (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    event_id            UUID NOT NULL UNIQUE,
+    event_category      VARCHAR(30) NOT NULL,
+    event_type          VARCHAR(100) NOT NULL,
+    platform_id         UUID,
+    platform_code       VARCHAR(64),
+    user_id             UUID,
+    username_snapshot   VARCHAR(64),
+    session_id          UUID,
+    resource_type       VARCHAR(100),
+    resource_id         VARCHAR(200),
+    operation_code      VARCHAR(100),
+    outcome             VARCHAR(20) NOT NULL,
+    failure_reason      VARCHAR(500),
+    request_method      VARCHAR(10),
+    request_path        VARCHAR(500),
+    request_summary     JSONB,
+    client_ip           VARCHAR(64),
+    user_agent          VARCHAR(1000),
+    device_id           VARCHAR(200),
+    duration_ms         BIGINT,
+    request_id          VARCHAR(64),
+    trace_id            VARCHAR(64),
+    occurred_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_audit_event_category CHECK (event_category IN ('LOGIN', 'OPERATION', 'SECURITY', 'SYSTEM')),
+    CONSTRAINT ck_audit_event_outcome CHECK (outcome IN ('SUCCESS', 'FAILURE', 'UNKNOWN'))
+);
+
+CREATE INDEX idx_audit_event_platform_time ON ocean_platform.audit_event(platform_code, occurred_at DESC);
+CREATE INDEX idx_audit_event_user_time ON ocean_platform.audit_event(user_id, occurred_at DESC);
+CREATE INDEX idx_audit_event_category_time ON ocean_platform.audit_event(event_category, occurred_at DESC);
+CREATE INDEX idx_audit_event_trace ON ocean_platform.audit_event(trace_id) WHERE trace_id IS NOT NULL;
+
+COMMENT ON COLUMN ocean_platform.audit_event.request_summary IS
+    'Only sanitized business summaries are allowed; passwords, tokens, cookies and secrets are forbidden.';
+
+CREATE TABLE ocean_platform.audit_exception (
+    id                   UUID PRIMARY KEY,
+    fingerprint          VARCHAR(128) NOT NULL,
+    platform_code        VARCHAR(64),
+    exception_type       VARCHAR(300) NOT NULL,
+    message_summary      VARCHAR(1000),
+    stack_trace          TEXT,
+    first_occurred_at    TIMESTAMPTZ NOT NULL,
+    last_occurred_at     TIMESTAMPTZ NOT NULL,
+    occurrence_count     BIGINT NOT NULL DEFAULT 1,
+    status               VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+    handler_user_id      UUID,
+    handle_remark        VARCHAR(1000),
+    handled_at           TIMESTAMPTZ,
+    last_trace_id        VARCHAR(64),
+    CONSTRAINT ck_audit_exception_status CHECK (status IN ('OPEN', 'PROCESSING', 'RESOLVED', 'IGNORED'))
+);
+
+CREATE UNIQUE INDEX uk_audit_exception_open_fingerprint
+    ON ocean_platform.audit_exception(fingerprint)
+    WHERE status IN ('OPEN', 'PROCESSING');
+
+CREATE TABLE ocean_platform.wb_metric_daily (
+    metric_date             DATE NOT NULL,
+    platform_id             UUID NOT NULL REFERENCES ocean_platform.iam_platform(id),
+    login_count             BIGINT NOT NULL DEFAULT 0,
+    login_success_count     BIGINT NOT NULL DEFAULT 0,
+    login_failure_count     BIGINT NOT NULL DEFAULT 0,
+    active_user_count       BIGINT NOT NULL DEFAULT 0,
+    operation_count         BIGINT NOT NULL DEFAULT 0,
+    failed_operation_count  BIGINT NOT NULL DEFAULT 0,
+    security_event_count    BIGINT NOT NULL DEFAULT 0,
+    exception_count         BIGINT NOT NULL DEFAULT 0,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (metric_date, platform_id)
+);
+
+CREATE TRIGGER trg_iam_platform_updated_at BEFORE UPDATE ON ocean_platform.iam_platform
+FOR EACH ROW EXECUTE FUNCTION ocean_platform.set_updated_at();
+CREATE TRIGGER trg_iam_user_updated_at BEFORE UPDATE ON ocean_platform.iam_user
+FOR EACH ROW EXECUTE FUNCTION ocean_platform.set_updated_at();
+CREATE TRIGGER trg_iam_oauth_client_updated_at BEFORE UPDATE ON ocean_platform.iam_oauth_client
+FOR EACH ROW EXECUTE FUNCTION ocean_platform.set_updated_at();
+CREATE TRIGGER trg_iam_role_updated_at BEFORE UPDATE ON ocean_platform.iam_role
+FOR EACH ROW EXECUTE FUNCTION ocean_platform.set_updated_at();
+CREATE TRIGGER trg_iam_permission_updated_at BEFORE UPDATE ON ocean_platform.iam_permission
+FOR EACH ROW EXECUTE FUNCTION ocean_platform.set_updated_at();
+CREATE TRIGGER trg_wb_metric_daily_updated_at BEFORE UPDATE ON ocean_platform.wb_metric_daily
+FOR EACH ROW EXECUTE FUNCTION ocean_platform.set_updated_at();
+
