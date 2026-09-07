@@ -20,6 +20,9 @@ ocean_platform
 | `iam_role_permission` | IAM | 角色权限关联 |
 | `iam_auth_session` | IAM | 会话管理和刷新令牌哈希 |
 | `iam_security_policy` | IAM | 全局安全策略 |
+| `oauth2_registered_client` | OAuth2 | Spring Authorization Server 注册客户端 |
+| `oauth2_authorization` | OAuth2 | 授权码、访问令牌与刷新令牌协议状态 |
+| `oauth2_authorization_consent` | OAuth2 | 用户对客户端的授权确认 |
 | `audit_event` | Audit | 登录、操作、安全和系统审计事件 |
 | `audit_exception` | Audit | 去重聚合后的异常事件 |
 | `wb_metric_daily` | Workbench | 各平台每日指标投影 |
@@ -32,4 +35,4 @@ ocean_platform
 - 审计表保存用户名和平台编码快照，不对 IAM 建强外键。
 - 当 `audit_event` 达到千万级或需要差异化留存时，再改为按月分区。
 - 已执行的 Flyway 文件不得修改，只能追加新版本。
-
+- OAuth2 三张协议表遵循 Spring Authorization Server 1.2.3 JDBC Schema；`iam_oauth_client.registered_client_id` 关联平台归属元数据与协议客户端。

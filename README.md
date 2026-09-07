@@ -38,12 +38,12 @@ Flyway 会执行：
 ```text
 V1__init_ocean_platform.sql
 V2__seed_platform_core.sql
+V3__add_oauth2_authorization_server.sql
 ```
 
 种子脚本不会创建默认管理员和默认密码。首个管理员应通过受控初始化命令创建。
 
 详细说明见：
 
-- `docs/ARCHITECTURE.md`
-- `docs/DATABASE.md`
-
+- `docs/ARCHITECTURE 架构说明.md`
+- `docs/DATABASE 数据库说明.md`
