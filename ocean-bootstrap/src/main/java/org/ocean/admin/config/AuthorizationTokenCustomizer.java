@@ -6,6 +6,7 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
@@ -64,6 +65,12 @@ public class AuthorizationTokenCustomizer implements OAuth2TokenCustomizer<JwtEn
             return;
         }
         context.getClaims().audience(List.of(properties.audience()));
+        if (context.getRegisteredClient().getAuthorizationGrantTypes()
+                .contains(AuthorizationGrantType.REFRESH_TOKEN)
+                && context.getAuthorization() != null) {
+            context.getClaims().claim("sid", StateMachineOAuth2AuthorizationService
+                    .authorizationSessionId(context.getAuthorization().getId()).toString());
+        }
 
         // 未绑定到业务平台的协议客户端仍可签发令牌，但不会获得平台授权声明。
         Platform platform = jdbcTemplate.query(PLATFORM_SQL, resultSet ->

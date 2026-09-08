@@ -62,6 +62,7 @@ Flyway 会执行：
 V1__init_ocean_platform.sql
 V2__seed_platform_core.sql
 V3__add_oauth2_authorization_server.sql
+V4__add_refresh_token_lifecycle.sql
 ```
 
 种子脚本不会创建默认管理员和默认密码。首个管理员应通过受控初始化命令创建。
@@ -103,6 +104,14 @@ mvn -pl ocean-bootstrap -am spring-boot:run
 ```powershell
 Remove-Item Env:OCEAN_BOOTSTRAP_OAUTH_CLIENT_ENABLED
 ```
+
+## 刷新令牌数据库状态机
+
+V4 将刷新令牌状态从会话表拆到 `iam_refresh_token`。数据库是会话与令牌族状态的唯一权威源；IAM 表只保存带 `sha256:` 前缀的令牌摘要，不保存令牌原文。当前状态转换为 `ISSUED → USED`（正常轮换）和 `ISSUED → REVOKED`（注销或过期）；再次提交已消费令牌会撤销整个 token family。
+
+SAS 官方 JDBC 授权服务已由该状态机装饰：授权码换取令牌时建立会话，刷新时轮换，RFC 7009 撤销时注销会话。公共浏览器客户端仅在 `client_authentication_method=none`、强制 PKCE 且显式允许 `refresh_token` 时启用受控扩展。
+
+轮换在单个数据库事务中完成，并通过会话/令牌行锁、乐观版本号和“每会话最多一枚 `ISSUED` 令牌”的唯一索引处理并发。受管理客户端的访问令牌携带 `sid`，资源服务器据此检查活跃会话，使注销同时令现有访问令牌失效。Redis 仅缓存不含令牌原文的活跃会话投影：数据库事务提交后才回填或删除，读取未命中/连接失败时回源 PostgreSQL，缓存写入失败不回滚业务；TTL 上限默认 5 分钟。
 
 详细说明见：
 

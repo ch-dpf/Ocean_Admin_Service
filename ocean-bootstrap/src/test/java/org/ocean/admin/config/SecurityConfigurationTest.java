@@ -43,7 +43,10 @@ class SecurityConfigurationTest {
         AuthorizationServerProperties properties = new AuthorizationServerProperties(
                 java.net.URI.create(ISSUER), AUDIENCE, null,
                 "PKCS12", "test", "test");
-        decoder = new SecurityConfiguration().jwtDecoder(rsaKey, properties);
+        decoder = new SecurityConfiguration().jwtDecoder(
+                rsaKey, properties,
+                org.mockito.Mockito.mock(
+                        org.ocean.admin.platform.identity.session.RefreshTokenLifecycleService.class));
     }
 
     /** 正确 issuer 与 audience 的令牌应通过完整校验链。 */

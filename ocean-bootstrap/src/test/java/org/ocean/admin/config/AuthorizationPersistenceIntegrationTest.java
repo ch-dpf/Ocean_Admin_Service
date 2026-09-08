@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.core.OAuth2RefreshToken;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -63,9 +64,10 @@ class AuthorizationPersistenceIntegrationTest {
         jdbcTemplate = new JdbcTemplate(dataSource);
         AuthorizationPersistenceConfiguration persistence = new AuthorizationPersistenceConfiguration();
         AuthorizationPersistenceConfiguration.AuthorizationJdbcOperations operations =
-                persistence.authorizationJdbcOperations(dataSource);
+                persistence.authorizationJdbcOperations(
+                        dataSource, new DataSourceTransactionManager(dataSource));
         repository = persistence.registeredClientRepository(operations);
-        authorizationService = persistence.authorizationService(operations, repository);
+        authorizationService = persistence.jdbcOAuth2AuthorizationService(operations, repository);
         consentService = persistence.authorizationConsentService(operations, repository);
     }
 

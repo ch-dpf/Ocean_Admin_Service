@@ -7,15 +7,18 @@ import javax.sql.DataSource;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DelegatingDataSource;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
+import org.springframework.transaction.PlatformTransactionManager;
 
 /**
  * Spring Authorization Server 的 JDBC 持久化配置。
@@ -29,11 +32,13 @@ public class AuthorizationPersistenceConfiguration {
 
     /** 共享带 schema 的 JDBC 上下文，供协议仓储和跨表初始化事务共同使用。 */
     @Bean
-    AuthorizationJdbcOperations authorizationJdbcOperations(DataSource dataSource) {
-        DataSource schemaDataSource = new SchemaDataSource(dataSource, AUTHORIZATION_SCHEMA);
+    AuthorizationJdbcOperations authorizationJdbcOperations(
+            DataSource dataSource, PlatformTransactionManager transactionManager) {
+        DataSource transactionAwareDataSource = new TransactionAwareDataSourceProxy(dataSource);
+        DataSource schemaDataSource = new SchemaDataSource(transactionAwareDataSource, AUTHORIZATION_SCHEMA);
         return new AuthorizationJdbcOperations(
                 new JdbcTemplate(schemaDataSource),
-                new DataSourceTransactionManager(schemaDataSource));
+                transactionManager);
     }
 
     /** 创建 OAuth2 注册客户端仓储。 */
@@ -44,11 +49,24 @@ public class AuthorizationPersistenceConfiguration {
 
     /** 创建授权、令牌及其元数据的持久化服务。 */
     @Bean
-    OAuth2AuthorizationService authorizationService(
+    JdbcOAuth2AuthorizationService jdbcOAuth2AuthorizationService(
             AuthorizationJdbcOperations operations,
             RegisteredClientRepository registeredClientRepository) {
         return new JdbcOAuth2AuthorizationService(
                 operations.jdbcTemplate(), registeredClientRepository);
+    }
+
+    /** 在官方 JDBC 服务外增加 IAM 会话状态机，同时保留官方序列化与查询实现。 */
+    @Bean
+    @Primary
+    OAuth2AuthorizationService authorizationService(
+            @Qualifier("jdbcOAuth2AuthorizationService") OAuth2AuthorizationService delegate,
+            org.ocean.admin.platform.identity.session.RefreshTokenLifecycleService lifecycleService,
+            JdbcTemplate jdbcTemplate,
+            PlatformTransactionManager transactionManager,
+            SessionLifecycleProperties properties) {
+        return new StateMachineOAuth2AuthorizationService(
+                delegate, lifecycleService, jdbcTemplate, transactionManager, properties);
     }
 
     /** 创建用户授权同意记录的持久化服务。 */
@@ -63,7 +81,7 @@ public class AuthorizationPersistenceConfiguration {
     /** 同时持有共享 JdbcTemplate 与绑定同一 DataSource 的事务管理器。 */
     record AuthorizationJdbcOperations(
             JdbcTemplate jdbcTemplate,
-            DataSourceTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager) {
     }
 
     /** 在借出连接时设置默认 schema 的轻量 DataSource 装饰器。 */

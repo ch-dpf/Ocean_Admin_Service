@@ -27,11 +27,16 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeAuthenticationProvider;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.ocean.admin.platform.identity.session.RefreshTokenLifecycleService;
 
 /**
  * OAuth2 授权服务器与业务资源服务器的安全配置。
@@ -40,15 +45,34 @@ import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
 @EnableMethodSecurity
-@EnableConfigurationProperties(AuthorizationServerProperties.class)
+@EnableConfigurationProperties({AuthorizationServerProperties.class, SessionLifecycleProperties.class})
 public class SecurityConfiguration {
 
     /** 保护授权、令牌、JWK 和 OIDC 等协议端点，并为交互式授权启用表单登录。 */
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
-    SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain authorizationServerSecurityFilterChain(
+            HttpSecurity http,
+            OAuth2AuthorizationService authorizationService,
+            RegisteredClientRepository registeredClientRepository,
+            PlatformTransactionManager transactionManager) throws Exception {
         http.oauth2AuthorizationServer(authorizationServer -> {
             http.securityMatcher(authorizationServer.getEndpointsMatcher());
+            authorizationServer.clientAuthentication(clientAuthentication -> clientAuthentication
+                    .authenticationConverters(converters -> converters.add(
+                            0, new PublicRefreshClientAuthenticationConverter()))
+                    .authenticationProviders(providers -> providers.add(
+                            0, new PublicRefreshClientAuthenticationProvider(registeredClientRepository))));
+            authorizationServer.tokenEndpoint(tokenEndpoint ->
+                    tokenEndpoint.authenticationProviders(providers -> {
+                        for (int index = 0; index < providers.size(); index++) {
+                            if (providers.get(index) instanceof OAuth2AuthorizationCodeAuthenticationProvider) {
+                                providers.set(index, new PublicClientRefreshTokenAuthenticationProvider(
+                                        providers.get(index), authorizationService, transactionManager));
+                                break;
+                            }
+                        }
+                    }));
             authorizationServer.oidc(Customizer.withDefaults());
         });
         http.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated());
@@ -104,7 +128,10 @@ public class SecurityConfiguration {
      * 仅验证签名而不验证受众，可能导致签发给其他服务的令牌被误接受。
      */
     @Bean
-    JwtDecoder jwtDecoder(RSAKey authorizationServerRsaKey, AuthorizationServerProperties properties)
+    JwtDecoder jwtDecoder(
+            RSAKey authorizationServerRsaKey,
+            AuthorizationServerProperties properties,
+            RefreshTokenLifecycleService lifecycleService)
             throws JOSEException {
         NimbusJwtDecoder decoder = NimbusJwtDecoder
                 .withPublicKey(authorizationServerRsaKey.toRSAPublicKey())
@@ -119,7 +146,23 @@ public class SecurityConfiguration {
             return OAuth2TokenValidatorResult.failure(new OAuth2Error(
                     "invalid_token", "Required audience is missing", null));
         };
-        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(issuerValidator, audienceValidator));
+        OAuth2TokenValidator<Jwt> activeSessionValidator = jwt -> {
+            String sessionId = jwt.getClaimAsString("sid");
+            if (sessionId == null) {
+                return OAuth2TokenValidatorResult.success();
+            }
+            try {
+                if (lifecycleService.findActiveSession(java.util.UUID.fromString(sessionId)).isPresent()) {
+                    return OAuth2TokenValidatorResult.success();
+                }
+            } catch (IllegalArgumentException invalidSessionId) {
+                // 统一映射为无效令牌，避免向调用方暴露内部标识解析细节。
+            }
+            return OAuth2TokenValidatorResult.failure(new OAuth2Error(
+                    "invalid_token", "Authorization session is no longer active", null));
+        };
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+                issuerValidator, audienceValidator, activeSessionValidator));
         return decoder;
     }
 

@@ -50,6 +50,12 @@ ocean:
       post-logout-redirect-uri: ${OCEAN_BOOTSTRAP_OAUTH_POST_LOGOUT_REDIRECT_URI:http://127.0.0.1:3000/}
       require-consent: ${OCEAN_BOOTSTRAP_OAUTH_REQUIRE_CONSENT:true}
   security:
+    session:
+      maximum-lifetime: ${OCEAN_SESSION_MAXIMUM_LIFETIME:P30D}
+    session-cache:
+      enabled: ${OCEAN_SESSION_CACHE_ENABLED:true}
+      key-prefix: ${OCEAN_SESSION_CACHE_KEY_PREFIX:ocean:iam:session:}
+      maximum-ttl: ${OCEAN_SESSION_CACHE_MAXIMUM_TTL:PT5M}
     authorization-server:
       issuer: ${OAUTH2_ISSUER:http://localhost:${SERVER_PORT:8090}}
       audience: ${OAUTH2_AUDIENCE:ocean-admin-api}

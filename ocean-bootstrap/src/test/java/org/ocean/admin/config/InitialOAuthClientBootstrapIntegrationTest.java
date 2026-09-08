@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.boot.DefaultApplicationArguments;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
@@ -47,7 +48,8 @@ class InitialOAuthClientBootstrapIntegrationTest {
         dataSource.setUser(postgres.getUsername());
         dataSource.setPassword(postgres.getPassword());
         AuthorizationPersistenceConfiguration persistence = new AuthorizationPersistenceConfiguration();
-        operations = persistence.authorizationJdbcOperations(dataSource);
+        operations = persistence.authorizationJdbcOperations(
+                dataSource, new DataSourceTransactionManager(dataSource));
         repository = persistence.registeredClientRepository(operations);
     }
 
