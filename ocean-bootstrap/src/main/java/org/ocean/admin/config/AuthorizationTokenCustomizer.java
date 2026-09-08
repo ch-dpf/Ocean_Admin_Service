@@ -11,9 +11,14 @@ import org.springframework.security.oauth2.server.authorization.token.JwtEncodin
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.stereotype.Component;
 
+/**
+ * 为访问令牌补充平台、角色和权限声明。
+ * 自定义声明只写入 access token，避免把业务授权信息混入其他类型令牌。
+ */
 @Component
 public class AuthorizationTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingContext> {
 
+    /** 通过协议客户端标识解析其归属且当前启用的平台。 */
     private static final String PLATFORM_SQL = """
             SELECT p.id, p.platform_code
               FROM ocean_platform.iam_oauth_client c
@@ -24,6 +29,7 @@ public class AuthorizationTokenCustomizer implements OAuth2TokenCustomizer<JwtEn
                AND p.deleted_at IS NULL
             """;
 
+    /** 查询用户在目标平台范围内当前有效的角色与权限。 */
     private static final String USER_AUTHORITY_SQL = """
             SELECT DISTINCT r.role_code, p.permission_code
               FROM ocean_platform.iam_user u
@@ -51,6 +57,7 @@ public class AuthorizationTokenCustomizer implements OAuth2TokenCustomizer<JwtEn
         this.properties = properties;
     }
 
+    /** 根据客户端和登录主体构造令牌中的业务授权上下文。 */
     @Override
     public void customize(JwtEncodingContext context) {
         if (!OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) {
@@ -58,6 +65,7 @@ public class AuthorizationTokenCustomizer implements OAuth2TokenCustomizer<JwtEn
         }
         context.getClaims().audience(List.of(properties.audience()));
 
+        // 未绑定到业务平台的协议客户端仍可签发令牌，但不会获得平台授权声明。
         Platform platform = jdbcTemplate.query(PLATFORM_SQL, resultSet ->
                         resultSet.next()
                                 ? new Platform(
@@ -73,6 +81,7 @@ public class AuthorizationTokenCustomizer implements OAuth2TokenCustomizer<JwtEn
                 .claim("platform_id", platform.id().toString())
                 .claim("platform_code", platform.code());
 
+        // 有序集合既去重又保证声明序列稳定，便于测试、缓存和审计比对。
         Set<String> roles = new TreeSet<>();
         Set<String> permissions = new TreeSet<>();
         jdbcTemplate.query(USER_AUTHORITY_SQL, resultSet -> {
@@ -87,6 +96,7 @@ public class AuthorizationTokenCustomizer implements OAuth2TokenCustomizer<JwtEn
                 .claim("permissions", permissions);
     }
 
+    /** 令牌定制阶段所需的平台最小投影。 */
     private record Platform(UUID id, String code) {
     }
 }

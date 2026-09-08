@@ -14,9 +14,14 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
+/**
+ * 从 IAM 表加载 Spring Security 用户及其当前有效授权。
+ * 用户名按统一规则归一化；角色以 {@code ROLE_} 前缀暴露，权限保留业务编码。
+ */
 @Service
 public class JdbcIamUserDetailsService implements UserDetailsService {
 
+    /** 查询未软删除用户的认证信息与账号有效期。 */
     private static final String USER_SQL = """
             SELECT id, username, password_hash, status, permanent_valid,
                    valid_from, valid_until, locked_until
@@ -25,6 +30,10 @@ public class JdbcIamUserDetailsService implements UserDetailsService {
                AND deleted_at IS NULL
             """;
 
+    /**
+     * 合并用户当前有效的角色和权限。
+     * UNION 会去重，时间条件用于排除尚未生效或已经到期的角色分配。
+     */
     private static final String AUTHORITY_SQL = """
             SELECT DISTINCT authority
               FROM (
@@ -56,6 +65,7 @@ public class JdbcIamUserDetailsService implements UserDetailsService {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /** 将数据库状态映射为 Spring Security 的账号可用、过期和锁定语义。 */
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         String normalized = username.strip().toLowerCase(Locale.ROOT);
@@ -70,6 +80,7 @@ public class JdbcIamUserDetailsService implements UserDetailsService {
                 .stream()
                 .map(SimpleGrantedAuthority::new)
                 .toList();
+        // 在一次加载中复用同一时刻，避免临界时间上各状态判断不一致。
         OffsetDateTime now = OffsetDateTime.now();
         boolean enabled = "ACTIVE".equals(user.status())
                 && (user.validFrom() == null || !user.validFrom().isAfter(now));
@@ -89,6 +100,7 @@ public class JdbcIamUserDetailsService implements UserDetailsService {
                 .build();
     }
 
+    /** 将当前结果行转换为仅供本服务内部使用的用户快照。 */
     private static UserRecord mapUser(ResultSet resultSet) throws SQLException {
         return new UserRecord(
                 resultSet.getObject("id", java.util.UUID.class),
@@ -101,6 +113,7 @@ public class JdbcIamUserDetailsService implements UserDetailsService {
                 resultSet.getObject("locked_until", OffsetDateTime.class));
     }
 
+    /** IAM 用户查询所需的最小字段集合。 */
     private record UserRecord(
             java.util.UUID id,
             String username,

@@ -41,6 +41,10 @@ ocean-business-cloud
 ## 安全约束
 
 - JWT 必须使用非对称密钥并校验 `iss`、`aud`、`exp` 和 `nbf`。
+- 开发环境在进程启动时动态生成 RSA KeyPair；测试环境从外部 KeyStore 加载固定密钥；生产环境只允许接入 KMS/HSM Provider，不得回退到进程级临时密钥。
+- JWT `kid` 使用公钥的 RFC 7638 JWK Thumbprint（SHA-256），不得由部署人员手工指定。
+- 首位管理员初始化默认关闭，密码只能来自专用环境变量；初始化必须在事务和数据库锁内完成，且不得覆盖已有账号或密码。
+- 首个浏览器 OAuth 客户端通过默认关闭的初始化命令创建；协议客户端、IAM 元数据和回调地址必须同事务写入，已存在但不完全匹配时拒绝覆盖。
 - 浏览器客户端使用 Authorization Code + PKCE。
 - 活跃会话和短期撤销状态存放 Redis；OAuth 协议状态存放 PostgreSQL，令牌材料必须采用字段级加密或经验证的自定义摘要持久化方案保护。
 - 密码、令牌、Cookie、Authorization 和密钥不得写入审计表。

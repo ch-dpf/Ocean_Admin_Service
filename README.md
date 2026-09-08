@@ -24,19 +24,32 @@ ocean-bootstrap       应用启动、配置和 Flyway
 
 ## 初始化
 
-运行环境必须提供数据库密码和持久化的 OAuth2 签名密钥。以下命令只用于生成本地开发密钥，生产环境应由 KMS、HSM 或受控密钥库提供：
+开发环境默认启用 `dev` profile。应用启动时动态生成 3072-bit RSA KeyPair，`kid` 根据公钥的 JWK Thumbprint 自动计算。动态密钥只在当前进程内有效，应用重启后已有开发令牌会失效。
 
-```powershell
-keytool -genkeypair -alias ocean-admin -keyalg RSA -keysize 3072 -storetype PKCS12 -keystore ocean-admin.p12 -validity 3650
-```
-
-启动应用：
+启动开发环境：
 
 ```powershell
 $env:DB_URL='jdbc:postgresql://localhost:5432/ocean_admin'
 $env:DB_USERNAME='ocean_admin'
 $env:DB_PASSWORD='replace-me'
-$env:OAUTH2_ISSUER='http://localhost:8080'
+$env:OAUTH2_ISSUER='http://localhost:8090'
+mvn -pl ocean-bootstrap -am spring-boot:run
+```
+
+测试环境启用 `test` profile，并必须提供固定 KeyStore。以下命令只用于生成本地测试密钥，生产环境后续由 KMS、HSM 或受控密钥库提供：
+
+```powershell
+keytool -genkeypair -alias ocean-admin -keyalg RSA -keysize 3072 -storetype PKCS12 -keystore ocean-admin.p12 -validity 3650
+```
+
+启动测试环境：
+
+```powershell
+$env:DB_URL='jdbc:postgresql://localhost:5432/ocean_admin'
+$env:DB_USERNAME='ocean_admin'
+$env:DB_PASSWORD='replace-me'
+$env:SPRING_PROFILES_ACTIVE='test'
+$env:OAUTH2_ISSUER='http://localhost:8090'
 $env:OAUTH2_KEYSTORE_LOCATION='file:./ocean-admin.p12'
 $env:OAUTH2_KEYSTORE_PASSWORD='replace-me'
 $env:OAUTH2_KEY_ALIAS='ocean-admin'
@@ -52,6 +65,44 @@ V3__add_oauth2_authorization_server.sql
 ```
 
 种子脚本不会创建默认管理员和默认密码。首个管理员应通过受控初始化命令创建。
+
+## 首位管理员初始化
+
+初始化命令默认关闭，仅当 IAM 用户表为空时才会创建首位全局管理员。密码只从 `OCEAN_BOOTSTRAP_ADMIN_PASSWORD` 环境变量读取，并按照 `iam_security_policy` 校验后使用带算法标识的 bcrypt 哈希保存。
+
+```powershell
+$env:OCEAN_BOOTSTRAP_ADMIN_ENABLED='true'
+$env:OCEAN_BOOTSTRAP_ADMIN_USERNAME='admin'
+$env:OCEAN_BOOTSTRAP_ADMIN_PASSWORD='replace-with-a-strong-password'
+mvn -pl ocean-bootstrap -am spring-boot:run
+```
+
+看到管理员创建成功日志后停止进程并清除敏感环境变量；后续启动无需继续启用初始化命令：
+
+```powershell
+Remove-Item Env:OCEAN_BOOTSTRAP_ADMIN_PASSWORD
+Remove-Item Env:OCEAN_BOOTSTRAP_ADMIN_ENABLED
+```
+
+重复执行同一管理员会安全跳过且不会修改密码；如果 IAM 中已经存在其他用户，命令会拒绝执行，避免通过初始化入口提升已有系统权限。
+
+## 首个 OAuth 客户端初始化
+
+管理员创建完成后，通过独立且默认关闭的初始化命令注册管理后台公共客户端。命令会在同一事务内写入 Spring Authorization Server 官方客户端表、IAM 客户端元数据和回调地址；重复执行相同配置会安全跳过，发现残缺记录或配置漂移则拒绝覆盖。
+
+```powershell
+$env:OCEAN_BOOTSTRAP_OAUTH_CLIENT_ENABLED='true'
+$env:OCEAN_BOOTSTRAP_OAUTH_CLIENT_ID='ocean-admin-web'
+$env:OCEAN_BOOTSTRAP_OAUTH_REDIRECT_URI='http://127.0.0.1:3000/login/oauth2/code/ocean-admin'
+$env:OCEAN_BOOTSTRAP_OAUTH_POST_LOGOUT_REDIRECT_URI='http://127.0.0.1:3000/'
+mvn -pl ocean-bootstrap -am spring-boot:run
+```
+
+该客户端固定采用 Authorization Code + Refresh Token、公共客户端认证、强制 PKCE、15 分钟访问令牌、7 天刷新令牌和刷新令牌不复用策略。初始化成功后清除开关：
+
+```powershell
+Remove-Item Env:OCEAN_BOOTSTRAP_OAUTH_CLIENT_ENABLED
+```
 
 详细说明见：
 

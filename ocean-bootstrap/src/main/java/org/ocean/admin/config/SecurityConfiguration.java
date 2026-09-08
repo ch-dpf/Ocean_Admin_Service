@@ -1,11 +1,5 @@
 package org.ocean.admin.config;
 
-import java.io.InputStream;
-import java.security.Key;
-import java.security.KeyStore;
-import java.security.cert.Certificate;
-import java.security.interfaces.RSAPrivateKey;
-import java.security.interfaces.RSAPublicKey;
 import java.util.List;
 
 import com.nimbusds.jose.JOSEException;
@@ -19,6 +13,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -32,14 +27,23 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 
+/**
+ * OAuth2 授权服务器与业务资源服务器的安全配置。
+ * 两条过滤器链通过顺序隔离：授权协议端点优先匹配，其余请求再进入应用安全链。
+ */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
 @EnableMethodSecurity
 @EnableConfigurationProperties(AuthorizationServerProperties.class)
 public class SecurityConfiguration {
 
+    /** 保护授权、令牌、JWK 和 OIDC 等协议端点，并为交互式授权启用表单登录。 */
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
     SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
@@ -48,10 +52,14 @@ public class SecurityConfiguration {
             authorizationServer.oidc(Customizer.withDefaults());
         });
         http.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated());
+        http.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
+                new LoginUrlAuthenticationEntryPoint("/login"),
+                new MediaTypeRequestMatcher(MediaType.TEXT_HTML)));
         http.formLogin(Customizer.withDefaults());
         return http.build();
     }
 
+    /** 保护普通业务接口，同时允许健康检查匿名访问。 */
     @Bean
     @Order(2)
     SecurityFilterChain applicationSecurityFilterChain(HttpSecurity http, JwtDecoder jwtDecoder)
@@ -65,6 +73,7 @@ public class SecurityConfiguration {
         return http.build();
     }
 
+    /** 使用显式配置的 issuer，确保发现文档与令牌签发者保持一致。 */
     @Bean
     AuthorizationServerSettings authorizationServerSettings(AuthorizationServerProperties properties) {
         return AuthorizationServerSettings.builder()
@@ -72,38 +81,28 @@ public class SecurityConfiguration {
                 .build();
     }
 
+    /** 从当前运行环境对应的 Provider 获取 JWT 签名密钥。 */
     @Bean
-    RSAKey authorizationServerRsaKey(AuthorizationServerProperties properties) {
-        try {
-            char[] password = required(properties.keyStorePassword(), "key-store-password").toCharArray();
-            KeyStore keyStore = KeyStore.getInstance(required(properties.keyStoreType(), "key-store-type"));
-            try (InputStream input = required(properties.keyStore(), "key-store").getInputStream()) {
-                keyStore.load(input, password);
-            }
-
-            String alias = required(properties.keyAlias(), "key-alias");
-            Key key = keyStore.getKey(alias, password);
-            Certificate certificate = keyStore.getCertificate(alias);
-            if (!(key instanceof RSAPrivateKey privateKey)
-                    || certificate == null
-                    || !(certificate.getPublicKey() instanceof RSAPublicKey publicKey)) {
-                throw new IllegalStateException("OAuth2 signing key must be an RSA private key with a certificate");
-            }
-
-            return new RSAKey.Builder(publicKey)
-                    .privateKey(privateKey)
-                    .keyID(required(properties.keyId(), "key-id"))
-                    .build();
-        } catch (Exception exception) {
-            throw new IllegalStateException("Unable to load OAuth2 signing key", exception);
-        }
+    RSAKey authorizationServerRsaKey(SigningKeyProvider signingKeyProvider) {
+        return signingKeyProvider.signingKey();
     }
 
+    /** 统一生成带算法标识的密码哈希，当前默认编码器为 bcrypt。 */
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+    }
+
+    /** 将签名密钥发布为授权服务器可使用的 JWK 数据源。 */
     @Bean
     JWKSource<SecurityContext> jwkSource(RSAKey authorizationServerRsaKey) {
         return new ImmutableJWKSet<>(new JWKSet(authorizationServerRsaKey));
     }
 
+    /**
+     * 创建资源服务器的 JWT 解码器，并同时校验 issuer 与本服务要求的 audience。
+     * 仅验证签名而不验证受众，可能导致签发给其他服务的令牌被误接受。
+     */
     @Bean
     JwtDecoder jwtDecoder(RSAKey authorizationServerRsaKey, AuthorizationServerProperties properties)
             throws JOSEException {
@@ -124,6 +123,7 @@ public class SecurityConfiguration {
         return decoder;
     }
 
+    /** 对启动所需配置执行快速失败校验，避免带着不完整安全配置运行。 */
     private static <T> T required(T value, String property) {
         if (value == null || value instanceof String text && text.isBlank()) {
             throw new IllegalStateException(

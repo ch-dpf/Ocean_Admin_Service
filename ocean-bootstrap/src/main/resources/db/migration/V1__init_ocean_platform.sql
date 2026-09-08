@@ -1,5 +1,7 @@
+-- Ocean Admin 核心数据模型：IAM、审计与工作台指标。
 CREATE SCHEMA IF NOT EXISTS ocean_platform;
 
+-- 统一维护带 updated_at 字段表的最后更新时间。
 CREATE OR REPLACE FUNCTION ocean_platform.set_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -10,6 +12,7 @@ BEGIN
 END;
 $$;
 
+-- 平台注册表：记录可接入统一管理后台的业务平台及其入口信息。
 CREATE TABLE ocean_platform.iam_platform (
     id              UUID PRIMARY KEY,
     platform_code   VARCHAR(64) NOT NULL,
@@ -29,6 +32,8 @@ CREATE UNIQUE INDEX uk_iam_platform_code
     ON ocean_platform.iam_platform(platform_code)
     WHERE deleted_at IS NULL;
 
+-- 用户主表：保存认证凭据、有效期、锁定状态及登录安全信息。
+-- username_normalized 用于大小写无关查询，username 保留原始展示形式。
 CREATE TABLE ocean_platform.iam_user (
     id                    UUID PRIMARY KEY,
     username              VARCHAR(64) NOT NULL,
@@ -63,6 +68,7 @@ CREATE UNIQUE INDEX uk_iam_user_username
     WHERE deleted_at IS NULL;
 CREATE INDEX idx_iam_user_status ON ocean_platform.iam_user(status) WHERE deleted_at IS NULL;
 
+-- 平台侧 OAuth 客户端元数据；协议运行数据由后续迁移中的官方 OAuth2 表承载。
 CREATE TABLE ocean_platform.iam_oauth_client (
     id                     UUID PRIMARY KEY,
     platform_id            UUID NOT NULL REFERENCES ocean_platform.iam_platform(id),
@@ -82,6 +88,7 @@ CREATE TABLE ocean_platform.iam_oauth_client (
     CONSTRAINT ck_oauth_client_secret CHECK (client_type = 'PUBLIC' OR client_secret_hash IS NOT NULL)
 );
 
+-- 一个 OAuth 客户端可配置多个合法回调地址。
 CREATE TABLE ocean_platform.iam_oauth_redirect_uri (
     id            UUID PRIMARY KEY,
     oauth_client_id UUID NOT NULL REFERENCES ocean_platform.iam_oauth_client(id) ON DELETE CASCADE,
@@ -89,6 +96,7 @@ CREATE TABLE ocean_platform.iam_oauth_redirect_uri (
     UNIQUE (oauth_client_id, redirect_uri)
 );
 
+-- 角色定义：GLOBAL 角色跨平台生效，PLATFORM 角色必须归属于具体平台。
 CREATE TABLE ocean_platform.iam_role (
     id           UUID PRIMARY KEY,
     platform_id  UUID REFERENCES ocean_platform.iam_platform(id),
@@ -110,6 +118,7 @@ CREATE TABLE ocean_platform.iam_role (
 CREATE UNIQUE INDEX uk_iam_role_scope_code
     ON ocean_platform.iam_role(COALESCE(platform_id, '00000000-0000-0000-0000-000000000000'::uuid), role_code);
 
+-- 细粒度权限定义，permission_code 是业务鉴权使用的稳定编码。
 CREATE TABLE ocean_platform.iam_permission (
     id               UUID PRIMARY KEY,
     platform_id      UUID REFERENCES ocean_platform.iam_platform(id),
@@ -124,6 +133,7 @@ CREATE TABLE ocean_platform.iam_permission (
     CONSTRAINT ck_iam_permission_status CHECK (status IN ('ENABLED', 'DISABLED'))
 );
 
+-- 用户角色分配，可限定平台并设置生效、失效时间。
 CREATE TABLE ocean_platform.iam_user_role (
     user_id      UUID NOT NULL REFERENCES ocean_platform.iam_user(id) ON DELETE CASCADE,
     role_id      UUID NOT NULL REFERENCES ocean_platform.iam_role(id) ON DELETE CASCADE,
@@ -137,6 +147,7 @@ CREATE TABLE ocean_platform.iam_user_role (
 
 CREATE INDEX idx_iam_user_role_platform ON ocean_platform.iam_user_role(platform_id, user_id);
 
+-- 角色与权限的多对多关联。
 CREATE TABLE ocean_platform.iam_role_permission (
     role_id        UUID NOT NULL REFERENCES ocean_platform.iam_role(id) ON DELETE CASCADE,
     permission_id  UUID NOT NULL REFERENCES ocean_platform.iam_permission(id) ON DELETE CASCADE,
@@ -144,6 +155,7 @@ CREATE TABLE ocean_platform.iam_role_permission (
     PRIMARY KEY (role_id, permission_id)
 );
 
+-- 在数据库层校验角色分配范围，避免 GLOBAL/PLATFORM 语义与 platform_id 不一致。
 CREATE OR REPLACE FUNCTION ocean_platform.validate_user_role_scope()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -171,6 +183,7 @@ CREATE TRIGGER trg_validate_user_role_scope
 BEFORE INSERT OR UPDATE ON ocean_platform.iam_user_role
 FOR EACH ROW EXECUTE FUNCTION ocean_platform.validate_user_role_scope();
 
+-- 登录会话与刷新令牌族，用于设备管理、会话撤销和令牌轮换追踪。
 CREATE TABLE ocean_platform.iam_auth_session (
     session_id          UUID PRIMARY KEY,
     user_id             UUID NOT NULL REFERENCES ocean_platform.iam_user(id),
@@ -197,6 +210,7 @@ CREATE INDEX idx_iam_session_family
     ON ocean_platform.iam_auth_session(token_family_id)
     WHERE token_family_id IS NOT NULL;
 
+-- 全局唯一的账号安全策略；固定主键约束保证系统中最多只有一行。
 CREATE TABLE ocean_platform.iam_security_policy (
     id                      SMALLINT PRIMARY KEY DEFAULT 1,
     min_password_length     INTEGER NOT NULL DEFAULT 8,
@@ -211,6 +225,7 @@ CREATE TABLE ocean_platform.iam_security_policy (
     CONSTRAINT ck_single_security_policy CHECK (id = 1)
 );
 
+-- 只追加的审计事件事实表；快照字段确保关联实体变化后仍可还原事件语境。
 CREATE TABLE ocean_platform.audit_event (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     event_id            UUID NOT NULL UNIQUE,
@@ -246,8 +261,9 @@ CREATE INDEX idx_audit_event_category_time ON ocean_platform.audit_event(event_c
 CREATE INDEX idx_audit_event_trace ON ocean_platform.audit_event(trace_id) WHERE trace_id IS NOT NULL;
 
 COMMENT ON COLUMN ocean_platform.audit_event.request_summary IS
-    'Only sanitized business summaries are allowed; passwords, tokens, cookies and secrets are forbidden.';
+    '仅允许写入已脱敏的业务摘要，禁止包含密码、令牌、Cookie 或其他密钥信息。';
 
+-- 相同指纹的未关闭异常只保留一个处置记录，并累计发生次数。
 CREATE TABLE ocean_platform.audit_exception (
     id                   UUID PRIMARY KEY,
     fingerprint          VARCHAR(128) NOT NULL,
@@ -270,6 +286,7 @@ CREATE UNIQUE INDEX uk_audit_exception_open_fingerprint
     ON ocean_platform.audit_exception(fingerprint)
     WHERE status IN ('OPEN', 'PROCESSING');
 
+-- 工作台每日指标快照，按日期和平台唯一，用于低成本趋势查询。
 CREATE TABLE ocean_platform.wb_metric_daily (
     metric_date             DATE NOT NULL,
     platform_id             UUID NOT NULL REFERENCES ocean_platform.iam_platform(id),
@@ -286,6 +303,7 @@ CREATE TABLE ocean_platform.wb_metric_daily (
     PRIMARY KEY (metric_date, platform_id)
 );
 
+-- 为所有包含 updated_at 的核心表安装统一更新时间触发器。
 CREATE TRIGGER trg_iam_platform_updated_at BEFORE UPDATE ON ocean_platform.iam_platform
 FOR EACH ROW EXECUTE FUNCTION ocean_platform.set_updated_at();
 CREATE TRIGGER trg_iam_user_updated_at BEFORE UPDATE ON ocean_platform.iam_user
@@ -298,4 +316,3 @@ CREATE TRIGGER trg_iam_permission_updated_at BEFORE UPDATE ON ocean_platform.iam
 FOR EACH ROW EXECUTE FUNCTION ocean_platform.set_updated_at();
 CREATE TRIGGER trg_wb_metric_daily_updated_at BEFORE UPDATE ON ocean_platform.wb_metric_daily
 FOR EACH ROW EXECUTE FUNCTION ocean_platform.set_updated_at();
-

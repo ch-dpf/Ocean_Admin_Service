@@ -1,10 +1,14 @@
 spring:
   application:
     name: ocean-admin-service
+  profiles:
+    default: dev
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/ocean_admin}
     username: ${DB_USERNAME:ocean_admin}
-    password: ${DB_PASSWORD}
+    password: ${DB_PASSWORD:ocean_admin}
+    hikari:
+      connection-init-sql: SET TIME ZONE 'Asia/Shanghai'
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -17,7 +21,7 @@ spring:
     clean-disabled: true
 
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8090}
 
 management:
   endpoints:
@@ -33,12 +37,19 @@ springdoc:
     path: /swagger-ui.html
 
 ocean:
+  bootstrap:
+    admin:
+      enabled: ${OCEAN_BOOTSTRAP_ADMIN_ENABLED:false}
+      username: ${OCEAN_BOOTSTRAP_ADMIN_USERNAME:admin}
+    oauth-client:
+      enabled: ${OCEAN_BOOTSTRAP_OAUTH_CLIENT_ENABLED:false}
+      client-id: ${OCEAN_BOOTSTRAP_OAUTH_CLIENT_ID:ocean-admin-web}
+      client-name: ${OCEAN_BOOTSTRAP_OAUTH_CLIENT_NAME:Ocean Admin Web}
+      platform-code: ${OCEAN_BOOTSTRAP_OAUTH_PLATFORM_CODE:OCEAN_ADMIN}
+      redirect-uri: ${OCEAN_BOOTSTRAP_OAUTH_REDIRECT_URI:http://127.0.0.1:3000/login/oauth2/code/ocean-admin}
+      post-logout-redirect-uri: ${OCEAN_BOOTSTRAP_OAUTH_POST_LOGOUT_REDIRECT_URI:http://127.0.0.1:3000/}
+      require-consent: ${OCEAN_BOOTSTRAP_OAUTH_REQUIRE_CONSENT:true}
   security:
     authorization-server:
-      issuer: ${OAUTH2_ISSUER:http://localhost:${SERVER_PORT:8080}}
+      issuer: ${OAUTH2_ISSUER:http://localhost:${SERVER_PORT:8090}}
       audience: ${OAUTH2_AUDIENCE:ocean-admin-api}
-      key-id: ${OAUTH2_KEY_ID:ocean-admin-signing}
-      key-store: ${OAUTH2_KEYSTORE_LOCATION}
-      key-store-type: ${OAUTH2_KEYSTORE_TYPE:PKCS12}
-      key-alias: ${OAUTH2_KEY_ALIAS:ocean-admin}
-      key-store-password: ${OAUTH2_KEYSTORE_PASSWORD}

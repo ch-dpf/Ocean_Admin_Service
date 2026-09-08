@@ -12,6 +12,9 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
+/**
+ * 防止本地 Flyway 迁移与 Spring Authorization Server 官方 JDBC 表结构发生列级漂移。
+ */
 class AuthorizationSchemaCompatibilityTest {
 
     private static final String MIGRATION = "db/migration/V3__add_oauth2_authorization_server.sql";
@@ -22,6 +25,7 @@ class AuthorizationSchemaCompatibilityTest {
     private static final String CLIENT_SCHEMA =
             "org/springframework/security/oauth2/server/authorization/client/oauth2-registered-client-schema.sql";
 
+    /** 三张协议表的列集合必须与当前依赖版本内置脚本完全一致。 */
     @Test
     void migrationContainsEveryOfficialJdbcColumnWithoutSchemaDrift() throws IOException {
         String migration = read(MIGRATION);
@@ -34,10 +38,12 @@ class AuthorizationSchemaCompatibilityTest {
                 .isEqualTo(columns(read(CONSENT_SCHEMA), "oauth2_authorization_consent"));
     }
 
+    /** 从测试运行时类路径读取迁移或依赖包内置 SQL。 */
     private static String read(String path) throws IOException {
         return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
     }
 
+    /** 提取指定 CREATE TABLE 语句中的列名，并忽略表级约束关键字。 */
     private static Set<String> columns(String sql, String table) {
         Pattern tablePattern = Pattern.compile(
                 "(?is)CREATE\\s+TABLE\\s+(?:ocean_platform\\.)?" + Pattern.quote(table)

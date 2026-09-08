@@ -10,7 +10,6 @@ import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
@@ -31,21 +30,25 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/**
+ * 在真实 PostgreSQL 容器中验证 Flyway 迁移、IAM 查询和 OAuth2 JDBC 服务能够协同工作。
+ */
 @Testcontainers(disabledWithoutDocker = true)
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AuthorizationPersistenceIntegrationTest {
 
+    /** 所有用例共享一个数据库容器，容器不可用时由 Testcontainers 自动跳过。 */
     @Container
-    private final PostgreSQLContainer<?> postgres =
+    private static final PostgreSQLContainer<?> postgres =
             new PostgreSQLContainer<>("postgres:16-alpine");
 
-    private RegisteredClientRepository repository;
-    private OAuth2AuthorizationService authorizationService;
-    private OAuth2AuthorizationConsentService consentService;
-    private JdbcTemplate jdbcTemplate;
+    private static RegisteredClientRepository repository;
+    private static OAuth2AuthorizationService authorizationService;
+    private static OAuth2AuthorizationConsentService consentService;
+    private static JdbcTemplate jdbcTemplate;
 
+    /** 执行完整迁移，并用与生产配置相同的方式创建 JDBC 持久化组件。 */
     @BeforeAll
-    void migrateAndCreateRepository() {
+    static void migrateAndCreateRepository() {
         Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration")
@@ -59,11 +62,14 @@ class AuthorizationPersistenceIntegrationTest {
 
         jdbcTemplate = new JdbcTemplate(dataSource);
         AuthorizationPersistenceConfiguration persistence = new AuthorizationPersistenceConfiguration();
-        repository = persistence.registeredClientRepository(dataSource);
-        authorizationService = persistence.authorizationService(dataSource, repository);
-        consentService = persistence.authorizationConsentService(dataSource, repository);
+        AuthorizationPersistenceConfiguration.AuthorizationJdbcOperations operations =
+                persistence.authorizationJdbcOperations(dataSource);
+        repository = persistence.registeredClientRepository(operations);
+        authorizationService = persistence.authorizationService(operations, repository);
+        consentService = persistence.authorizationConsentService(operations, repository);
     }
 
+    /** 验证公共客户端、PKCE、重定向地址和令牌策略可被官方仓储无损往返。 */
     @Test
     void savesAndLoadsPkceClientUsingOfficialJdbcRepository() {
         RegisteredClient expected = RegisteredClient.withId(UUID.randomUUID().toString())
@@ -105,6 +111,7 @@ class AuthorizationPersistenceIntegrationTest {
                 .isEqualTo(Duration.ofMinutes(15));
     }
 
+    /** 验证用户名归一化以及当前有效角色、权限到 GrantedAuthority 的映射。 */
     @Test
     void loadsActiveIamUserWithRolesAndPermissions() {
         UUID userId = UUID.randomUUID();
@@ -131,6 +138,7 @@ class AuthorizationPersistenceIntegrationTest {
                 .contains("ROLE_PLATFORM_ADMIN", "admin:user:read", "admin:user:write");
     }
 
+    /** 验证访问令牌、刷新令牌和用户授权同意均可写入并按官方接口查回。 */
     @Test
     void persistsAuthorizationTokensAndConsentUsingSecurity71JdbcServices() {
         RegisteredClient client = RegisteredClient.withId(UUID.randomUUID().toString())
