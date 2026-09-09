@@ -2,7 +2,15 @@
 
 ## 技术基线
 
-项目基线为 Java 21、Spring Boot 4.1.1、Spring Security Authorization Server 7.1.1、MyBatis-Plus 3.5.17 和 springdoc-openapi 3.0.3。依赖版本由 Spring Boot BOM 与 MyBatis-Plus BOM 统一管理，并通过 Maven Enforcer 校验 Java 版本和依赖收敛。
+- Java 21
+- Spring Boot 4
+- Spring WebSocket
+- MyBatis-Plus
+- JWT（登录鉴权）
+- PostgreSQL （数据库服务）
+- Flyway （数据库迁移）
+- Redis （缓存中间件）
+- Knief4j （接口文档）
 
 ## 当前边界
 
@@ -26,29 +34,10 @@ ocean-business-cloud
 
 业务模块只能通过 `org.ocean.admin.platform.api` 使用平台能力。禁止直接访问平台模块的实体、Mapper 和数据表。
 
-扩展点：
-
-- `CurrentUserAccessor`：读取当前用户与平台上下文。
-- `AuditPublisher`：提交经过脱敏的业务审计事实。
-- `WorkbenchContributor`：向统一工作台贡献平台卡片。
-
 ## 数据所有权
 
-第一阶段只使用 `ocean_platform` Schema。平台核心表采用 `iam_`、`audit_`、`wb_` 前缀。
+第一阶段只使用 `ocean_platform` Schema。平台核心表采用 `sys_` 前缀。
 
 业务模块应使用自己的表前缀；只有出现独立团队、发布周期、数据库权限、备份或伸缩需求时，才拆分 Schema 或服务。
 
 ## 安全约束
-
-- JWT 必须使用非对称密钥并校验 `iss`、`aud`、`exp` 和 `nbf`。
-- 开发环境在进程启动时动态生成 RSA KeyPair；测试环境从外部 KeyStore 加载固定密钥；生产环境只允许接入 KMS/HSM Provider，不得回退到进程级临时密钥。
-- JWT `kid` 使用公钥的 RFC 7638 JWK Thumbprint（SHA-256），不得由部署人员手工指定。
-- 首位管理员初始化默认关闭，密码只能来自专用环境变量；初始化必须在事务和数据库锁内完成，且不得覆盖已有账号或密码。
-- 首个浏览器 OAuth 客户端通过默认关闭的初始化命令创建；协议客户端、IAM 元数据和回调地址必须同事务写入，已存在但不完全匹配时拒绝覆盖。
-- 浏览器客户端使用 Authorization Code + PKCE。
-- PostgreSQL 是会话、刷新令牌族和撤销状态的唯一权威源；刷新令牌状态机只保存 SHA-256 摘要，并以事务、行锁、版本号和唯一索引保证轮换并发安全。
-- SAS 官方 JDBC 授权服务由 IAM 状态机适配器装饰，签发、刷新轮换和 RFC 7009 注销与协议授权记录共用 PostgreSQL 事务。
-- Redis 仅作为活跃会话投影的可丢弃缓存，写路径先提交 PostgreSQL，再同步或失效缓存；缓存读取未命中或故障时回源数据库，缓存操作失败不阻断协议流程。
-- 允许刷新令牌的受管理客户端会在 access token 中携带 `sid`；资源服务器通过活跃会话投影校验该声明，注销或重放撤销令牌族后，既有 access token 立即被拒绝。
-- 密码、令牌、Cookie、Authorization 和密钥不得写入审计表。
-- 平台角色只能授予其所属平台，由数据库触发器和应用服务双重校验。
