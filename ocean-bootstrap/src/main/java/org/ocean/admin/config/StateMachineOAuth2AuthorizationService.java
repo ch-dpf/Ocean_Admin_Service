@@ -201,7 +201,8 @@ final class StateMachineOAuth2AuthorizationService implements OAuth2Authorizatio
         HttpServletRequest request = currentRequest();
         lifecycleService.issue(new SessionIssueCommand(
                 owner.userId(), owner.platformId(), owner.oauthClientId(),
-                header(request, "X-Device-Id"), header(request, "X-Device-Name"),
+                attributeOrHeader(request, "ocean.login.device-id", "X-Device-Id"),
+                attributeOrHeader(request, "ocean.login.device-name", "X-Device-Name"),
                 request == null ? null : request.getRemoteAddr(), header(request, "User-Agent"),
                 sessionExpiresAt, refreshExpiresAt), refreshToken.getTokenValue(),
                 authorizationSessionId(authorization.getId()));
@@ -270,6 +271,16 @@ final class StateMachineOAuth2AuthorizationService implements OAuth2Authorizatio
 
     private static String header(HttpServletRequest request, String name) {
         return request == null ? null : request.getHeader(name);
+    }
+
+    private static String attributeOrHeader(
+            HttpServletRequest request, String attributeName, String headerName) {
+        if (request == null) {
+            return null;
+        }
+        Object attribute = request.getAttribute(attributeName);
+        return attribute instanceof String text && !text.isBlank()
+                ? text : request.getHeader(headerName);
     }
 
     private static OAuth2AuthenticationException oauthError(String code, String description) {

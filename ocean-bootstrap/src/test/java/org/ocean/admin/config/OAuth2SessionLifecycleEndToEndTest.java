@@ -36,6 +36,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class OAuth2SessionLifecycleEndToEndTest {
 
     private static final UUID USER_ID = UUID.fromString("40000000-0000-0000-0000-000000000003");
+    private static final UUID PLATFORM_ID = UUID.fromString("10000000-0000-0000-0000-000000000001");
+    private static final UUID PLATFORM_ADMIN_ROLE_ID = UUID.fromString("20000000-0000-0000-0000-000000000002");
+    private static final UUID AUDITOR_ROLE_ID = UUID.fromString("20000000-0000-0000-0000-000000000003");
     private static final String USERNAME = "oauth-e2e-user";
     private static final String PASSWORD = "test-password";
     private static final String CLIENT_ID = "ocean-admin-web";
@@ -51,6 +54,12 @@ class OAuth2SessionLifecycleEndToEndTest {
             Pattern.compile("\"refresh_token\"\s*:\s*\"([^\"]+)\"");
     private static final Pattern ACCESS_TOKEN =
             Pattern.compile("\"access_token\"\s*:\s*\"([^\"]+)\"");
+    private static final Pattern LOGIN_ACCESS_TOKEN =
+            Pattern.compile("\"accessToken\"\s*:\s*\"([^\"]+)\"");
+    private static final Pattern LOGIN_REFRESH_TOKEN =
+            Pattern.compile("\"refreshToken\"\s*:\s*\"([^\"]+)\"");
+    private static final Pattern LOGIN_SESSION_ID =
+            Pattern.compile("\"sessionId\"\s*:\s*\"([^\"]+)\"");
 
     @Container
     private static final PostgreSQLContainer<?> postgres =
@@ -95,6 +104,10 @@ class OAuth2SessionLifecycleEndToEndTest {
                     id, username, username_normalized, password_hash, status
                 ) VALUES (?, ?, ?, '{noop}test-password', 'ACTIVE')
                 """, USER_ID, USERNAME, USERNAME);
+        jdbcTemplate.update("""
+                INSERT INTO ocean_platform.iam_user_role (user_id, role_id, platform_id)
+                VALUES (?, ?, ?)
+                """, USER_ID, PLATFORM_ADMIN_ROLE_ID, PLATFORM_ID);
         CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         client = HttpClient.newBuilder()
                 .cookieHandler(cookies)
@@ -119,7 +132,28 @@ class OAuth2SessionLifecycleEndToEndTest {
         redisTemplate.delete(cacheKey(firstSessionId));
         assertThat(lifecycleService.findActiveSession(firstSessionId)).isPresent();
         assertThat(redisTemplate.hasKey(cacheKey(firstSessionId))).isTrue();
-        assertThat(getWithBearer("/v3/api-docs", firstTokens.accessToken()).statusCode()).isEqualTo(200);
+        HttpResponse<String> me = getWithBearer("/api/v1/me", firstTokens.accessToken());
+        assertThat(me.statusCode()).as(me.body()).isEqualTo(200);
+        assertThat(me.body()).contains(USER_ID.toString(), "PLATFORM_ADMIN", "admin:user:write");
+        assertThat(getWithBearer(
+                "/api/v1/users?keyword=" + USERNAME, firstTokens.accessToken()).body())
+                .contains(USER_ID.toString(), USERNAME, "\"total\":1");
+        assertThat(getWithBearer("/api/v1/roles", firstTokens.accessToken()).body())
+                .contains(PLATFORM_ADMIN_ROLE_ID.toString(), "SUPER_ADMIN", "PLATFORM_ADMIN", "AUDITOR");
+        assertThat(getWithBearer("/api/v1/permissions", firstTokens.accessToken()).body())
+                .contains("admin:user:read", "admin:user:write");
+        assertThat(getWithBearer("/api/v1/me/sessions", firstTokens.accessToken()).body())
+                .contains(firstSessionId.toString());
+
+        assertThat(postWithBearer(
+                "/api/v1/users/" + USER_ID + "/roles/" + AUDITOR_ROLE_ID,
+                firstTokens.accessToken()).statusCode()).isEqualTo(200);
+        assertThat(getWithBearer(
+                "/api/v1/users/" + USER_ID + "/roles", firstTokens.accessToken()).body())
+                .contains("AUDITOR");
+        assertThat(deleteWithBearer(
+                "/api/v1/users/" + USER_ID + "/roles/" + AUDITOR_ROLE_ID,
+                firstTokens.accessToken()).statusCode()).isEqualTo(204);
 
         HttpResponse<String> refresh = postForm("/oauth2/token", Map.of(
                 "grant_type", "refresh_token",
@@ -140,13 +174,13 @@ class OAuth2SessionLifecycleEndToEndTest {
         assertThat(tokenStatuses()).containsExactly("USED", "REVOKED");
         assertThat(sessionRevokeReasons()).containsExactly("REFRESH_TOKEN_REUSE");
         assertThat(redisTemplate.hasKey(cacheKey(firstSessionId))).isFalse();
-        assertThat(getWithBearer("/v3/api-docs", firstTokens.accessToken()).statusCode()).isEqualTo(401);
+        assertThat(getWithBearer("/api/v1/me", firstTokens.accessToken()).statusCode()).isEqualTo(401);
 
         TokenPair revocableTokens = exchangeAuthorizationCode(authorize());
         String revocableToken = revocableTokens.refreshToken();
         UUID revocableSessionId = activeSessionIds().getFirst();
         assertThat(redisTemplate.hasKey(cacheKey(revocableSessionId))).isTrue();
-        assertThat(getWithBearer("/v3/api-docs", revocableTokens.accessToken()).statusCode()).isEqualTo(200);
+        assertThat(getWithBearer("/api/v1/me", revocableTokens.accessToken()).statusCode()).isEqualTo(200);
         HttpResponse<String> revocation = postForm("/oauth2/revoke", Map.of(
                 "token", revocableToken,
                 "token_type_hint", "refresh_token",
@@ -156,7 +190,66 @@ class OAuth2SessionLifecycleEndToEndTest {
                 .containsExactlyInAnyOrder("REFRESH_TOKEN_REUSE", "OAUTH2_TOKEN_REVOCATION");
         assertThat(activeTokenCount()).isZero();
         assertThat(redisTemplate.hasKey(cacheKey(revocableSessionId))).isFalse();
-        assertThat(getWithBearer("/v3/api-docs", revocableTokens.accessToken()).statusCode()).isEqualTo(401);
+        assertThat(getWithBearer("/api/v1/me", revocableTokens.accessToken()).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void logsInRefreshesAndLogsOutThroughFirstPartyRestApi() throws Exception {
+        HttpResponse<String> rejected = postJson("/api/user/login", """
+                {"username":"oauth-e2e-user","password":"wrong-password"}
+                """);
+        assertThat(rejected.statusCode()).as(rejected.body()).isEqualTo(401);
+
+        HttpResponse<String> missingPlatform = postJson("/api/user/platform-login", """
+                {"username":"oauth-e2e-user","password":"test-password"}
+                """);
+        assertThat(missingPlatform.statusCode()).as(missingPlatform.body()).isEqualTo(400);
+
+        HttpResponse<String> wrongPlatform = postJson("/api/user/platform-login", """
+                {
+                  "username":"oauth-e2e-user",
+                  "password":"test-password",
+                  "platformCode":"OTHER_PLATFORM"
+                }
+                """);
+        assertThat(wrongPlatform.statusCode()).as(wrongPlatform.body()).isEqualTo(403);
+
+        HttpResponse<String> login = postJson("/api/user/login", """
+                {
+                  "username":"oauth-e2e-user",
+                  "password":"test-password",
+                  "platformCode":"OCEAN_ADMIN",
+                  "deviceId":"postman-device",
+                  "deviceName":"Postman"
+                }
+                """);
+        assertThat(login.statusCode()).as(login.body()).isEqualTo(200);
+        assertThat(login.body()).contains(
+                USER_ID.toString(), USERNAME, "OCEAN_ADMIN", "PLATFORM_ADMIN", "admin:user:write");
+        String accessToken = jsonValue(login.body(), LOGIN_ACCESS_TOKEN);
+        String refreshToken = jsonValue(login.body(), LOGIN_REFRESH_TOKEN);
+        UUID sessionId = UUID.fromString(jsonValue(login.body(), LOGIN_SESSION_ID));
+
+        assertThat(lifecycleService.findActiveSession(sessionId)).isPresent();
+        assertThat(redisTemplate.hasKey(cacheKey(sessionId))).isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT device_id FROM ocean_platform.iam_auth_session WHERE session_id = ?
+                """, String.class, sessionId)).isEqualTo("postman-device");
+        assertThat(getWithBearer("/api/v1/me", accessToken).statusCode()).isEqualTo(200);
+
+        HttpResponse<String> refresh = postForm("/oauth2/token", Map.of(
+                "grant_type", "refresh_token",
+                "refresh_token", refreshToken,
+                "client_id", CLIENT_ID));
+        assertThat(refresh.statusCode()).as(refresh.body()).isEqualTo(200);
+        String refreshedAccessToken = jsonValue(refresh.body(), ACCESS_TOKEN);
+
+        HttpResponse<String> logout = postWithBearer("/api/user/logout", refreshedAccessToken);
+        assertThat(logout.statusCode()).as(logout.body()).isEqualTo(204);
+        assertThat(lifecycleService.findActiveSession(sessionId)).isEmpty();
+        assertThat(redisTemplate.hasKey(cacheKey(sessionId))).isFalse();
+        assertThat(getWithBearer("/api/v1/me", refreshedAccessToken).statusCode()).isEqualTo(401);
+        assertThat(tokenStatuses()).containsExactly("USED", "REVOKED");
     }
 
     private void login() throws Exception {
@@ -206,6 +299,30 @@ class OAuth2SessionLifecycleEndToEndTest {
         return client.send(HttpRequest.newBuilder(uri(path))
                         .header("Authorization", "Bearer " + accessToken)
                         .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> postWithBearer(String path, String accessToken) throws Exception {
+        return client.send(HttpRequest.newBuilder(uri(path))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .POST(HttpRequest.BodyPublishers.noBody())
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> postJson(String path, String json) throws Exception {
+        return client.send(HttpRequest.newBuilder(uri(path))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(json))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> deleteWithBearer(String path, String accessToken) throws Exception {
+        return client.send(HttpRequest.newBuilder(uri(path))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .DELETE()
                         .build(),
                 HttpResponse.BodyHandlers.ofString());
     }

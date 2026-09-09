@@ -15,9 +15,13 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -34,6 +38,8 @@ import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.ocean.admin.platform.identity.session.RefreshTokenLifecycleService;
@@ -83,16 +89,46 @@ public class SecurityConfiguration {
         return http.build();
     }
 
-    /** 保护普通业务接口，同时允许健康检查匿名访问。 */
+    /** 管理 API 只接受 Bearer JWT，并且不创建或读取浏览器会话。 */
     @Bean
     @Order(2)
-    SecurityFilterChain applicationSecurityFilterChain(HttpSecurity http, JwtDecoder jwtDecoder)
+    SecurityFilterChain apiSecurityFilterChain(HttpSecurity http, JwtDecoder jwtDecoder)
             throws Exception {
+        http.securityMatcher("/api/**");
+        http.csrf(AbstractHttpConfigurer::disable);
+        http.sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+        http.requestCache(AbstractHttpConfigurer::disable);
+        http.exceptionHandling(exceptions -> exceptions
+                .authenticationEntryPoint(new BearerTokenAuthenticationEntryPoint())
+                .accessDeniedHandler(new BearerTokenAccessDeniedHandler()));
         http.authorizeHttpRequests(authorize -> authorize
-                .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                .requestMatchers(
+                        "/api/user/login",
+                        "/api/user/platform-login")
+                .permitAll()
                 .anyRequest().authenticated());
         http.oauth2ResourceServer(resourceServer -> resourceServer
-                .jwt(jwt -> jwt.decoder(jwtDecoder)));
+                .jwt(jwt -> jwt
+                        .decoder(jwtDecoder)
+                        .jwtAuthenticationConverter(new OceanJwtAuthenticationConverter())));
+        return http.build();
+    }
+
+    /** 暴露与表单登录相同的认证管理器，供第一方 REST 登录入口复用。 */
+    @Bean
+    AuthenticationManager authenticationManager(AuthenticationConfiguration configuration)
+            throws Exception {
+        return configuration.getAuthenticationManager();
+    }
+
+    /** 承载登录页、文档和运维端点；健康信息允许匿名读取。 */
+    @Bean
+    @Order(3)
+    SecurityFilterChain applicationSecurityFilterChain(HttpSecurity http) throws Exception {
+        http.authorizeHttpRequests(authorize -> authorize
+                .requestMatchers("/error", "/actuator/health", "/actuator/info").permitAll()
+                .anyRequest().authenticated());
         http.formLogin(Customizer.withDefaults());
         return http.build();
     }

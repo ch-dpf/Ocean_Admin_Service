@@ -36,6 +36,11 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+mybatis-plus:
+  type-handlers-package: org.ocean.admin.platform.identity.dao.type
+  configuration:
+    map-underscore-to-camel-case: true
+
 ocean:
   bootstrap:
     admin:

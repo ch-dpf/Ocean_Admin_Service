@@ -84,7 +84,19 @@ public class AuthorizationTokenCustomizer implements OAuth2TokenCustomizer<JwtEn
             return;
         }
 
+        UUID userId = jdbcTemplate.query("""
+                SELECT id FROM ocean_platform.iam_user
+                 WHERE username_normalized = lower(?)
+                   AND deleted_at IS NULL AND status = 'ACTIVE'
+                """, resultSet -> resultSet.next()
+                        ? resultSet.getObject("id", UUID.class) : null,
+                context.getPrincipal().getName());
+        if (userId == null) {
+            return;
+        }
+
         context.getClaims()
+                .claim("user_id", userId.toString())
                 .claim("platform_id", platform.id().toString())
                 .claim("platform_code", platform.code());
 

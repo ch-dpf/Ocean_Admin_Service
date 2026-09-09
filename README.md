@@ -117,3 +117,50 @@ SAS 官方 JDBC 授权服务已由该状态机装饰：授权码换取令牌时�
 
 - `docs/ARCHITECTURE 架构说明.md`
 - `docs/DATABASE 数据库说明.md`
+
+## IAM Web API
+
+首批人工验证接口使用 Spring Web 暴露，DAO 使用 MyBatis-Plus 访问 PostgreSQL；实体只映射用户非敏感字段，不读取或返回 `password_hash`。调用 `/api/v1/**` 时需要携带本授权服务器签发的 Bearer access token。
+
+| 方法 | 路径 | 用途 | 所需权限 |
+| --- | --- | --- | --- |
+| `POST` | `/api/user/login` | 第一方用户登录；`platformCode` 可选 | 匿名 |
+| `POST` | `/api/user/platform-login` | 指定平台登录；强制校验 `platformCode` 与客户端平台绑定 | 匿名 |
+| `POST` | `/api/user/logout` | 注销当前会话及刷新令牌族 | 已登录 |
+| `GET` | `/api/v1/me` | 当前用户、平台、角色和权限 | 已登录 |
+| `GET` | `/api/v1/users` | 分页查询用户，支持 `page`、`size`、`keyword`、`status` | `SUPER_ADMIN` 或 `admin:user:read` |
+| `GET` | `/api/v1/users/{userId}` | 用户详情 | `SUPER_ADMIN` 或 `admin:user:read` |
+| `GET` | `/api/v1/roles` | 角色列表 | `SUPER_ADMIN` 或 `admin:user:read` |
+| `GET` | `/api/v1/permissions` | 权限列表 | `SUPER_ADMIN` 或 `admin:user:read` |
+| `GET` | `/api/v1/users/{userId}/roles` | 用户角色 | `SUPER_ADMIN` 或 `admin:user:read` |
+| `POST` | `/api/v1/users/{userId}/roles/{roleId}` | 授予角色，可提交 `validFrom`、`validUntil` | `SUPER_ADMIN` 或 `admin:user:write` |
+| `DELETE` | `/api/v1/users/{userId}/roles/{roleId}` | 撤销角色 | `SUPER_ADMIN` 或 `admin:user:write` |
+| `GET` | `/api/v1/me/sessions` | 当前用户活跃会话 | 已登录 |
+| `DELETE` | `/api/v1/me/sessions/{sessionId}` | 注销指定会话 | 已登录且会话属于本人 |
+| `DELETE` | `/api/v1/me/sessions` | 注销本人全部会话 | 已登录 |
+
+`/api/user/login` 和 `/api/user/platform-login` 都复用 Spring Security 用户认证、SAS 令牌生成器、官方 JDBC 授权存储及 V4 状态机；它们不是另一套简化令牌。前者适合本管理前端直接登录，后者用于调用方必须明确声明平台的场景。当前第一方客户端由 `ocean.security.first-party-client-id` 配置，默认是 `ocean-admin-web`。
+
+Postman 登录示例：
+
+```http
+POST http://localhost:8090/api/user/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "your-password",
+  "platformCode": "OCEAN_ADMIN",
+  "deviceId": "postman-local",
+  "deviceName": "Postman"
+}
+```
+
+成功响应包含 `accessToken`、`refreshToken`、`expiresInSeconds`、`sessionId`、`roles` 和 `permissions`。调用受保护接口或注销时携带访问令牌：
+
+```http
+POST http://localhost:8090/api/user/logout
+Authorization: Bearer <accessToken>
+```
+
+OpenAPI 文档位于 `/v3/api-docs`，Swagger UI 位于 `/swagger-ui.html`。既可使用以上登录 API 直接取得令牌，也可通过 Authorization Code + PKCE 获取令牌，再调用管理接口验证完整链路；角色变更只影响之后签发或刷新的 JWT，注销会通过数据库状态机立即使对应现有 access token 失效。
