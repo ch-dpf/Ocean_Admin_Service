@@ -59,7 +59,7 @@ logging:
 
 # MyBatis Plus配置
 mybatis-plus:
-  type-handlers-package: org.ocean.admin.platform.identity.dao.type
+  type-handlers-package: org.ocean.admin.platform.identity.mapper
   configuration:
     map-underscore-to-camel-case: true
 

@@ -10,5 +10,12 @@
     </parent>
     <artifactId>ocean-kernel</artifactId>
     <name>Ocean Admin Kernel</name>
+    <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
 </project>
 

@@ -9,8 +9,8 @@ sys_user_platform       用户的平台准入授权
 sys_user_role           用户角色关系
 sys_role_permission     角色权限关系
 
-sys_user_lock_record    锁定记录
 sys_security_policy     密码、锁定、会话安全策略
-
-sys_login_log   登录日志
-sys_operation_log   操作日志
+sys_user_lock_record    锁定记录
+sys_login_log   系统登录日志
+sys_operation_log   系统操作日志
+sys_exception_log   系统异常日志
