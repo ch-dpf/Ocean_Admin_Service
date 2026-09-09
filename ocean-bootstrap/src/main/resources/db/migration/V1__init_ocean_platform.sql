@@ -332,3 +332,41 @@ CREATE INDEX idx_operation_log_module
 
 CREATE INDEX idx_operation_log_status
     ON ocean_platform.sys_operation_log (status);
+
+
+CREATE TABLE ocean_platform.sys_exception_log (
+                                                  id                  BIGINT PRIMARY KEY,
+                                                  exception_type      VARCHAR(200),
+                                                  exception_message   TEXT,
+                                                  request_url         VARCHAR(500),
+                                                  request_method      VARCHAR(10),
+                                                  request_params      TEXT,
+                                                  user_id             BIGINT,
+                                                  username            VARCHAR(50),
+                                                  ip_address          VARCHAR(50),
+                                                  class_method        VARCHAR(500),
+                                                  line_number         INTEGER,
+                                                  stack_trace         TEXT,
+                                                  status              INTEGER      NOT NULL DEFAULT 0,
+                                                  handle_remark       VARCHAR(500),
+                                                  handle_time         TIMESTAMP,
+                                                  handle_user         VARCHAR(64),
+                                                  create_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                                  deleted             INTEGER      NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE ocean_platform.sys_exception_log IS '系统异常日志表';
+COMMENT ON COLUMN ocean_platform.sys_exception_log.status IS '处理状态：0-未处理，1-已处理';
+COMMENT ON COLUMN ocean_platform.sys_exception_log.deleted IS '逻辑删除：0-未删除，1-已删除';
+
+CREATE INDEX idx_exception_log_user_id
+    ON ocean_platform.sys_exception_log (user_id);
+
+CREATE INDEX idx_exception_log_create_time
+    ON ocean_platform.sys_exception_log (create_time DESC);
+
+CREATE INDEX idx_exception_log_exception_type
+    ON ocean_platform.sys_exception_log (exception_type);
+
+CREATE INDEX idx_exception_log_status
+    ON ocean_platform.sys_exception_log (status);
