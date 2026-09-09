@@ -12,7 +12,7 @@
 - PostgreSQL （数据库服务）
 - Flyway （数据库迁移）
 - Redis （缓存中间件）
-- Knief4j （接口文档）
+- Knife4j （接口文档）
 
 ## 模块
 
@@ -31,12 +31,6 @@ $env:DB_URL='jdbc:postgresql://localhost:5432/ocean_admin'
 $env:DB_USERNAME='ocean_admin'
 $env:DB_PASSWORD='ocean_admin'
 mvn -pl ocean-bootstrap -am spring-boot:run
-```
-
-Flyway 会执行：
-```text
-V1__init_ocean_platform.sql
-V2__seed_platform_core.sql
 ```
 
 详细说明见：

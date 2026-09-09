@@ -1,66 +1,78 @@
+server:
+  port: 8090
+  address: 0.0.0.0  # 绑定到所有网络接口,允许外部访问
+  servlet:
+    context-path: /
+  compression:
+    enabled: true               # 开启GZIP压缩
+    mime-types: application/json,application/xml,text/html,text/xml,text/plain  # 压缩JSON等类型
+    min-response-size: 1024
+
 spring:
   application:
     name: ocean-admin-service
   profiles:
     default: dev
+  # 数据库配置
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/ocean_admin}
+    driver-class-name: org.postgresql.Driver
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ocean_admin?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai}
     username: ${DB_USERNAME:ocean_admin}
     password: ${DB_PASSWORD:ocean_admin}
+    # HikariCP连接池配置
     hikari:
-      connection-init-sql: SET TIME ZONE 'Asia/Shanghai'
+      minimum-idle: 5
+      maximum-pool-size: 20
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  # Redis 会话状态（登录并发控制）
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
+      password: ${REDIS_PASSWORD:123456}
+      database: ${REDIS_DB:0}
+      timeout: 3s
+
+  # Flyway 迁移配置
   flyway:
-    enabled: true
+    enabled: false
     locations: classpath:db/migration
     validate-on-migrate: true
     clean-disabled: true
 
-server:
-  port: ${SERVER_PORT:8090}
+# 日志配置
+logging:
+  level:
+    root: INFO
+    org.SHKJ_Server.kanhai: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"
+  file:
+    name: logs/kanhai.log
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 30
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus
-  endpoint:
-    health:
-      show-details: when_authorized
-
-springdoc:
-  swagger-ui:
-    path: /swagger-ui.html
-
+# MyBatis Plus配置
 mybatis-plus:
   type-handlers-package: org.ocean.admin.platform.identity.dao.type
   configuration:
     map-underscore-to-camel-case: true
 
-ocean:
-  bootstrap:
-    admin:
-      enabled: ${OCEAN_BOOTSTRAP_ADMIN_ENABLED:false}
-      username: ${OCEAN_BOOTSTRAP_ADMIN_USERNAME:admin}
-    oauth-client:
-      enabled: ${OCEAN_BOOTSTRAP_OAUTH_CLIENT_ENABLED:false}
-      client-id: ${OCEAN_BOOTSTRAP_OAUTH_CLIENT_ID:ocean-admin-web}
-      client-name: ${OCEAN_BOOTSTRAP_OAUTH_CLIENT_NAME:Ocean Admin Web}
-      platform-code: ${OCEAN_BOOTSTRAP_OAUTH_PLATFORM_CODE:OCEAN_ADMIN}
-      redirect-uri: ${OCEAN_BOOTSTRAP_OAUTH_REDIRECT_URI:http://127.0.0.1:3000/login/oauth2/code/ocean-admin}
-      post-logout-redirect-uri: ${OCEAN_BOOTSTRAP_OAUTH_POST_LOGOUT_REDIRECT_URI:http://127.0.0.1:3000/}
-      require-consent: ${OCEAN_BOOTSTRAP_OAUTH_REQUIRE_CONSENT:true}
-  security:
-    session:
-      maximum-lifetime: ${OCEAN_SESSION_MAXIMUM_LIFETIME:P30D}
-    session-cache:
-      enabled: ${OCEAN_SESSION_CACHE_ENABLED:true}
-      key-prefix: ${OCEAN_SESSION_CACHE_KEY_PREFIX:ocean:iam:session:}
-      maximum-ttl: ${OCEAN_SESSION_CACHE_MAXIMUM_TTL:PT5M}
-    authorization-server:
-      issuer: ${OAUTH2_ISSUER:http://localhost:${SERVER_PORT:8090}}
-      audience: ${OAUTH2_AUDIENCE:ocean-admin-api}
+# knife4j配置
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+    enable-swagger-models: true
+    enable-document-manage: true
+    enable-version: true
+    enable-footer: false
+    enable-footer-custom: true
+    footer-custom-content: Ocean Cloud Service API
+  basic:
+    enable: false
