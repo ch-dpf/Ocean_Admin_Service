@@ -1,4 +1,4 @@
-package org.ocean.admin.platform.identity.vo;
+package org.ocean.admin.platform.audit.vo;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;

@@ -10,11 +10,10 @@ import org.ocean.admin.platform.audit.entity.SysExceptionLog;
 import org.ocean.admin.platform.audit.mapper.SysExceptionLogMapper;
 import org.ocean.admin.platform.audit.utils.LogQuerySupport;
 import org.ocean.admin.platform.audit.vo.LogQueryVO;
-import org.ocean.admin.platform.identity.vo.SysExceptionLogVO;
+import org.ocean.admin.platform.audit.vo.SysExceptionLogVO;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -72,7 +71,7 @@ public class SysExceptionLogService {
      */
     @Transactional
     public boolean batchDeleteExceptionLogs(List<Long> ids) {
-        return exceptionLogMapper.deleteBatchIds(ids) > 0;
+        return exceptionLogMapper.deleteByIds(ids) > 0;
     }
 
     /**

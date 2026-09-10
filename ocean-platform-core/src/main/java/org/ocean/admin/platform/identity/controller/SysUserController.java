@@ -18,7 +18,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/member/user")
 @RequiredArgsConstructor
-@Tag(name = "成员管理", description = "用户管理接口")
+@Tag(name = "系统用户管理", description = "用户管理接口")
 public class SysUserController {
 
     private final SysUserService userService;

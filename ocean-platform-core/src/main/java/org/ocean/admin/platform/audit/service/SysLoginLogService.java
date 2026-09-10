@@ -9,11 +9,10 @@ import org.ocean.admin.platform.audit.entity.SysLoginLog;
 import org.ocean.admin.platform.audit.mapper.SysLoginLogMapper;
 import org.ocean.admin.platform.audit.utils.LogQuerySupport;
 import org.ocean.admin.platform.audit.vo.LogQueryVO;
-import org.ocean.admin.platform.identity.vo.SysLoginLogVO;
+import org.ocean.admin.platform.audit.vo.SysLoginLogVO;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
