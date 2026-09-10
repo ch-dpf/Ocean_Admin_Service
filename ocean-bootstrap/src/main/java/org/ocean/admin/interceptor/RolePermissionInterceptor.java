@@ -28,9 +28,9 @@ import java.util.Set;
 public class RolePermissionInterceptor implements HandlerInterceptor {
 
     private static final Set<String> PUBLIC_PATHS = Set.of(
-            "/api/user/login",
-            "/api/user/platform-login",
-            "/api/user/validate-token",
+            "/api/auth/login",
+            "/api/auth/platform-login",
+            "/api/auth/validate-token",
             "/api/auth/introspect",
             "/api/xtf/ping-image-batch-by-path",
             "/api/nc/list"

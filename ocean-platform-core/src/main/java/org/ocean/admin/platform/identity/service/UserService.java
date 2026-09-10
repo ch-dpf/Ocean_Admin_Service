@@ -4,12 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.platform.audit.entity.SysLoginLog;
-import org.ocean.admin.platform.audit.service.SysLoginLogService;
 import org.ocean.admin.platform.identity.entity.SysUser;
+import org.ocean.admin.platform.identity.event.UserLoginEvent;
+import org.ocean.admin.platform.identity.event.UserLogoutEvent;
 import org.ocean.admin.platform.identity.mapper.SysUserMapper;
 import org.ocean.admin.platform.identity.utils.JwtUtil;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -35,7 +36,7 @@ public class UserService {
 
     private final AuthSessionContractService authSessionContractService;
 
-    private final SysLoginLogService loginLogService;
+    private final ApplicationEventPublisher eventPublisher;
 
     private final UserRoleService userRoleService;
 
@@ -63,6 +64,29 @@ public class UserService {
                                      String os,
                                      String userAgent,
                                      String ipAddress) {
+        String resolvedUserAgent = resolveUserAgent(userAgent);
+        String resolvedIpAddress = resolveIpAddress(ipAddress);
+        try {
+            return doLogin(username, password, platform, deviceId, browser, os, resolvedUserAgent, resolvedIpAddress);
+        } catch (RuntimeException e) {
+            publishLoginEvent(null, username, false, e.getMessage(), null, platform, deviceId,
+                    browser, os, resolvedUserAgent, resolvedIpAddress);
+            throw e;
+        }
+    }
+
+    private Map<String, Object> doLogin(String username,
+                                        String password,
+                                        String platform,
+                                        String deviceId,
+                                        String browser,
+                                        String os,
+                                        String userAgent,
+                                        String ipAddress) {
+        if (username == null || username.isBlank() || password == null || password.isBlank()) {
+            throw new RuntimeException("用户名和密码不能为空");
+        }
+
         // 查询用户
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SysUser::getUsername, username);
@@ -94,10 +118,10 @@ public class UserService {
         int activeSessions = countActiveSessions(user.getId());
         String requestedPlatformCode = resolvePlatformCode(platform);
         String resolvedDeviceId = resolveDeviceId(deviceId, requestedPlatformCode, userAgent, ipAddress);
-        String resolvedUserAgent = resolveUserAgent(userAgent);
-        String resolvedBrowser = resolveBrowser(browser, resolvedUserAgent);
-        String resolvedOs = resolveOs(os, resolvedUserAgent);
-        String resolvedIpAddress = resolveIpAddress(ipAddress);
+        String resolvedUserAgent = userAgent;
+        String resolvedBrowser = normalizeOptional(browser);
+        String resolvedOs = normalizeOptional(os);
+        String resolvedIpAddress = ipAddress;
         boolean currentDeviceActive = userSessionService.hasActiveDeviceSession(user.getId(), resolvedDeviceId);
         if (activeSessions >= maxDevices) {
             if (!currentDeviceActive) {
@@ -131,8 +155,6 @@ public class UserService {
         user.setLastLoginIp(resolvedIpAddress);
         userMapper.updateById(user);
 
-        // 记录登录日志
-        recordLoginLog(user, true, "登录成功", loginSession.getSessionId(), requestedPlatformCode, resolvedDeviceId, resolvedBrowser, resolvedOs, resolvedUserAgent, resolvedIpAddress);
         securityPolicyService.onLoginSuccess(user.getId());
 
         // 返回结果
@@ -153,70 +175,30 @@ public class UserService {
         result.put("activeSessionCount", activeSessionsAfterLogin);
         result.put("authProvider", "OCEAN_CLOUD");
 
+        publishLoginEvent(user.getId(), user.getUsername(), true, "登录成功", loginSession.getSessionId(),
+                requestedPlatformCode, resolvedDeviceId, resolvedBrowser, resolvedOs, resolvedUserAgent, resolvedIpAddress);
         log.info("用户登录成功: {}", username);
         return result;
     }
 
-    /**
-     * 记录登录日志
-     *
-     * @param user 用户信息
-     * @param success 是否成功
-     * @param message 提示信息
-     */
-    private void recordLoginLog(SysUser user,
-                                boolean success,
-                                String message,
-                                String sessionId,
-                                String platform,
-                                String deviceId,
-                                String browser,
-                                String os,
-                                String userAgent,
-                                String ipAddress) {
+    private void publishLoginEvent(Long userId,
+                                   String username,
+                                   boolean success,
+                                   String message,
+                                   String sessionId,
+                                   String platform,
+                                   String deviceId,
+                                   String browser,
+                                   String os,
+                                   String userAgent,
+                                   String ipAddress) {
         try {
-            SysLoginLog loginLog = new SysLoginLog();
-            loginLog.setUserId(user.getId());
-            loginLog.setUsername(user.getUsername());
-            loginLog.setLoginType("PASSWORD");
-            loginLog.setStatus(success ? 1 : 0);
-            loginLog.setMessage(message);
-            loginLog.setLoginTime(LocalDateTime.now());
-            loginLog.setSessionId(sessionId);
-            loginLog.setPlatform(platform);
-            loginLog.setDeviceId(deviceId);
-            loginLog.setIpAddress(ipAddress);
-            loginLog.setUserAgent(userAgent);
-            loginLog.setBrowser(browser);
-            loginLog.setOs(os);
-
-            // 获取请求信息
-            ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-            if (attributes != null) {
-                HttpServletRequest request = attributes.getRequest();
-                if (loginLog.getIpAddress() == null || loginLog.getIpAddress().isBlank()) {
-                    loginLog.setIpAddress(request.getRemoteAddr());
-                }
-                if (loginLog.getUserAgent() == null || loginLog.getUserAgent().isBlank()) {
-                    loginLog.setUserAgent(request.getHeader("User-Agent"));
-                }
-
-                // 解析浏览器和操作系统信息（简单实现）
-                String requestUserAgent = request.getHeader("User-Agent");
-                if ((loginLog.getBrowser() == null || loginLog.getBrowser().isBlank()) && requestUserAgent != null) {
-                    loginLog.setBrowser(parseBrowser(requestUserAgent));
-                }
-                if ((loginLog.getOs() == null || loginLog.getOs().isBlank()) && requestUserAgent != null) {
-                    loginLog.setOs(parseOS(requestUserAgent));
-                }
-            }
-
-            loginLogService.recordLoginLog(loginLog);
+            eventPublisher.publishEvent(new UserLoginEvent(userId, username, success, message, sessionId,
+                    platform, deviceId, browser, os, userAgent, ipAddress, LocalDateTime.now()));
         } catch (Exception e) {
-            log.error("记录登录日志失败: {}", e.getMessage());
+            log.error("发布用户登录事件失败: {}", e.getMessage(), e);
         }
     }
-
 
     private boolean isUserWithinValidPeriod(SysUser user, LocalDateTime now) {
         Integer permanent = user.getIsPermanentValid();
@@ -285,24 +267,8 @@ public class UserService {
         return attributes.getRequest().getHeader("User-Agent");
     }
 
-    private String resolveBrowser(String browser, String userAgent) {
-        if (browser != null && !browser.isBlank()) {
-            return browser.trim();
-        }
-        if (userAgent == null || userAgent.isBlank()) {
-            return null;
-        }
-        return parseBrowser(userAgent);
-    }
-
-    private String resolveOs(String os, String userAgent) {
-        if (os != null && !os.isBlank()) {
-            return os.trim();
-        }
-        if (userAgent == null || userAgent.isBlank()) {
-            return null;
-        }
-        return parseOS(userAgent);
+    private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private String resolvePlatformCode(String platform) {
@@ -333,32 +299,112 @@ public class UserService {
         return "fp-" + Base64.getUrlEncoder().withoutPadding().encodeToString(source.getBytes(StandardCharsets.UTF_8));
     }
 
-    /**
-     * 解析浏览器信息
-     */
-    private String parseBrowser(String userAgent) {
-        if (userAgent.contains("Chrome")) return "Chrome";
-        if (userAgent.contains("Firefox")) return "Firefox";
-        if (userAgent.contains("Safari")) return "Safari";
-        if (userAgent.contains("Edge")) return "Edge";
-        if (userAgent.contains("MSIE") || userAgent.contains("Trident")) return "IE";
-        return "Unknown";
-    }
 
     /**
-     * 解析操作系统信息
+     * 验证Token是否有效
+     *
+     * @param token JWT Token
+     * @return 是否有效
      */
-    private String parseOS(String userAgent) {
-        if (userAgent.contains("Windows NT 10.0")) return "Windows 10";
-        if (userAgent.contains("Windows NT 6.3")) return "Windows 8.1";
-        if (userAgent.contains("Windows NT 6.1")) return "Windows 7";
-        if (userAgent.contains("Mac OS X")) return "Mac OS";
-        if (userAgent.contains("Linux")) return "Linux";
-        if (userAgent.contains("Android")) return "Android";
-        if (userAgent.contains("iPhone") || userAgent.contains("iPad")) return "iOS";
-        return "Unknown";
+    public boolean validateToken(String token) {
+        return authSessionContractService.validateToken(token);
     }
 
+    public Map<String, Object> introspectToken(String token) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("active", false);
+        data.put("userId", null);
+        data.put("sessionId", null);
+        data.put("deviceId", null);
+        data.put("platformCodes", List.of());
+        data.put("exp", null);
+        data.put("maxLoginDevices", null);
+        data.put("reason", "missing_token");
 
+        String status = jwtUtil.classifyTokenStatus(token);
+        if (!"ok".equals(status)) {
+            data.put("reason", status);
+            return data;
+        }
+
+        Long userId = jwtUtil.getUserIdFromToken(token);
+        String sessionId = jwtUtil.getSessionIdFromToken(token);
+        Long exp = jwtUtil.getExpirationEpochSeconds(token);
+        data.put("userId", userId);
+        data.put("sessionId", sessionId);
+        data.put("exp", exp);
+
+        if (userId == null || sessionId == null || sessionId.isBlank()) {
+            data.put("reason", "malformed");
+            return data;
+        }
+
+        if (!userSessionService.isSessionOwned(userId, sessionId)) {
+            data.put("reason", "session_revoked");
+            return data;
+        }
+
+        SysUser user = userMapper.selectById(userId);
+        if (user == null || (user.getDeleted() != null && user.getDeleted() == 1)) {
+            data.put("reason", "user_not_found");
+            return data;
+        }
+        if (user.getStatus() == null || user.getStatus() != 1) {
+            data.put("reason", "user_disabled");
+            return data;
+        }
+
+        data.put("active", true);
+        data.put("reason", "ok");
+        data.put("deviceId", userSessionService.findDeviceIdBySession(userId, sessionId));
+        data.put("platformCodes", userRoleService.getUserPlatformCodes(userId));
+        data.put("maxLoginDevices", resolveMaxLoginDevices(user));
+        return data;
+    }
+
+    public void logout(String token) {
+        AuthSessionContractService.AuthenticatedSession session = authSessionContractService.authenticate(token);
+        if (session == null) {
+            return;
+        }
+        authSessionContractService.logout(token);
+        try {
+            eventPublisher.publishEvent(new UserLogoutEvent(session.getSessionId(), LocalDateTime.now()));
+        } catch (Exception e) {
+            log.error("发布用户登出事件失败: {}", e.getMessage(), e);
+        }
+    }
+
+    public boolean isSessionActive(Long userId, String sessionId) {
+        if (userId == null || sessionId == null || sessionId.isBlank()) {
+            return false;
+        }
+        return userSessionService.isSessionActive(userId, sessionId, authSessionContractService.getExpirationTimeSeconds());
+    }
+
+    public void confirmAdminAccess(String token) {
+        if (!authSessionContractService.validateToken(token)) {
+            throw new RuntimeException("登录状态无效，请重新登录");
+        }
+
+        Long userId = authSessionContractService.getUserIdFromToken(token);
+        if (userId == null) {
+            throw new RuntimeException("无法识别当前用户");
+        }
+
+        SysUser currentUser = userMapper.selectById(userId);
+        if (currentUser == null || currentUser.getDeleted() != null && currentUser.getDeleted() == 1) {
+            throw new RuntimeException("当前用户不存在或已删除");
+        }
+        if (currentUser.getStatus() == null || currentUser.getStatus() != 1) {
+            throw new RuntimeException("当前用户已禁用");
+        }
+
+        List<String> roleCodes = userRoleService.getUserRoleCodes(currentUser.getId());
+        String roleType = userRoleService.resolveRoleType(roleCodes);
+        if (!UserRoleService.ROLE_TYPE_ADMIN.equals(roleType)) {
+            throw new RuntimeException("当前账号无管理员权限");
+        }
+    }
 
 }
