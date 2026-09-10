@@ -29,7 +29,7 @@ public class JwtUtil {
     /**
      * JWT密钥
      */
-    private static final String SECRET_KEY = "kanhai-secret-key-2026-deep-sea-technology-co-ltd";
+    private static final String SECRET_KEY = "ocean-admin-secret-key-2026-deep-sea-technology-co-ltd";
 
     /**
      * 过期时间：7天
@@ -123,27 +123,37 @@ public class JwtUtil {
         }
     }
 
+    /**
+     * JWT 令牌状态判定
+     * @param token 令牌
+     * @return 令牌状态
+     */
     public String classifyTokenStatus(String token) {
         if (token == null || token.isBlank()) {
-            return "missing_token";
+            return "missing_token";     //  token 为空或空白
         }
         try {
             Claims claims = parseTokenStrict(token);
             if (claims == null || isTokenExpired(claims)) {
-                return "expired";
+                return "expired";   // 	已过期
             }
-            return "ok";
+            return "ok";    //  解析成功且未过期
         } catch (ExpiredJwtException e) {
-            return "expired";
+            return "expired";   //  已过期
         } catch (SecurityException e) {
-            return "signature_invalid";
+            return "signature_invalid";    //   签名校验失败
         } catch (MalformedJwtException | UnsupportedJwtException | IllegalArgumentException e) {
-            return "malformed";
+            return "malformed";     //  格式错误、不支持、参数非法
         } catch (Exception e) {
-            return "unknown_error";
+            return "unknown_error";     //  未知异常
         }
     }
 
+    /**
+     * 获取过期时间戳（秒）
+     * @param token 令牌
+     * @return 过期时间戳（秒）
+     */
     public Long getExpirationEpochSeconds(String token) {
         Claims claims = parseToken(token);
         if (claims == null || claims.getExpiration() == null) {
@@ -152,6 +162,10 @@ public class JwtUtil {
         return Instant.ofEpochMilli(claims.getExpiration().getTime()).getEpochSecond();
     }
 
+    /**
+     * 获取过期时间戳（秒）
+     * @return 过期时间戳（秒）
+     */
     public long getExpirationTimeSeconds() {
         return EXPIRATION_TIME / 1000;
     }
@@ -169,7 +183,6 @@ public class JwtUtil {
 
     /**
      * 获取签名密钥
-     *
      * @return SecretKey
      */
     private SecretKey getSigningKey() {

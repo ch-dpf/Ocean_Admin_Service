@@ -54,7 +54,7 @@ public class ApiExceptionLogRecorder {
             entity.setRequestUrl(request.getRequestURI());
             entity.setRequestMethod(request.getMethod());
             entity.setRequestParams(resolveRequestParams(request, requestParamsOverride));
-            entity.setIpAddress(request.getRemoteAddr());
+            entity.setIpAddress(RequestIpResolver.resolve(request));
             entity.setStatus(0);
             entity.setCreateTime(LocalDateTime.now());
 

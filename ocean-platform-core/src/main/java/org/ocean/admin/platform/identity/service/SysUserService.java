@@ -27,7 +27,7 @@ public class SysUserService {
     private final JdbcTemplate jdbcTemplate;
     private final UserRoleService userRoleService;
     private final SecurityPolicyService securityPolicyService;
-    private final UserSessionService userSessionService;
+    private final AuthUserSessionService authUserSessionService;
     private final SysLoginLogService loginLogService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
@@ -59,13 +59,13 @@ public class SysUserService {
     }
 
     public List<UserOnlineDeviceVO> listOnlineDevices(Long userId) {
-        List<UserSessionService.ActiveDeviceSession> activeDevices = userSessionService.listActiveDevices(userId);
+        List<AuthUserSessionService.ActiveDeviceSession> activeDevices = authUserSessionService.listActiveDevices(userId);
         if (activeDevices.isEmpty()) {
             return List.of();
         }
 
         List<String> sessionIds = activeDevices.stream()
-                .map(UserSessionService.ActiveDeviceSession::getSessionId)
+                .map(AuthUserSessionService.ActiveDeviceSession::getSessionId)
                 .filter(sessionId -> sessionId != null && !sessionId.isBlank())
                 .toList();
         Map<String, SysLoginLog> latestLogMap = loginLogService.getLatestLoginLogsBySessionIds(sessionIds);
@@ -88,7 +88,7 @@ public class SysUserService {
         }
 
         String normalizedSessionId = sessionId.trim();
-        userSessionService.removeSession(userId, normalizedSessionId);
+        authUserSessionService.removeSession(userId, normalizedSessionId);
         loginLogService.updateLogoutTime(normalizedSessionId, LocalDateTime.now());
         return true;
     }
@@ -258,11 +258,11 @@ public class SysUserService {
                 user.setOnlineDeviceCount(0);
                 continue;
             }
-            user.setOnlineDeviceCount(userSessionService.countActiveSessions(user.getId()));
+            user.setOnlineDeviceCount(authUserSessionService.countActiveSessions(user.getId()));
         }
     }
 
-    private UserOnlineDeviceVO toOnlineDeviceVO(UserSessionService.ActiveDeviceSession session, SysLoginLog loginLog) {
+    private UserOnlineDeviceVO toOnlineDeviceVO(AuthUserSessionService.ActiveDeviceSession session, SysLoginLog loginLog) {
         UserOnlineDeviceVO vo = new UserOnlineDeviceVO();
         vo.setSessionId(session.getSessionId());
         vo.setDeviceId(session.getDeviceId());

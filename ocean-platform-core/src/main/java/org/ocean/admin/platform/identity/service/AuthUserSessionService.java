@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class UserSessionService {
+public class AuthUserSessionService {
 
     private static final String USER_DEVICE_SET_KEY = "kanhai:auth:user:%d:devices";
     private static final String USER_DEVICE_SESSION_KEY = "kanhai:auth:user:%d:device:%s:session";

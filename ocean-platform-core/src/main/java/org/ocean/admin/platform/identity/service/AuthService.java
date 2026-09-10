@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.ocean.admin.platform.audit.utils.RequestIpResolver;
 import org.ocean.admin.platform.identity.entity.SysUser;
 import org.ocean.admin.platform.identity.event.UserLoginEvent;
 import org.ocean.admin.platform.identity.event.UserLogoutEvent;
@@ -30,7 +31,7 @@ import java.util.Map;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class UserService {
+public class AuthService {
 
     private final SysUserMapper userMapper;
 
@@ -40,7 +41,7 @@ public class UserService {
 
     private final UserRoleService userRoleService;
 
-    private final UserSessionService userSessionService;
+    private final AuthUserSessionService authUserSessionService;
 
     private final SecurityPolicyService securityPolicyService;
 
@@ -122,7 +123,7 @@ public class UserService {
         String resolvedBrowser = normalizeOptional(browser);
         String resolvedOs = normalizeOptional(os);
         String resolvedIpAddress = ipAddress;
-        boolean currentDeviceActive = userSessionService.hasActiveDeviceSession(user.getId(), resolvedDeviceId);
+        boolean currentDeviceActive = authUserSessionService.hasActiveDeviceSession(user.getId(), resolvedDeviceId);
         if (activeSessions >= maxDevices) {
             if (!currentDeviceActive) {
                 throw new RuntimeException("已达到最大同时登录设备数限制(" + maxDevices + ")");
@@ -222,16 +223,7 @@ public class UserService {
     }
 
     private int countActiveSessions(Long userId) {
-        return userSessionService.countActiveSessions(userId);
-    }
-
-    private String resolveCurrentRequestIp() {
-        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        if (attributes == null) {
-            return null;
-        }
-        HttpServletRequest request = attributes.getRequest();
-        return request == null ? null : request.getRemoteAddr();
+        return authUserSessionService.countActiveSessions(userId);
     }
 
     private String resolveCurrentDeviceId() {
@@ -244,16 +236,13 @@ public class UserService {
             return null;
         }
         String userAgent = request.getHeader("User-Agent");
-        String remoteAddr = request.getRemoteAddr();
+        String remoteAddr = RequestIpResolver.resolve(request);
         String source = String.format("%s|%s|OCEAN_CLOUD", remoteAddr == null ? "-" : remoteAddr, userAgent == null ? "-" : userAgent);
         return "fp-" + Base64.getUrlEncoder().withoutPadding().encodeToString(source.getBytes(StandardCharsets.UTF_8));
     }
 
     private String resolveIpAddress(String ipAddress) {
-        if (ipAddress != null && !ipAddress.isBlank()) {
-            return ipAddress.trim();
-        }
-        return resolveCurrentRequestIp();
+        return RequestIpResolver.resolveOrFallback(ipAddress, currentRequest());
     }
 
     private String resolveUserAgent(String userAgent) {
@@ -292,11 +281,16 @@ public class UserService {
             return "anonymous-device";
         }
         String resolvedUserAgent = userAgent != null && !userAgent.isBlank() ? userAgent : request.getHeader("User-Agent");
-        String remoteAddr = ipAddress != null && !ipAddress.isBlank() ? ipAddress : request.getRemoteAddr();
+        String remoteAddr = RequestIpResolver.resolveOrFallback(ipAddress, request);
         String source = String.format("%s|%s|%s", remoteAddr == null ? "-" : remoteAddr,
                 resolvedUserAgent == null ? "-" : resolvedUserAgent,
                 platform == null ? "-" : platform);
         return "fp-" + Base64.getUrlEncoder().withoutPadding().encodeToString(source.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private HttpServletRequest currentRequest() {
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        return attributes == null ? null : attributes.getRequest();
     }
 
 
@@ -339,7 +333,7 @@ public class UserService {
             return data;
         }
 
-        if (!userSessionService.isSessionOwned(userId, sessionId)) {
+        if (!authUserSessionService.isSessionOwned(userId, sessionId)) {
             data.put("reason", "session_revoked");
             return data;
         }
@@ -356,7 +350,7 @@ public class UserService {
 
         data.put("active", true);
         data.put("reason", "ok");
-        data.put("deviceId", userSessionService.findDeviceIdBySession(userId, sessionId));
+        data.put("deviceId", authUserSessionService.findDeviceIdBySession(userId, sessionId));
         data.put("platformCodes", userRoleService.getUserPlatformCodes(userId));
         data.put("maxLoginDevices", resolveMaxLoginDevices(user));
         return data;
@@ -379,7 +373,7 @@ public class UserService {
         if (userId == null || sessionId == null || sessionId.isBlank()) {
             return false;
         }
-        return userSessionService.isSessionActive(userId, sessionId, authSessionContractService.getExpirationTimeSeconds());
+        return authUserSessionService.isSessionActive(userId, sessionId, authSessionContractService.getExpirationTimeSeconds());
     }
 
     public void confirmAdminAccess(String token) {
@@ -406,5 +400,22 @@ public class UserService {
             throw new RuntimeException("当前账号无管理员权限");
         }
     }
+
+
+    /**
+     * 根据Token获取用户信息
+     *
+     * @param token JWT Token
+     * @return 用户信息
+     */
+    public SysUser getUserInfoByToken(String token) {
+        Long userId = authSessionContractService.getUserIdFromToken(token);
+        if (userId == null) {
+            return null;
+        }
+        return userMapper.selectById(userId);
+    }
+
+
 
 }

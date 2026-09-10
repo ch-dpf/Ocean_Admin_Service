@@ -16,13 +16,13 @@ import java.util.UUID;
 public class AuthSessionContractService {
 
     private final JwtUtil jwtUtil;
-    private final UserSessionService userSessionService;
+    private final AuthUserSessionService authUserSessionService;
 
     public LoginSession createLoginSession(String username, Long userId, String deviceId) {
         String sessionId = UUID.randomUUID().toString();
         String token = jwtUtil.generateToken(username, userId, sessionId);
         long expiresInSeconds = jwtUtil.getExpirationTimeSeconds();
-        userSessionService.registerSession(userId, deviceId, sessionId, expiresInSeconds);
+        authUserSessionService.registerSession(userId, deviceId, sessionId, expiresInSeconds);
         return new LoginSession(token, sessionId, expiresInSeconds);
     }
 
@@ -36,7 +36,7 @@ public class AuthSessionContractService {
         if (userId == null || sessionId == null || sessionId.isBlank()) {
             return null;
         }
-        if (!userSessionService.isSessionActive(userId, sessionId, jwtUtil.getExpirationTimeSeconds())) {
+        if (!authUserSessionService.isSessionActive(userId, sessionId, jwtUtil.getExpirationTimeSeconds())) {
             return null;
         }
         return new AuthenticatedSession(userId, sessionId, username);
@@ -66,7 +66,7 @@ public class AuthSessionContractService {
         if (userId == null || sessionId == null || sessionId.isBlank()) {
             return;
         }
-        userSessionService.removeSession(userId, sessionId);
+        authUserSessionService.removeSession(userId, sessionId);
     }
 
     @Getter
