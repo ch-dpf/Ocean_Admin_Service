@@ -33,7 +33,7 @@ public class SecurityPolicyService {
         ensurePolicyRow();
         return jdbcTemplate.queryForObject(
                 "SELECT min_password_length, require_uppercase, require_lowercase, require_digit, require_special, max_error_count, lock_enabled, lock_base_minutes, lock_max_minutes " +
-                        "FROM sys_security_policy WHERE id = ?",
+                        "FROM ocean_platform.sys_security_policy WHERE id = ?",
                 (rs, rowNum) -> {
                     Map<String, Object> policy = new HashMap<>();
                     policy.put("minPasswordLength", rs.getInt("min_password_length"));
@@ -65,7 +65,7 @@ public class SecurityPolicyService {
 
         ensurePolicyRow();
         jdbcTemplate.update(
-                "UPDATE sys_security_policy SET min_password_length = ?, require_uppercase = ?, require_lowercase = ?, require_digit = ?, require_special = ?, " +
+                "UPDATE ocean_platform.sys_security_policy SET min_password_length = ?, require_uppercase = ?, require_lowercase = ?, require_digit = ?, require_special = ?, " +
                         "max_error_count = ?, lock_enabled = ?, lock_base_minutes = ?, lock_max_minutes = ?, update_time = NOW() WHERE id = ?",
                 minPasswordLength, requireUppercase, requireLowercase, requireDigit, requireSpecial,
                 maxErrorCount, lockEnabled, lockBaseMinutes, lockMaxMinutes, POLICY_ID
@@ -132,7 +132,7 @@ public class SecurityPolicyService {
         }
 
         jdbcTemplate.update(
-                "UPDATE sys_user SET failed_password_attempts = ?, lock_level = ?, lock_until = ?, last_password_error_time = ?, update_time = NOW() WHERE id = ?",
+                "UPDATE ocean_platform.sys_user SET failed_password_attempts = ?, lock_level = ?, lock_until = ?, last_password_error_time = ?, update_time = NOW() WHERE id = ?",
                 nextFailedCount,
                 nextLevel,
                 lockUntil,
@@ -147,7 +147,7 @@ public class SecurityPolicyService {
             return;
         }
         jdbcTemplate.update(
-                "UPDATE sys_user SET failed_password_attempts = 0, lock_level = 0, lock_until = NULL, last_password_error_time = NULL, update_time = NOW() WHERE id = ?",
+                "UPDATE ocean_platform.sys_user SET failed_password_attempts = 0, lock_level = 0, lock_until = NULL, last_password_error_time = NULL, update_time = NOW() WHERE id = ?",
                 userId
         );
     }
@@ -158,11 +158,11 @@ public class SecurityPolicyService {
             return false;
         }
         Map<String, Object> user = jdbcTemplate.queryForMap(
-                "SELECT id, username, real_name, failed_password_attempts, lock_level FROM sys_user WHERE id = ? AND deleted = 0",
+                "SELECT id, username, real_name, failed_password_attempts, lock_level FROM ocean_platform.sys_user WHERE id = ? AND deleted = 0",
                 userId
         );
         boolean updated = jdbcTemplate.update(
-                "UPDATE sys_user SET failed_password_attempts = 0, lock_level = 0, lock_until = NULL, last_password_error_time = NULL, " +
+                "UPDATE ocean_platform.sys_user SET failed_password_attempts = 0, lock_level = 0, lock_until = NULL, last_password_error_time = NULL, " +
                         "manual_unlock_time = NOW(), manual_unlock_by = ?, update_time = NOW() WHERE id = ? AND deleted = 0",
                 operatorName == null || operatorName.isBlank() ? "SYSTEM" : operatorName,
                 userId
@@ -214,12 +214,12 @@ public class SecurityPolicyService {
     }
 
     private void ensurePolicyRow() {
-        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(1) FROM sys_security_policy WHERE id = ?", Integer.class, POLICY_ID);
+        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(1) FROM ocean_platform.sys_security_policy WHERE id = ?", Integer.class, POLICY_ID);
         if (count != null && count > 0) {
             return;
         }
         jdbcTemplate.update(
-                "INSERT INTO sys_security_policy (id, min_password_length, require_uppercase, require_lowercase, require_digit, require_special, max_error_count, lock_enabled, lock_base_minutes, lock_max_minutes, create_time, update_time) " +
+                "INSERT INTO ocean_platform.sys_security_policy (id, min_password_length, require_uppercase, require_lowercase, require_digit, require_special, max_error_count, lock_enabled, lock_base_minutes, lock_max_minutes, create_time, update_time) " +
                         "VALUES (?, 8, 1, 1, 1, 0, 5, 1, 5, 720, NOW(), NOW())",
                 POLICY_ID
         );

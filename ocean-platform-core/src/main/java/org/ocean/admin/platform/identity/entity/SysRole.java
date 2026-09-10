@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
  * @since 2026-09-09
  */
 @Data
-@TableName("sys_role")
+@TableName(value = "sys_role", schema = "ocean_platform")
 @Schema(description = "系统角色")
 public class SysRole implements Serializable {
 

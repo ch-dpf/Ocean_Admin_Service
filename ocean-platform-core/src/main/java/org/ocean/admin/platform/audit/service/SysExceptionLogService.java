@@ -1,4 +1,4 @@
-package org.ocean.admin.platform.identity.service;
+package org.ocean.admin.platform.audit.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -6,10 +6,10 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.kernel.common.PageResult;
-import org.ocean.admin.platform.identity.entity.SysExceptionLog;
-import org.ocean.admin.platform.identity.mapper.SysExceptionLogMapper;
-import org.ocean.admin.platform.identity.utils.LogQuerySupport;
-import org.ocean.admin.platform.identity.vo.LogQueryVO;
+import org.ocean.admin.platform.audit.entity.SysExceptionLog;
+import org.ocean.admin.platform.audit.mapper.SysExceptionLogMapper;
+import org.ocean.admin.platform.audit.utils.LogQuerySupport;
+import org.ocean.admin.platform.audit.vo.LogQueryVO;
 import org.ocean.admin.platform.identity.vo.SysExceptionLogVO;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;

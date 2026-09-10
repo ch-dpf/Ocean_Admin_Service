@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
  * @since 2026-09-09
  */
 @Data
-@TableName("sys_platform")
+@TableName(value = "sys_platform", schema = "ocean_platform")
 @Schema(description = "系统平台")
 public class SysPlatform implements Serializable {
 

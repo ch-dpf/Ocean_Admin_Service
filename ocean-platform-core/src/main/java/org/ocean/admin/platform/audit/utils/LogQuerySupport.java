@@ -1,10 +1,10 @@
-package org.ocean.admin.platform.identity.utils;
+package org.ocean.admin.platform.audit.utils;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.ocean.admin.kernel.common.PageResult;
-import org.ocean.admin.platform.identity.vo.LogQueryVO;
+import org.ocean.admin.platform.audit.vo.LogQueryVO;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;

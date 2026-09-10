@@ -15,7 +15,7 @@ import java.util.List;
  * @since 2026-09-09
  */
 @Data
-@TableName("sys_user")
+@TableName(value = "sys_user", schema = "ocean_platform")
 public class SysUser implements Serializable {
 
     private static final long SerialVersionUID = 1L;

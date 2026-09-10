@@ -1,7 +1,7 @@
-package org.ocean.admin.platform.identity.mapper;
+package org.ocean.admin.platform.audit.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import org.ocean.admin.platform.identity.entity.SysOperationLog;
+import org.ocean.admin.platform.audit.entity.SysOperationLog;
 import org.apache.ibatis.annotations.Mapper;
 
 /**

@@ -1,4 +1,4 @@
-package org.ocean.admin.platform.identity.entity;
+package org.ocean.admin.platform.audit.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
  * @since 2026-04-16
  */
 @Data
-@TableName("sys_exception_log")
+@TableName(value = "sys_exception_log", schema = "ocean_platform")
 @Schema(description = "系统异常日志")
 public class SysExceptionLog implements Serializable {
 

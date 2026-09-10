@@ -1,10 +1,11 @@
-package org.ocean.admin.platform.identity.utils;
+package org.ocean.admin.platform.audit.utils;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.platform.identity.entity.SysExceptionLog;
-import org.ocean.admin.platform.identity.service.SysExceptionLogService;
+import org.ocean.admin.platform.audit.entity.SysExceptionLog;
+import org.ocean.admin.platform.audit.service.SysExceptionLogService;
+import org.ocean.admin.platform.identity.utils.JwtUtil;
 import org.springframework.stereotype.Component;
 import java.io.PrintWriter;
 import java.io.StringWriter;

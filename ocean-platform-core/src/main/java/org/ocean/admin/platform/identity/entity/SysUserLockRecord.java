@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
  * @since 2026-09-09
  */
 @Data
-@TableName("sys_user_lock_record")
+@TableName(value = "sys_user_lock_record", schema = "ocean_platform")
 @Schema(description = "用户锁定记录")
 public class SysUserLockRecord implements Serializable {
 

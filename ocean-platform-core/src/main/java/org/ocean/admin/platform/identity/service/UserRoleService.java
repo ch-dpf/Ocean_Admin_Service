@@ -34,8 +34,8 @@ public class UserRoleService {
             return List.of();
         }
         try {
-            String sql = "SELECT r.role_code FROM sys_role r " +
-                    "INNER JOIN sys_user_role ur ON r.id = ur.role_id " +
+            String sql = "SELECT r.role_code FROM ocean_platform.sys_role r " +
+                    "INNER JOIN ocean_platform.sys_user_role ur ON r.id = ur.role_id " +
                     "WHERE ur.user_id = ? AND r.deleted = 0 AND r.status = 1";
             return jdbcTemplate.queryForList(sql, String.class, userId);
         } catch (Exception e) {
@@ -105,8 +105,8 @@ public class UserRoleService {
             return List.of();
         }
         try {
-            String sql = "SELECT p.platform_code FROM sys_platform p " +
-                    "INNER JOIN sys_user_platform up ON p.id = up.platform_id " +
+            String sql = "SELECT p.platform_code FROM ocean_platform.sys_platform p " +
+                    "INNER JOIN ocean_platform.sys_user_platform up ON p.id = up.platform_id " +
                     "WHERE up.user_id = ? AND p.deleted = 0 AND p.status = 1";
             return jdbcTemplate.queryForList(sql, String.class, userId);
         } catch (Exception e) {
