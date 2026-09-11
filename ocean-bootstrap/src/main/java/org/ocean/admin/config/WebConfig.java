@@ -18,11 +18,9 @@ public class WebConfig implements WebMvcConfigurer {
 
     private final RolePermissionInterceptor rolePermissionInterceptor;
 
-    public WebConfig(RolePermissionInterceptor rolePermissionInterceptor
-    ) {
+    public WebConfig(RolePermissionInterceptor rolePermissionInterceptor) {
         this.rolePermissionInterceptor = rolePermissionInterceptor;
     }
-
 
     /**
      * @param registry 拦截器注册器

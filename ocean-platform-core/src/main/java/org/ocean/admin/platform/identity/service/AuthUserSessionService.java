@@ -25,10 +25,10 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class AuthUserSessionService {
 
-    private static final String USER_DEVICE_SET_KEY = "kanhai:auth:user:%d:devices";
-    private static final String USER_DEVICE_SESSION_KEY = "kanhai:auth:user:%d:device:%s:session";
-    private static final String USER_DEVICE_LAST_ACTIVE_KEY = "kanhai:auth:user:%d:device:%s:last-active";
-    private static final String SESSION_OWNER_KEY = "kanhai:auth:session:%s:owner";
+    private static final String USER_DEVICE_SET_KEY = "ocean-admin:auth:user:%d:devices";
+    private static final String USER_DEVICE_SESSION_KEY = "ocean-admin:auth:user:%d:device:%s:session";
+    private static final String USER_DEVICE_LAST_ACTIVE_KEY = "ocean-admin:auth:user:%d:device:%s:last-active";
+    private static final String SESSION_OWNER_KEY = "ocean-admin:auth:session:%s:owner";
 
     private final StringRedisTemplate redisTemplate;
 

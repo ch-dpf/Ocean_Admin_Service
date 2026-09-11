@@ -46,12 +46,12 @@ spring:
 logging:
   level:
     root: INFO
-    org.SHKJ_Server.kanhai: DEBUG
+    org.ocean.admin: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"
   file:
-    name: logs/kanhai.log
+    name: logs/ocean.log
   logback:
     rollingpolicy:
       max-file-size: 10MB
