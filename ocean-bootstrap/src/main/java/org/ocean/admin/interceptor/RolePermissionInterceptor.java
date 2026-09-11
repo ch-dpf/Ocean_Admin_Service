@@ -46,7 +46,7 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
         if (path == null || !path.startsWith("/api/")) {
             return true;
         }
-        if (PUBLIC_PATHS.contains(path) || isPublicNcFileInfoPath(request) || isKnowbaseBypassPath(path)) {
+        if (PUBLIC_PATHS.contains(path) || isPublicNcFileInfoPath(request)) {
             return true;
         }
 
@@ -98,17 +98,6 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
         }
         String path = request.getRequestURI();
         return path != null && path.matches("^/api/nc/\\d+$");
-    }
-
-    private boolean isKnowbaseBypassPath(String path) {
-        return path.startsWith("/api/knowbase/")
-                || path.startsWith("/api/v1/libraries")
-                || path.startsWith("/api/v1/storage")
-                || path.startsWith("/api/v1/query-runs")
-                || path.startsWith("/api/v1/agents")
-                || path.startsWith("/api/v1/ingestion-runs")
-                || path.startsWith("/api/v1/observability")
-                || path.startsWith("/api/v1/presets");
     }
 
     private boolean isAdminManagementPath(String path) {

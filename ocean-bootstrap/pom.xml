@@ -17,6 +17,11 @@
             <artifactId>ocean-platform-core</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.ocean.admin</groupId>
+            <artifactId>ocean-gis</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- Spring Boot WebSocket -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

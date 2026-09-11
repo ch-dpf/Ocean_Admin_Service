@@ -21,6 +21,7 @@
         <module>ocean-kernel</module>
         <module>ocean-platform-core</module>
         <module>ocean-bootstrap</module>
+        <module>ocean-gis</module>
     </modules>
 
     <properties>
@@ -30,6 +31,7 @@
         <maven-enforcer-plugin.version>3.6.2</maven-enforcer-plugin.version>
         <mybatis-plus.version>3.5.17</mybatis-plus.version>
         <knife4j-openapi.version>5.4.0</knife4j-openapi.version>
+        <hutool.version>5.8.25</hutool.version>
     </properties>
 
     <dependencyManagement>
@@ -69,6 +71,33 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>${flyway.version}</version>
+                <inherited>false</inherited>
+                <configuration>
+                    <locations>
+                        <location>filesystem:${maven.multiModuleProjectDirectory}/ocean-bootstrap/src/main/resources/db/migration</location>
+                        <location>filesystem:${maven.multiModuleProjectDirectory}/ocean-gis/src/main/resources/db/migration</location>
+                    </locations>
+                    <baselineOnMigrate>false</baselineOnMigrate>
+                    <validateOnMigrate>true</validateOnMigrate>
+                    <cleanDisabled>true</cleanDisabled>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-database-postgresql</artifactId>
+                        <version>${flyway.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.postgresql</groupId>
+                        <artifactId>postgresql</artifactId>
+                        <version>${postgresql.version}</version>
+                    </dependency>
+                </dependencies>
             </plugin>
         </plugins>
         <pluginManagement>
