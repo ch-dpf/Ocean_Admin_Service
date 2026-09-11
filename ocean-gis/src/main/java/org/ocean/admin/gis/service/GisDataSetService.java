@@ -1,14 +1,14 @@
-package org.ocean.admin.service;
+package org.ocean.admin.gis.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.entity.GisDataSet;
+import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.kernel.common.PageResult;
-import org.ocean.admin.mapper.GisDataSetMapper;
-import org.ocean.admin.vo.GisDataSetVO;
+import org.ocean.admin.gis.mapper.GisDataSetMapper;
+import org.ocean.admin.gis.vo.GisDataSetVO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,13 +30,21 @@ public class GisDataSetService {
     private final GisDataSetMapper gisDataSetMapper;
 
 
-    public PageResult<List<GisDataSet>> getDataSetPage(Integer current, Integer size) {
+    public PageResult<List<GisDataSet>> getDataSetPage(
+            Integer current, Integer size, Long categoryId, String dataSetName) {
         long currentPage = current == null || current < 1 ? 1L : current;
         long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
+        String normalizedDataSetName = dataSetName == null ? "" : dataSetName.trim();
+
+        LambdaQueryWrapper<GisDataSet> queryWrapper = new LambdaQueryWrapper<GisDataSet>()
+                .eq(categoryId != null, GisDataSet::getCategoryId, categoryId)
+                .like(!normalizedDataSetName.isEmpty() && !"0".equals(normalizedDataSetName),
+                        GisDataSet::getDataSetName, normalizedDataSetName)
+                .orderByDesc(GisDataSet::getCreateTime);
+
         Page<GisDataSet> page = gisDataSetMapper.selectPage(
                 new Page<>(currentPage, pageSize),
-                new LambdaQueryWrapper<GisDataSet>()
-                        .orderByDesc(GisDataSet::getCreateTime)
+                queryWrapper
         );
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
     }

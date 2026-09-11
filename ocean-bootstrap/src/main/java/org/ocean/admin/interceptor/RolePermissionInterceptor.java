@@ -31,9 +31,7 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
             "/api/auth/login",
             "/api/auth/platform-login",
             "/api/auth/validate-token",
-            "/api/auth/introspect",
-            "/api/xtf/ping-image-batch-by-path",
-            "/api/nc/list"
+            "/api/auth/introspect"
     );
 
     private final AuthSessionContractService authSessionContractService;
@@ -46,7 +44,7 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
         if (path == null || !path.startsWith("/api/")) {
             return true;
         }
-        if (PUBLIC_PATHS.contains(path) || isPublicNcFileInfoPath(request)) {
+        if (PUBLIC_PATHS.contains(path)) {
             return true;
         }
 
@@ -86,18 +84,6 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
         }
 
         return true;
-    }
-
-    /**
-     * 免鉴权：获取 NC 文件信息 GET /api/nc/{id}
-     * 仅放行数字 ID 的 GET，避免误放开 DELETE /api/nc/{id} 等写接口。
-     */
-    private boolean isPublicNcFileInfoPath(HttpServletRequest request) {
-        if (!"GET".equalsIgnoreCase(request.getMethod())) {
-            return false;
-        }
-        String path = request.getRequestURI();
-        return path != null && path.matches("^/api/nc/\\d+$");
     }
 
     private boolean isAdminManagementPath(String path) {

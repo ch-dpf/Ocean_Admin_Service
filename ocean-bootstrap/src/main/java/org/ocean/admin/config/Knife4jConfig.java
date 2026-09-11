@@ -32,15 +32,30 @@ public class Knife4jConfig {
     }
 
     /**
-     * 接口文档分组
-     * 扫描 org.ocean.admin
+     * 平台接口文档分组
+     * 扫描 org.ocean.admin.platform
      */
     @Bean
-    public GroupedOpenApi oceanAdminApiGroup() {
+    public GroupedOpenApi systemApiGroup() {
         return GroupedOpenApi.builder()
-                .group("ocean-admin")
-                .packagesToScan("org.ocean.admin")
-                .pathsToMatch("/**")
+                .group("system")
+                .packagesToScan("org.ocean.admin.platform")
+                .pathsToMatch(
+                        "/api/auth/**",
+                        "/api/member/**",
+                        "/api/log/**"
+                )
                 .build();
     }
+
+
+    @Bean
+    public GroupedOpenApi gisApiGroup() {
+        return GroupedOpenApi.builder()
+                .group("gis")
+                .packagesToScan("org.ocean.admin.gis")
+                .pathsToMatch("/api/gis/**")
+                .build();
+    }
+
 }

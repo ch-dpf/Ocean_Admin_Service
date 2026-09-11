@@ -1,13 +1,13 @@
-package org.ocean.admin.controller;
+package org.ocean.admin.gis.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.entity.GisDataSet;
+import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
-import org.ocean.admin.service.GisDataSetService;
-import org.ocean.admin.vo.GisDataSetVO;
+import org.ocean.admin.gis.service.GisDataSetService;
+import org.ocean.admin.gis.vo.GisDataSetVO;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -28,8 +28,14 @@ public class GisDataSetController {
 
     @GetMapping("/page")
     @Operation(summary = "获取数据集分页")
-    public ResponseResult<PageResult<List<GisDataSet>>> getDataSetPage(@RequestParam(defaultValue = "1") Integer current, @RequestParam(defaultValue = "10") Integer size) {
-        return ResponseResult.success(gisDataSetService.getDataSetPage(current, size));
+    public ResponseResult<PageResult<List<GisDataSet>>> getDataSetPage(
+            @RequestParam(defaultValue = "1") Integer current,
+            @RequestParam(defaultValue = "10") Integer size,
+            @RequestParam(defaultValue = "0") Long categoryId,
+            @RequestParam(defaultValue = "0") String dataSetName) {
+        return ResponseResult.success(
+                gisDataSetService.getDataSetPage(current, size, categoryId, dataSetName)
+        );
     }
 
     @PostMapping("/create")

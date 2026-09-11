@@ -42,6 +42,11 @@
                 <version>${mybatis-plus.version}</version>
             </dependency>
             <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-jsqlparser</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>com.baizhukui</groupId>
                 <artifactId>knife4j-openapi3-boot4-spring-boot-starter</artifactId>
                 <version>${knife4j-openapi.version}</version>

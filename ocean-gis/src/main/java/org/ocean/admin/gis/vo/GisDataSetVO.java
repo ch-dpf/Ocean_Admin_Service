@@ -1,4 +1,4 @@
-package org.ocean.admin.vo;
+package org.ocean.admin.gis.vo;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -20,10 +20,11 @@ public class GisDataSetVO {
     @NotNull(message = "数据集不能为空")
     private String dataSetName;
 
-    /**
-     * 数据类别:0-影像数据、1-地形数据、2-矢量数据
-     */
-    @Schema(description = "数据类别",defaultValue = "0")
+    @Schema(
+            description = "数据类别：0-影像数据、1-地形数据、2-矢量数据",
+            allowableValues = {"0", "1", "2"},
+            example = "0"
+    )
     @NotNull(message = "数据类别不能为空")
     private Long categoryId;
 
