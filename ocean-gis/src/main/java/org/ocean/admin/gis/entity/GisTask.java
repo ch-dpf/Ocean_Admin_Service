@@ -44,6 +44,15 @@ public class GisTask {
     /** 失败工作项数量 */
     private Long failedCount;
 
+    /** QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED */
+    private String taskStatus;
+
+    /** 当前执行阶段 */
+    private String currentStage;
+
+    /** 任务级错误信息 */
+    private String errorMessage;
+
     /** 关联数据集 */
     private Long dataSetId;
 
@@ -52,6 +61,10 @@ public class GisTask {
 
     /** 整条任务链的根任务 */
     private Long rootTaskId;
+
+    private LocalDateTime startTime;
+
+    private LocalDateTime finishTime;
 
     private LocalDateTime createTime;
 

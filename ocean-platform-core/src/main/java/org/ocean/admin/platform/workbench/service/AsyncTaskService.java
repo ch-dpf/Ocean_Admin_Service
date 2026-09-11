@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.ocean.admin.kernel.task.TaskProgressService;
 import org.ocean.admin.platform.workbench.dto.TaskProgressMessage;
 import org.ocean.admin.platform.workbench.websocket.TaskProgressWebSocketHandler;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -24,7 +25,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
-public class AsyncTaskService {
+public class AsyncTaskService implements TaskProgressService {
 
     private static final String TASK_REDIS_KEY_PREFIX = "ocean-admin:async-task:";
     private static final Duration TASK_REDIS_TTL = Duration.ofHours(24);
@@ -95,6 +96,31 @@ public class AsyncTaskService {
      */
     public String createTask(String taskName, int totalCount, String taskType, String fileType, Long fileId) {
         String taskId = generateTaskId();
+        initializeTask(taskId, taskName, totalCount, taskType, fileType, fileId);
+        return taskId;
+    }
+
+    /**
+     * 使用业务侧稳定任务编号注册进度任务。
+     */
+    @Override
+    public String registerTask(String taskId, String taskName, int totalCount, String taskType) {
+        if (taskId == null || taskId.isBlank()) {
+            throw new IllegalArgumentException("任务ID不能为空");
+        }
+        if (totalCount < 1) {
+            throw new IllegalArgumentException("任务总数必须大于0");
+        }
+        initializeTask(taskId, taskName, totalCount, taskType, null, null);
+        return taskId;
+    }
+
+    private void initializeTask(String taskId,
+                                String taskName,
+                                int totalCount,
+                                String taskType,
+                                String fileType,
+                                Long fileId) {
         TaskInfo taskInfo = new TaskInfo();
         taskInfo.setTaskId(taskId);
         taskInfo.setTaskName(taskName);
@@ -108,13 +134,12 @@ public class AsyncTaskService {
         taskInfo.setFileId(fileId);
         taskInfo.setStage("queued");
         taskInfo.setMessage("任务已创建");
-        taskInfo.setManualProgress(0);
+        taskInfo.setManualProgress(null);
 
         taskMap.put(taskId, taskInfo);
         persistTask(taskInfo);
         log.info("创建任务: taskId={}, taskName={}, totalCount={}", taskId, taskName, totalCount);
         
-        return taskId;
     }
 
     /**
@@ -181,32 +206,73 @@ public class AsyncTaskService {
     }
 
     /**
+     * 根据已累计的成功、失败数量结束任务。
+     */
+    @Override
+    public void finalizeTaskResult(String taskId, String message) {
+        TaskInfo taskInfo = taskMap.get(taskId);
+        if (taskInfo == null) {
+            return;
+        }
+        synchronized (taskInfo) {
+            taskInfo.setManualProgress(100);
+            taskInfo.setStage("completed");
+            taskInfo.setMessage(message != null && !message.isBlank() ? message : "任务结束");
+            if (taskInfo.getFailedCount() == 0) {
+                taskInfo.setStatus("completed");
+            } else if (taskInfo.getCompletedCount() == 0) {
+                taskInfo.setStatus("failed");
+                taskInfo.setStage("failed");
+            } else {
+                taskInfo.setStatus("partial_failed");
+                taskInfo.setStage("partial_failed");
+            }
+            taskInfo.setEndTime(LocalDateTime.now());
+        }
+        pushProgress(taskId);
+    }
+
+    /** 将任务标记为整体失败。 */
+    @Override
+    public void finalizeTaskFailure(String taskId, String message) {
+        TaskInfo taskInfo = taskMap.get(taskId);
+        if (taskInfo == null) {
+            return;
+        }
+        synchronized (taskInfo) {
+            int unprocessed = taskInfo.getTotalCount()
+                    - taskInfo.getCompletedCount()
+                    - taskInfo.getFailedCount();
+            if (unprocessed > 0) {
+                taskInfo.setFailedCount(taskInfo.getFailedCount() + unprocessed);
+            }
+            taskInfo.setManualProgress(100);
+            taskInfo.setStatus("failed");
+            taskInfo.setStage("failed");
+            taskInfo.setMessage(message != null && !message.isBlank() ? message : "任务失败");
+            taskInfo.setEndTime(LocalDateTime.now());
+        }
+        pushProgress(taskId);
+    }
+
+    /**
      * 更新任务进度
      */
+    @Override
     public void updateProgress(String taskId, boolean success) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo != null) {
-            // 如果任务已经完成，不再更新和推送
-            if ("completed".equals(taskInfo.getStatus())) {
-                return;
+            synchronized (taskInfo) {
+                if (isTerminal(taskInfo.getStatus())) {
+                    return;
+                }
+                taskInfo.setManualProgress(null);
+                if (success) {
+                    taskInfo.setCompletedCount(taskInfo.getCompletedCount() + 1);
+                } else {
+                    taskInfo.setFailedCount(taskInfo.getFailedCount() + 1);
+                }
             }
-            
-            if (success) {
-                taskInfo.setCompletedCount(taskInfo.getCompletedCount() + 1);
-            } else {
-                taskInfo.setFailedCount(taskInfo.getFailedCount() + 1);
-            }
-            
-            // 检查是否完成
-            int processed = taskInfo.getCompletedCount() + taskInfo.getFailedCount();
-            if (processed >= taskInfo.getTotalCount()) {
-                taskInfo.setStatus("completed");
-                taskInfo.setEndTime(LocalDateTime.now());
-                log.info("✅ 任务完成: taskId={}, completed={}, failed={}, progress={}%", 
-                    taskId, taskInfo.getCompletedCount(), taskInfo.getFailedCount(), taskInfo.getProgress());
-            }
-            
-            // 通过 WebSocket 推送进度更新（包括完成状态）
             pushProgress(taskId);
             log.debug("📤 推送任务进度: taskId={}, status={}, progress={}%", taskId, taskInfo.getStatus(), taskInfo.getProgress());
         }
@@ -215,6 +281,7 @@ public class AsyncTaskService {
     /**
      * 手动更新任务进度
      */
+    @Override
     public void updateProgress(String taskId, int progress, String stage, String message) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo == null) {
@@ -222,7 +289,7 @@ public class AsyncTaskService {
         }
 
         // 如果任务已经完成，不再更新和推送
-        if ("completed".equals(taskInfo.getStatus())) {
+        if (isTerminal(taskInfo.getStatus())) {
             return;
         }
 
@@ -271,7 +338,7 @@ public class AsyncTaskService {
             message.setFileId(taskInfo.getFileId());
             message.setStage(taskInfo.getStage());
             message.setMessage(taskInfo.getMessage());
-            message.setDone("completed".equals(taskInfo.getStatus()));
+            message.setDone(isTerminal(taskInfo.getStatus()));
             message.setTimestamp(System.currentTimeMillis());
             
             // 通过 WebSocket 广播
@@ -285,7 +352,7 @@ public class AsyncTaskService {
      */
     public List<TaskInfo> getRunningTasks() {
         return taskMap.values().stream()
-                .filter(task -> "running".equals(task.getStatus()))
+                .filter(task -> "running".equals(task.getStatus()) || "queued".equals(task.getStatus()))
                 .collect(Collectors.toList());
     }
 
@@ -310,7 +377,7 @@ public class AsyncTaskService {
      */
     public void cleanupCompletedTasks() {
         taskMap.entrySet().removeIf(entry -> {
-            boolean completed = "completed".equals(entry.getValue().getStatus());
+            boolean completed = isTerminal(entry.getValue().getStatus());
             if (completed) {
                 deleteTaskFromRedis(entry.getKey());
             }
@@ -347,6 +414,12 @@ public class AsyncTaskService {
      */
     private String generateTaskId() {
         return "TASK_" + System.currentTimeMillis() + "_" + (int)(Math.random() * 10000);
+    }
+
+    private boolean isTerminal(String status) {
+        return "completed".equals(status)
+                || "partial_failed".equals(status)
+                || "failed".equals(status);
     }
 
     /**

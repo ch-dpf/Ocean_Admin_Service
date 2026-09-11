@@ -29,6 +29,22 @@ public class GisDataSetService {
 
     private final GisDataSetMapper gisDataSetMapper;
 
+    public void incrementFileCount(Long dataSetId, long increment) {
+        if (increment <= 0) {
+            return;
+        }
+        int updated = gisDataSetMapper.update(
+                null,
+                new LambdaUpdateWrapper<GisDataSet>()
+                        .eq(GisDataSet::getId, dataSetId)
+                        .setSql("file_count = file_count + " + increment)
+                        .set(GisDataSet::getUpdateTime, LocalDateTime.now())
+        );
+        if (updated != 1) {
+            throw new IllegalStateException("数据集文件数量更新失败: " + dataSetId);
+        }
+    }
+
 
     public PageResult<List<GisDataSet>> getDataSetPage(
             Integer current, Integer size, Long categoryId, String dataSetName) {

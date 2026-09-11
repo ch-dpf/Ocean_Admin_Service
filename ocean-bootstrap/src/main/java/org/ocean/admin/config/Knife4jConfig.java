@@ -38,7 +38,7 @@ public class Knife4jConfig {
     @Bean
     public GroupedOpenApi systemApiGroup() {
         return GroupedOpenApi.builder()
-                .group("system")
+                .group("平台接口")
                 .packagesToScan("org.ocean.admin.platform")
                 .pathsToMatch(
                         "/api/auth/**",
@@ -49,10 +49,14 @@ public class Knife4jConfig {
     }
 
 
+    /**
+     * Gis地理信息接口文档分组
+     * 扫描 org.ocean.admin.platform
+     */
     @Bean
     public GroupedOpenApi gisApiGroup() {
         return GroupedOpenApi.builder()
-                .group("gis")
+                .group("Gis地理信息接口")
                 .packagesToScan("org.ocean.admin.gis")
                 .pathsToMatch("/api/gis/**")
                 .build();

@@ -24,6 +24,9 @@ public class GisFileMeta {
     /** 所属数据集 */
     private Long dataSetId;
 
+    /** 所属上传任务 */
+    private Long taskId;
+
     /** 用户上传时的文件名 */
     private String originalName;
 
@@ -47,6 +50,12 @@ public class GisFileMeta {
 
     /** 上传人 */
     private Long uploadedBy;
+
+    /** PENDING、READY、FAILED */
+    private String uploadStatus;
+
+    /** 文件处理错误信息 */
+    private String errorMessage;
 
     /** 上传时间 */
     private LocalDateTime createTime;

@@ -13,6 +13,10 @@ spring:
     name: ocean-admin-service
   profiles:
     default: dev
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 5GB
   # 数据库配置
   datasource:
     driver-class-name: org.postgresql.Driver
@@ -43,6 +47,10 @@ spring:
     baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
     validate-on-migrate: true
     clean-disabled: true
+
+gis:
+  upload:
+    base-path: ${GIS_UPLOAD_BASE_PATH:uploads/gis}
 
 # 日志配置
 logging:
