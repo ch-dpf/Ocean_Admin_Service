@@ -33,6 +33,14 @@ public class GisProcessingStorageService {
                 taskRoot.resolve("logs").resolve("engine.log"));
     }
 
+    /** 将数据库中的产物 Key 安全解析到切片目录。 */
+    public Path resolveTiles(String outputKey) {
+        if (outputKey == null || outputKey.isBlank()) {
+            throw new IllegalArgumentException("切片产物 Key 不能为空");
+        }
+        return resolve(outputKey).resolve("tiles").normalize();
+    }
+
     private Path resolve(String key) {
         Path resolved = processingRoot
                 .resolve(key.replace('/', java.io.File.separatorChar))
