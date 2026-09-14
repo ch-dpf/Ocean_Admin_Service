@@ -18,6 +18,10 @@ public class GisFileMetaVO {
     @Schema(description = "所属数据集 ID", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long dataSetId;
 
+    @Schema(description = "数据类别：0-影像数据、1-地形数据、2-矢量数据",
+            allowableValues = {"0", "1", "2"}, accessMode = Schema.AccessMode.READ_ONLY)
+    private Long categoryId;
+
     @Schema(description = "所属上传任务 ID")
     private Long taskId;
 

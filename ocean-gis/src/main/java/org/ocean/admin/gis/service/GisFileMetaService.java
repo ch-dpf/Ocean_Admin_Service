@@ -21,7 +21,10 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** GIS 文件元数据服务。 */
 @Service
@@ -40,6 +43,7 @@ public class GisFileMetaService {
             Integer current,
             Integer size,
             Long dataSetId,
+            Long categoryId,
             Long taskId,
             String originalName,
             String extension,
@@ -55,6 +59,10 @@ public class GisFileMetaService {
 
         LambdaQueryWrapper<GisFileMeta> query = new LambdaQueryWrapper<GisFileMeta>()
                 .eq(dataSetId != null, GisFileMeta::getDataSetId, dataSetId)
+                .apply(categoryId != null,
+                        "data_set_id IN (SELECT id FROM ocean_gis.gis_data_set "
+                                + "WHERE category_id = {0} AND deleted = 0)",
+                        categoryId)
                 .eq(taskId != null, GisFileMeta::getTaskId, taskId)
                 .like(normalizedName != null, GisFileMeta::getOriginalName, normalizedName)
                 .eq(normalizedExtension != null, GisFileMeta::getExtension, normalizedExtension)
@@ -62,6 +70,7 @@ public class GisFileMetaService {
                 .orderByDesc(GisFileMeta::getCreateTime);
         Page<GisFileMeta> page = gisFileMetaMapper.selectPage(new Page<>(currentPage, pageSize), query);
         List<GisFileMetaVO> records = page.getRecords().stream().map(this::toVO).toList();
+        populateCategoryIds(records);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), records);
     }
 
@@ -92,7 +101,7 @@ public class GisFileMetaService {
         }
         log.info("创建 GIS 文件元数据成功: id={}, dataSetId={}, storageKey={}",
                 meta.getId(), meta.getDataSetId(), meta.getStorageKey());
-        return toVO(meta);
+        return toVOWithCategory(meta);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -137,7 +146,7 @@ public class GisFileMetaService {
         updatedMeta.setCreateTime(existing.getCreateTime());
         updatedMeta.setDeleted(existing.getDeleted());
         log.info("更新 GIS 文件元数据成功: id={}", reqVO.getId());
-        return toVO(updatedMeta);
+        return toVOWithCategory(updatedMeta);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -153,7 +162,7 @@ public class GisFileMetaService {
     }
 
     public GisFileMetaVO getFileMetaDetail(Long id) {
-        return toVO(getRequired(id));
+        return toVOWithCategory(getRequired(id));
     }
 
     private GisFileMeta getRequired(Long id) {
@@ -266,6 +275,31 @@ public class GisFileMetaService {
         result.setCreateTime(meta.getCreateTime());
         result.setUpdateTime(meta.getUpdateTime());
         return result;
+    }
+
+    private GisFileMetaVO toVOWithCategory(GisFileMeta meta) {
+        GisFileMetaVO result = toVO(meta);
+        populateCategoryIds(List.of(result));
+        return result;
+    }
+
+    private void populateCategoryIds(List<GisFileMetaVO> records) {
+        Set<Long> dataSetIds = records.stream()
+                .map(GisFileMetaVO::getDataSetId)
+                .collect(Collectors.toSet());
+        if (dataSetIds.isEmpty()) {
+            return;
+        }
+        Map<Long, GisDataSet> dataSetsById = gisDataSetMapper.selectList(
+                        new LambdaQueryWrapper<GisDataSet>().in(GisDataSet::getId, dataSetIds))
+                .stream()
+                .collect(Collectors.toMap(GisDataSet::getId, Function.identity()));
+        records.forEach(record -> {
+            GisDataSet dataSet = dataSetsById.get(record.getDataSetId());
+            if (dataSet != null) {
+                record.setCategoryId(dataSet.getCategoryId());
+            }
+        });
     }
 
     private String defaultStatus(String value) {
