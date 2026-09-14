@@ -36,6 +36,7 @@ public class GisTaskService {
             Long taskType,
             String taskStatus,
             Long dataSetId,
+            Integer deleted,
             LocalDateTime createTimeStart,
             LocalDateTime createTimeEnd) {
         long currentPage = current == null || current < 1 ? 1L : current;
@@ -62,6 +63,7 @@ public class GisTaskService {
                 .eq(taskType != null, GisTask::getTaskType, taskType)
                 .eq(normalizedStatus != null, GisTask::getTaskStatus, normalizedStatus)
                 .eq(dataSetId != null, GisTask::getDataSetId, dataSetId)
+                .eq(deleted != null, GisTask::getDeleted, deleted)
                 .ge(createTimeStart != null, GisTask::getCreateTime, createTimeStart)
                 .le(createTimeEnd != null, GisTask::getCreateTime, createTimeEnd)
                 .orderByDesc(GisTask::getCreateTime);

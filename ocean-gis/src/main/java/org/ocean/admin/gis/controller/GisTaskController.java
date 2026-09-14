@@ -51,6 +51,7 @@ public class GisTaskController {
             @Parameter(description = "任务状态：QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED")
             @RequestParam(required = false) String taskStatus,
             @RequestParam(required = false) Long dataSetId,
+            @RequestParam(defaultValue = "0") Integer deleted,
             @Parameter(description = "创建开始时间，ISO 日期时间格式")
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime createTimeStart,
@@ -65,6 +66,7 @@ public class GisTaskController {
                 taskType,
                 taskStatus,
                 dataSetId,
+                deleted,
                 createTimeStart,
                 createTimeEnd));
     }
