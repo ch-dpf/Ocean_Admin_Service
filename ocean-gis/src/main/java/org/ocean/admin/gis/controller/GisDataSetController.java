@@ -4,6 +4,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisDataSet;
+import org.ocean.admin.kernel.audit.OperationLog;
+import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.ocean.admin.gis.service.GisDataSetService;
@@ -40,6 +42,8 @@ public class GisDataSetController {
 
     @PostMapping("/create")
     @Operation(summary = "创建数据集")
+    @OperationLog(module = "GIS_DATASET", type = OperationType.INSERT, description = "创建GIS数据集",
+            recordResponse = true)
     public ResponseResult<GisDataSetVO> createProject(@RequestBody GisDataSetVO reqVO) {
         GisDataSetVO created = gisDataSetService.createProject(reqVO);
         return ResponseResult.success("创建成功", created);
@@ -47,6 +51,7 @@ public class GisDataSetController {
 
     @PutMapping("/update")
     @Operation(summary = "更新数据集")
+    @OperationLog(module = "GIS_DATASET", type = OperationType.UPDATE, description = "更新GIS数据集")
     public ResponseResult<String> updateProject(@RequestBody GisDataSetVO reqVO) {
         gisDataSetService.updateProject(reqVO);
         return ResponseResult.success("更新成功");
@@ -54,6 +59,7 @@ public class GisDataSetController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除数据集")
+    @OperationLog(module = "GIS_DATASET", type = OperationType.DELETE, description = "删除GIS数据集")
     public ResponseResult<String> deleteProject(@PathVariable Long id) {
         gisDataSetService.deleteProject(id);
         return ResponseResult.success("删除成功");

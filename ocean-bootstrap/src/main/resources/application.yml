@@ -48,10 +48,6 @@ spring:
     validate-on-migrate: true
     clean-disabled: true
 
-gis:
-  upload:
-    base-path: ${GIS_UPLOAD_BASE_PATH:uploads/gis}
-
 # 日志配置
 logging:
   level:
@@ -85,3 +81,18 @@ knife4j:
     footer-custom-content: Ocean Cloud Service API
   basic:
     enable: false
+
+
+gis:
+  upload:
+    base-path: ${GIS_UPLOAD_BASE_PATH:uploads/gis}
+
+ocean:
+  audit:
+    operation-log:
+      async-enabled: ${OPERATION_LOG_ASYNC_ENABLED:true}
+      core-pool-size: ${OPERATION_LOG_CORE_POOL_SIZE:2}
+      max-pool-size: ${OPERATION_LOG_MAX_POOL_SIZE:4}
+      queue-capacity: ${OPERATION_LOG_QUEUE_CAPACITY:500}
+      request-max-length: ${OPERATION_LOG_REQUEST_MAX_LENGTH:8192}
+      response-max-length: ${OPERATION_LOG_RESPONSE_MAX_LENGTH:16384}

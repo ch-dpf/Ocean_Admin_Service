@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
+import org.ocean.admin.kernel.audit.OperationLog;
+import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.platform.audit.service.SysOperationLogService;
 import org.ocean.admin.platform.audit.utils.LogResponseSupport;
 import org.ocean.admin.platform.audit.vo.LogQueryVO;
@@ -53,6 +55,7 @@ public class SysOperationLogController {
      */
     @DeleteMapping("/{id}")
     @Operation(summary = "删除操作日志")
+    @OperationLog(module = "OPERATION_LOG", type = OperationType.DELETE, description = "删除操作日志")
     public ResponseResult<Boolean> deleteOperationLog(@PathVariable Long id) {
         boolean success = operationLogService.deleteOperationLog(id);
         return LogResponseSupport.booleanResult(success, "删除失败");
@@ -63,6 +66,7 @@ public class SysOperationLogController {
      */
     @DeleteMapping("/batch-delete")
     @Operation(summary = "批量删除操作日志")
+    @OperationLog(module = "OPERATION_LOG", type = OperationType.DELETE, description = "批量删除操作日志")
     public ResponseResult<Boolean> batchDeleteOperationLogs(@RequestBody List<Long> ids) {
         boolean success = operationLogService.batchDeleteOperationLogs(ids);
         return LogResponseSupport.booleanResult(success, "批量删除失败");
@@ -73,6 +77,8 @@ public class SysOperationLogController {
      */
     @DeleteMapping("/clear")
     @Operation(summary = "清空操作日志")
+    @OperationLog(module = "OPERATION_LOG", type = OperationType.DELETE, description = "清空操作日志",
+            recordRequest = false)
     public ResponseResult<Boolean> clearOperationLogs() {
         boolean success = operationLogService.clearOperationLogs();
         return LogResponseSupport.booleanResult(success, "清空失败");

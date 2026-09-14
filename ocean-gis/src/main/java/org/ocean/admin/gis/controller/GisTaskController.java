@@ -11,6 +11,8 @@ import org.ocean.admin.gis.vo.GisTaskVO;
 import org.ocean.admin.gis.vo.GisUploadTaskVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
+import org.ocean.admin.kernel.audit.OperationLog;
+import org.ocean.admin.kernel.audit.OperationType;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -37,6 +39,8 @@ public class GisTaskController {
 
     @GetMapping("/page")
     @Operation(summary = "分页条件查询 GIS 任务")
+    @OperationLog(module = "GIS_TASK", type = OperationType.QUERY, description = "分页条件查询 GIS 任务",
+            recordResponse = true)
     public ResponseResult<PageResult<List<GisTaskVO>>> getTaskPage(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "10") Integer size,
@@ -67,6 +71,8 @@ public class GisTaskController {
 
     @PostMapping(value = "/upload",consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "多文件上传", description = "一次上传多个Gis文件")
+    @OperationLog(module = "GIS_TASK", type = OperationType.SUBMIT, description = "提交GIS文件上传任务",
+            recordResponse = true)
     public ResponseResult<GisUploadTaskVO> upload(
             @Parameter(description = "数据集ID") @RequestParam Long dataSetId,
             @Parameter(description = "文件列表", required = true)  @RequestPart("files") List<MultipartFile> files){

@@ -6,6 +6,8 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
+import org.ocean.admin.kernel.audit.OperationLog;
+import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.platform.identity.entity.SysUser;
 import org.ocean.admin.platform.identity.service.SysUserLockRecordService;
 import org.ocean.admin.platform.identity.service.SysUserService;
@@ -43,6 +45,7 @@ public class SysUserController {
 
     @PostMapping("/{id}/online-devices/{sessionId}/kickout")
     @Operation(summary = "踢出用户指定在线设备")
+    @OperationLog(module = "USER_MANAGEMENT", type = OperationType.UPDATE, description = "踢出用户在线设备")
     public ResponseResult<Boolean> kickoutOnlineDevice(@PathVariable Long id, @PathVariable String sessionId) {
         boolean success = userService.kickoutOnlineDevice(id, sessionId);
         return success ? ResponseResult.success(true) : ResponseResult.error("踢出失败");
@@ -50,6 +53,8 @@ public class SysUserController {
 
     @PostMapping("/create")
     @Operation(summary = "创建用户")
+    @OperationLog(module = "USER_MANAGEMENT", type = OperationType.INSERT, description = "创建用户",
+            excludeFields = {"password"})
     public ResponseResult<Boolean> createUser(@RequestBody SysUser user) {
         boolean success = userService.createUser(user);
         return success ? ResponseResult.success(true) : ResponseResult.error("创建失败");
@@ -57,6 +62,8 @@ public class SysUserController {
 
     @PutMapping("/update")
     @Operation(summary = "更新用户")
+    @OperationLog(module = "USER_MANAGEMENT", type = OperationType.UPDATE, description = "更新用户",
+            excludeFields = {"password"})
     public ResponseResult<Boolean> updateUser(@RequestBody SysUser user) {
         boolean success = userService.updateUser(user);
         return success ? ResponseResult.success(true) : ResponseResult.error("更新失败");
@@ -64,6 +71,7 @@ public class SysUserController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除用户")
+    @OperationLog(module = "USER_MANAGEMENT", type = OperationType.DELETE, description = "删除用户")
     public ResponseResult<Boolean> deleteUser(@PathVariable Long id) {
         boolean success = userService.deleteUser(id);
         return success ? ResponseResult.success(true) : ResponseResult.error("删除失败");
@@ -71,6 +79,8 @@ public class SysUserController {
 
     @PutMapping("/reset-password/{id}")
     @Operation(summary = "重置密码")
+    @OperationLog(module = "USER_MANAGEMENT", type = OperationType.UPDATE, description = "重置用户密码",
+            recordRequest = false)
     public ResponseResult<Boolean> resetPassword(@PathVariable Long id, @RequestBody PasswordRequest request) {
         boolean success = userService.resetPassword(id, request.getNewPassword());
         return success ? ResponseResult.success(true) : ResponseResult.error("重置失败");
@@ -78,6 +88,7 @@ public class SysUserController {
 
     @PutMapping("/unlock/{id}")
     @Operation(summary = "手动解锁用户")
+    @OperationLog(module = "USER_MANAGEMENT", type = OperationType.UPDATE, description = "手动解锁用户")
     public ResponseResult<Boolean> unlockUser(@PathVariable Long id, @RequestBody(required = false) UnlockRequest request) {
         String operatorName = request == null ? null : request.getOperatorName();
         boolean success = userService.unlockUser(id, operatorName);

@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.ocean.admin.kernel.audit.CurrentOperator;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.ocean.admin.platform.identity.service.AuthSessionContractService;
 import org.ocean.admin.platform.identity.service.UserRoleService;
@@ -61,6 +62,9 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
             return false;
         }
         Long userId = session.getUserId();
+        request.setAttribute(
+                CurrentOperator.REQUEST_ATTRIBUTE,
+                new CurrentOperator(userId, session.getUsername()));
 
         List<String> roleCodes = userRoleService.getUserRoleCodes(userId);
         String roleType = userRoleService.resolveRoleType(roleCodes);

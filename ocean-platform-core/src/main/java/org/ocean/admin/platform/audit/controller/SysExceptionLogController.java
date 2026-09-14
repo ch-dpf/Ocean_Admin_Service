@@ -6,6 +6,8 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
+import org.ocean.admin.kernel.audit.OperationLog;
+import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.platform.audit.service.SysExceptionLogService;
 import org.ocean.admin.platform.audit.utils.LogResponseSupport;
 import org.ocean.admin.platform.audit.vo.LogQueryVO;
@@ -53,6 +55,7 @@ public class SysExceptionLogController {
      */
     @DeleteMapping("/{id}")
     @Operation(summary = "删除异常日志")
+    @OperationLog(module = "EXCEPTION_LOG", type = OperationType.DELETE, description = "删除异常日志")
     public ResponseResult<Boolean> deleteExceptionLog(@PathVariable Long id) {
         boolean success = exceptionLogService.deleteExceptionLog(id);
         return LogResponseSupport.booleanResult(success, "删除失败");
@@ -63,6 +66,7 @@ public class SysExceptionLogController {
      */
     @DeleteMapping("/batch-delete")
     @Operation(summary = "批量删除异常日志")
+    @OperationLog(module = "EXCEPTION_LOG", type = OperationType.DELETE, description = "批量删除异常日志")
     public ResponseResult<Boolean> batchDeleteExceptionLogs(@RequestBody List<Long> ids) {
         boolean success = exceptionLogService.batchDeleteExceptionLogs(ids);
         return LogResponseSupport.booleanResult(success, "批量删除失败");
@@ -73,6 +77,8 @@ public class SysExceptionLogController {
      */
     @DeleteMapping("/clear")
     @Operation(summary = "清空异常日志")
+    @OperationLog(module = "EXCEPTION_LOG", type = OperationType.DELETE, description = "清空异常日志",
+            recordRequest = false)
     public ResponseResult<Boolean> clearExceptionLogs() {
         boolean success = exceptionLogService.clearExceptionLogs();
         return LogResponseSupport.booleanResult(success, "清空失败");
@@ -83,6 +89,7 @@ public class SysExceptionLogController {
      */
     @PutMapping("/handle/{id}")
     @Operation(summary = "标记异常为已处理")
+    @OperationLog(module = "EXCEPTION_LOG", type = OperationType.UPDATE, description = "标记异常为已处理")
     public ResponseResult<Boolean> markAsHandled(
             @PathVariable Long id,
             @RequestBody HandleRequest request) {

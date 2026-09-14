@@ -5,6 +5,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
+import org.ocean.admin.kernel.audit.OperationLog;
+import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.platform.audit.service.SysLoginLogService;
 import org.ocean.admin.platform.audit.utils.LogResponseSupport;
 import org.ocean.admin.platform.audit.vo.LogQueryVO;
@@ -52,6 +54,7 @@ public class SysLoginLogController {
      */
     @DeleteMapping("/{id}")
     @Operation(summary = "删除登录日志")
+    @OperationLog(module = "LOGIN_LOG", type = OperationType.DELETE, description = "删除登录日志")
     public ResponseResult<Boolean> deleteLoginLog(@PathVariable Long id) {
         boolean success = loginLogService.deleteLoginLog(id);
         return LogResponseSupport.booleanResult(success, "删除失败");
@@ -62,6 +65,7 @@ public class SysLoginLogController {
      */
     @DeleteMapping("/batch-delete")
     @Operation(summary = "批量删除登录日志")
+    @OperationLog(module = "LOGIN_LOG", type = OperationType.DELETE, description = "批量删除登录日志")
     public ResponseResult<Boolean> batchDeleteLoginLogs(@RequestBody List<Long> ids) {
         boolean success = loginLogService.batchDeleteLoginLogs(ids);
         return LogResponseSupport.booleanResult(success, "批量删除失败");
@@ -72,6 +76,8 @@ public class SysLoginLogController {
      */
     @DeleteMapping("/clear")
     @Operation(summary = "清空登录日志")
+    @OperationLog(module = "LOGIN_LOG", type = OperationType.DELETE, description = "清空登录日志",
+            recordRequest = false)
     public ResponseResult<Boolean> clearLoginLogs() {
         boolean success = loginLogService.clearLoginLogs();
         return LogResponseSupport.booleanResult(success, "清空失败");
