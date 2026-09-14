@@ -100,6 +100,15 @@ public class FileStorageService {
         delete(resolveKey(storageKey));
     }
 
+    /** 解析已入库的本地文件，并阻止存储根目录之外的路径穿越。 */
+    public Path resolveStoredPath(String storageKey) {
+        Path path = resolveKey(storageKey);
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("已入库文件不存在: " + storageKey);
+        }
+        return path;
+    }
+
     private void validateMultipartFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("上传文件不能为空");

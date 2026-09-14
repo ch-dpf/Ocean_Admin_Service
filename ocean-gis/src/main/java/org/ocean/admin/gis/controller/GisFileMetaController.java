@@ -4,8 +4,11 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.dto.GisFileProcessRequest;
+import org.ocean.admin.gis.service.GisFileProcessingService;
 import org.ocean.admin.gis.service.GisFileMetaService;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
+import org.ocean.admin.gis.vo.GisProcessingTaskVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
@@ -27,6 +30,7 @@ import java.util.List;
 public class GisFileMetaController {
 
     private final GisFileMetaService gisFileMetaService;
+    private final GisFileProcessingService gisFileProcessingService;
 
     @GetMapping("/page")
     @Operation(summary = "分页查询文件元数据")
@@ -70,5 +74,17 @@ public class GisFileMetaController {
     @Operation(summary = "获取文件元数据详情")
     public ResponseResult<GisFileMetaVO> getFileMeta(@PathVariable Long id) {
         return ResponseResult.success(gisFileMetaService.getFileMetaDetail(id));
+    }
+
+    @PostMapping("/{id}/process")
+    @Operation(summary = "提交已入库单文件切片任务",
+            description = "按 TERRAIN、IMAGERY 或 VECTOR 选择处理引擎；任务异步执行")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT,
+            description = "提交GIS单文件切片任务", recordResponse = true)
+    public ResponseResult<GisProcessingTaskVO> processFile(
+            @PathVariable Long id,
+            @Valid @RequestBody GisFileProcessRequest request) {
+        return ResponseResult.success("处理任务已提交",
+                gisFileProcessingService.submit(id, request));
     }
 }

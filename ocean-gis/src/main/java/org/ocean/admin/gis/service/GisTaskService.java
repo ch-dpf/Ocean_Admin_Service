@@ -180,6 +180,9 @@ public class GisTaskService {
         result.setCurrentStage(task.getCurrentStage());
         result.setErrorMessage(task.getErrorMessage());
         result.setDataSetId(task.getDataSetId());
+        result.setProcessingType(task.getProcessingType());
+        result.setSourceFileMetaId(task.getSourceFileMetaId());
+        result.setOutputKey(task.getOutputKey());
         result.setParentTaskId(task.getParentTaskId());
         result.setRootTaskId(task.getRootTaskId());
         result.setStartTime(task.getStartTime());

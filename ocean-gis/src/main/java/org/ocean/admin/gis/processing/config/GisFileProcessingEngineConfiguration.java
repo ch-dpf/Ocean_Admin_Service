@@ -1,0 +1,23 @@
+package org.ocean.admin.gis.processing.config;
+
+import org.ocean.admin.gis.processing.engine.GisFileProcessingEngine;
+import org.ocean.admin.gis.processing.engine.TerrainFileProcessingEngine;
+import org.ocean.admin.gis.terrain.engine.TerrainEngine;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/** 文件处理引擎适配层装配。 */
+@Configuration(proxyBeanMethods = false)
+public class GisFileProcessingEngineConfiguration {
+
+    @Bean
+    @ConditionalOnProperty(
+            prefix = "gis.terrain.mago",
+            name = "enabled",
+            havingValue = "true",
+            matchIfMissing = true)
+    public GisFileProcessingEngine terrainFileProcessingEngine(TerrainEngine terrainEngine) {
+        return new TerrainFileProcessingEngine(terrainEngine);
+    }
+}

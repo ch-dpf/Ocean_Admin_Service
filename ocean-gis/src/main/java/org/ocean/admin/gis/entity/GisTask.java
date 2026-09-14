@@ -56,6 +56,15 @@ public class GisTask {
     /** 关联数据集 */
     private Long dataSetId;
 
+    /** 切片处理类型：TERRAIN、IMAGERY、VECTOR */
+    private String processingType;
+
+    /** 切片任务的源文件元数据 ID */
+    private Long sourceFileMetaId;
+
+    /** 切片产物在处理存储根目录下的相对 Key */
+    private String outputKey;
+
     /** 父任务，用于上传→处理→切片任务链 */
     private Long parentTaskId;
 

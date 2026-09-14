@@ -165,6 +165,11 @@ public class GisFileMetaService {
         return toVOWithCategory(getRequired(id));
     }
 
+    /** 供文件处理编排读取完整的已入库元数据。 */
+    public GisFileMeta getRequiredEntity(Long id) {
+        return getRequired(id);
+    }
+
     private GisFileMeta getRequired(Long id) {
         if (id == null) {
             throw new IllegalArgumentException("文件元数据ID不能为空");

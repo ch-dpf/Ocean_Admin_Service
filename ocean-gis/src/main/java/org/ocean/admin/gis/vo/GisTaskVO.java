@@ -45,6 +45,15 @@ public class GisTaskVO {
     @Schema(description = "关联数据集 ID")
     private Long dataSetId;
 
+    @Schema(description = "处理类型：TERRAIN、IMAGERY、VECTOR")
+    private String processingType;
+
+    @Schema(description = "源文件元数据 ID")
+    private Long sourceFileMetaId;
+
+    @Schema(description = "处理产物相对 Key")
+    private String outputKey;
+
     @Schema(description = "父任务 ID")
     private Long parentTaskId;
 

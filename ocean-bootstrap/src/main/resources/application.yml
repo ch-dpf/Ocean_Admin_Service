@@ -86,6 +86,8 @@ knife4j:
 gis:
   upload:
     base-path: ${GIS_UPLOAD_BASE_PATH:uploads/gis}
+  processing:
+    base-path: ${GIS_PROCESSING_BASE_PATH:processed/gis}
   terrain:
     mago:
       enabled: ${GIS_TERRAIN_MAGO_ENABLED:true}

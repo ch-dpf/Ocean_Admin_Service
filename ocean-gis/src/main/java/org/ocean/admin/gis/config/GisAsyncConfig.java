@@ -17,7 +17,7 @@ public class GisAsyncConfig {
         executor.setCorePoolSize(2);
         executor.setMaxPoolSize(4);
         executor.setQueueCapacity(100);
-        executor.setThreadNamePrefix("gis-upload-");
+        executor.setThreadNamePrefix("gis-task-");
         executor.initialize();
         return executor;
     }
