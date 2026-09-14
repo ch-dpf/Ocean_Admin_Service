@@ -6,4 +6,5 @@ logs/
 *.log
 .env
 .cursor/
+uploads/
 

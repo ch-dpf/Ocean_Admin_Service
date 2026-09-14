@@ -11,10 +11,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** 在一个数据库事务中创建上传任务及其文件明细。 */
+/** 在一个数据库事务中创建上传任务元数据及其文件元数据。 */
 @Service
 @RequiredArgsConstructor
-public class UploadTransactionService {
+public class UploadTaskService {
 
     private final GisTaskService gisTaskService;
     private final GisFileMetaService gisFileMetaService;

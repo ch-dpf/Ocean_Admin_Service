@@ -45,6 +45,22 @@ public class GisDataSetService {
         }
     }
 
+    public void decrementFileCount(Long dataSetId, long decrement) {
+        if (decrement <= 0) {
+            return;
+        }
+        int updated = gisDataSetMapper.update(
+                null,
+                new LambdaUpdateWrapper<GisDataSet>()
+                        .eq(GisDataSet::getId, dataSetId)
+                        .setSql("file_count = GREATEST(file_count - " + decrement + ", 0)")
+                        .set(GisDataSet::getUpdateTime, LocalDateTime.now())
+        );
+        if (updated != 1) {
+            throw new IllegalStateException("数据集文件数量更新失败: " + dataSetId);
+        }
+    }
+
 
     public PageResult<List<GisDataSet>> getDataSetPage(
             Integer current, Integer size, Long categoryId, String dataSetName) {

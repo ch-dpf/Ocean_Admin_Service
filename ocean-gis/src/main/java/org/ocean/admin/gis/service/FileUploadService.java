@@ -24,13 +24,17 @@ import java.util.UUID;
 @Slf4j
 @RequiredArgsConstructor
 public class FileUploadService {
-
+    // 单次任务文件数量
     private static final int MAX_FILES_PER_TASK = 100;
+    // 单次上传文件总大小
     private static final long MAX_TOTAL_SIZE = 5L * 1024 * 1024 * 1024;
+    // 影像数据扩展名集合
     private static final Set<String> IMAGE_EXTENSIONS = Set.of(
             "tif", "tiff", "img", "jp2", "png", "jpg", "jpeg", "tfw", "prj", "aux", "xml");
+    // 地形数据扩展名集合
     private static final Set<String> TERRAIN_EXTENSIONS = Set.of(
             "tif", "tiff", "dem", "hgt", "terrain", "asc", "prj", "xml");
+    // 矢量数据扩展名集合
     private static final Set<String> VECTOR_EXTENSIONS = Set.of(
             "shp", "shx", "dbf", "prj", "cpg", "sbn", "sbx", "geojson", "json", "kml", "kmz", "gpkg");
 
@@ -39,7 +43,7 @@ public class FileUploadService {
     private final GisFileMetaService gisFileMetaService;
     private final TaskProgressService taskProgressService;
     private final FileStorageService fileStorageService;
-    private final UploadTransactionService transactionService;
+    private final UploadTaskService transactionService;
     private final FileUploadWorker uploadWorker;
 
     public GisUploadTaskVO createUploadTask(Long dataSetId, List<MultipartFile> files) {
@@ -56,6 +60,7 @@ public class FileUploadService {
                 stagedFiles.add(fileStorageService.stage(taskNo, file));
             }
 
+            // 已完成暂存和数据库建档、可以交给异步线程处理的上传任务
             preparedUpload = transactionService.create(taskNo, dataSet, stagedFiles);
             taskProgressService.registerTask(
                     taskNo,

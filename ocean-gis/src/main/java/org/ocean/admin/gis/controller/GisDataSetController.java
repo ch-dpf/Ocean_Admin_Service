@@ -20,7 +20,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/gis/dataSet")
-@Tag(name = "Gis数据集管理", description = "Gis数据集管理接口")
+@Tag(name = "GIS数据集管理", description = "GIS数据集管理接口")
 @RequiredArgsConstructor
 public class GisDataSetController {
 
