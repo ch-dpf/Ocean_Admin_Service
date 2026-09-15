@@ -96,8 +96,8 @@ gis:
       enabled: ${GIS_TERRAIN_MAGO_ENABLED:true}
       java-command: ${GIS_TERRAIN_MAGO_JAVA_COMMAND:java}
       jar-path: ${GIS_TERRAIN_MAGO_JAR_PATH:ocean-gis/tools/mago/mago-3d-terrainer-1.14.2-release.jar}
-      max-heap: ${GIS_TERRAIN_MAGO_MAX_HEAP:8g}
-      process-timeout: ${GIS_TERRAIN_MAGO_PROCESS_TIMEOUT:24h}
+      max-heap: ${GIS_TERRAIN_MAGO_MAX_HEAP:32g}
+      process-timeout: ${GIS_TERRAIN_MAGO_PROCESS_TIMEOUT:72h}
 
 ocean:
   audit:

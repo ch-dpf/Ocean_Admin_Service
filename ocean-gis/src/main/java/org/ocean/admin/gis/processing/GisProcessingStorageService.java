@@ -48,6 +48,17 @@ public class GisProcessingStorageService {
                 taskRoot.resolve("logs").resolve("engine.log"));
     }
 
+    public GisProcessingWorkspace batchWorkspace(GisProcessingType type, String taskNo) {
+        if (type == null || taskNo == null || !taskNo.matches("[A-Za-z0-9_.-]+")) {
+            throw new IllegalArgumentException("无法创建非法的 GIS 多文件处理工作目录");
+        }
+        String outputKey = type.name().toLowerCase(Locale.ROOT) + "/batches/" + taskNo;
+        Path taskRoot = resolve(outputKey);
+        return new GisProcessingWorkspace(outputKey,
+                taskRoot.resolve("tiles"), taskRoot.resolve("temp"),
+                taskRoot.resolve("logs").resolve("engine.log"));
+    }
+
     /** 将数据库中的产物 Key 安全解析到切片目录。 */
     public Path resolveTiles(String outputKey) {
         if (outputKey == null || outputKey.isBlank()) {

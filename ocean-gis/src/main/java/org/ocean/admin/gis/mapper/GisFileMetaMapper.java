@@ -16,8 +16,6 @@ public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
 
     /**
      * 分页查询已逻辑删除的文件元数据。
-     *
-     * <p>该查询由 XML 提供 SQL，绕过 {@code @TableLogic} 对 BaseMapper 查询的自动过滤。</p>
      */
     Page<GisFileMetaVO> selectDeletedPage(
             Page<GisFileMetaVO> page,

@@ -7,6 +7,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.service.FileUploadService;
 import org.ocean.admin.gis.service.GisFolderProcessingService;
+import org.ocean.admin.gis.service.GisBatchProcessingService;
+import org.ocean.admin.gis.vo.GisProcessingTaskFileVO;
+import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
+import org.ocean.admin.gis.vo.GisBatchProcessingTaskVO;
 import org.ocean.admin.gis.service.GisTaskService;
 import org.ocean.admin.gis.vo.GisProcessingTaskVO;
 import org.ocean.admin.gis.vo.GisTaskVO;
@@ -22,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import jakarta.validation.Valid;
 
 /**
  * GIS任务管理
@@ -39,6 +44,7 @@ public class GisTaskController {
     private final FileUploadService fileUploadService;
     private final GisTaskService gisTaskService;
     private final GisFolderProcessingService gisFolderProcessingService;
+    private final GisBatchProcessingService gisBatchProcessingService;
 
     @GetMapping("/page")
     @Operation(summary = "分页条件查询 GIS 任务")
@@ -81,6 +87,26 @@ public class GisTaskController {
             @Parameter(description = "文件列表", required = true)  @RequestPart("files") List<MultipartFile> files){
         return ResponseResult.success(
                 fileUploadService.createUploadTask(dataSetId, files));
+    }
+
+    @PostMapping(value = "/process", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "新建多文件处理任务",
+            description = "request 为 JSON，files 为本次上传的文件；按处理类型选择切片引擎并异步逐文件执行")
+    @OperationLog(module = "GIS_TASK", type = OperationType.SUBMIT,
+            description = "新建GIS多文件处理任务", recordResponse = true)
+    public ResponseResult<GisBatchProcessingTaskVO> createProcessingTask(
+            @Valid @RequestPart("request") GisCreateProcessingTaskRequest request,
+            @Parameter(description = "待处理文件列表", required = true)
+            @RequestPart("files") List<MultipartFile> files) {
+        return ResponseResult.success("处理任务已提交",
+                gisBatchProcessingService.submit(request, files));
+    }
+
+    @GetMapping("/{taskId}/processing-files")
+    @Operation(summary = "查询多文件处理任务的逐文件结果")
+    public ResponseResult<List<GisProcessingTaskFileVO>> getProcessingFiles(
+            @PathVariable Long taskId) {
+        return ResponseResult.success(gisBatchProcessingService.getFiles(taskId));
     }
 
     @PostMapping("/process-folder")

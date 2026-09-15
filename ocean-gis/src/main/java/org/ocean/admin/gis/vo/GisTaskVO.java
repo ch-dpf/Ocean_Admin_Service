@@ -48,6 +48,15 @@ public class GisTaskVO {
     @Schema(description = "处理类型：TERRAIN、IMAGERY、VECTOR")
     private String processingType;
 
+    @Schema(description = "目标坐标系")
+    private String targetCrs;
+
+    @Schema(description = "瓦片切分剖面")
+    private String tileProfile;
+
+    @Schema(description = "输出格式")
+    private String outputFormat;
+
     @Schema(description = "源文件元数据 ID")
     private Long sourceFileMetaId;
 

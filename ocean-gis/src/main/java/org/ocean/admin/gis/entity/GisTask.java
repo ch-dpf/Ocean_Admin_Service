@@ -59,6 +59,11 @@ public class GisTask {
     /** 切片处理类型：TERRAIN、IMAGERY、VECTOR */
     private String processingType;
 
+    /** 多文件处理任务的输出参数。 */
+    private String targetCrs;
+    private String tileProfile;
+    private String outputFormat;
+
     /** 切片任务的源文件元数据 ID */
     private Long sourceFileMetaId;
 

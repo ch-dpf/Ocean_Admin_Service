@@ -92,6 +92,34 @@ public class FileStorageService {
         }
     }
 
+    /** 将请求期暂存文件转为可供异步处理的持久输入。 */
+    public GisStoredFile commitForProcessing(String taskNo, GisStagedFile stagedFile) {
+        String storageKey = "processing/" + safeSegment(taskNo) + "/"
+                + safeSegment(stagedFile.getStorageName());
+        Path source = resolveKey(stagedFile.getStagingKey());
+        Path target = resolveKey(storageKey);
+        try {
+            if (!Files.isRegularFile(source)) {
+                throw new IllegalStateException("暂存文件不存在: " + stagedFile.getStagingKey());
+            }
+            Files.createDirectories(target.getParent());
+            try {
+                Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ex) {
+                Files.move(source, target);
+            }
+            return GisStoredFile.builder()
+                    .storageName(stagedFile.getStorageName())
+                    .storageKey(storageKey)
+                    .storageType("LOCAL")
+                    .sizeBytes(stagedFile.getSizeBytes())
+                    .sha256(stagedFile.getSha256())
+                    .build();
+        } catch (IOException ex) {
+            throw new IllegalStateException("处理输入文件转存失败: " + stagedFile.getOriginalName(), ex);
+        }
+    }
+
     public void deleteStaged(String stagingKey) {
         delete(resolveKey(stagingKey));
     }

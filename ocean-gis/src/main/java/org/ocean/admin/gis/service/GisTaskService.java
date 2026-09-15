@@ -181,6 +181,9 @@ public class GisTaskService {
         result.setErrorMessage(task.getErrorMessage());
         result.setDataSetId(task.getDataSetId());
         result.setProcessingType(task.getProcessingType());
+        result.setTargetCrs(task.getTargetCrs());
+        result.setTileProfile(task.getTileProfile());
+        result.setOutputFormat(task.getOutputFormat());
         result.setSourceFileMetaId(task.getSourceFileMetaId());
         result.setOutputKey(task.getOutputKey());
         result.setParentTaskId(task.getParentTaskId());
