@@ -33,8 +33,8 @@ public class GisDataSetController {
     public ResponseResult<PageResult<List<GisDataSet>>> getDataSetPage(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "10") Integer size,
-            @RequestParam(defaultValue = "0") Long categoryId,
-            @RequestParam(defaultValue = "0") String dataSetName) {
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) String dataSetName) {
         return ResponseResult.success(
                 gisDataSetService.getDataSetPage(current, size, categoryId, dataSetName)
         );

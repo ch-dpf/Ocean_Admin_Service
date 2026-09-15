@@ -70,8 +70,7 @@ public class GisDataSetService {
 
         LambdaQueryWrapper<GisDataSet> queryWrapper = new LambdaQueryWrapper<GisDataSet>()
                 .eq(categoryId != null, GisDataSet::getCategoryId, categoryId)
-                .like(!normalizedDataSetName.isEmpty() && !"0".equals(normalizedDataSetName),
-                        GisDataSet::getDataSetName, normalizedDataSetName)
+                .like(!normalizedDataSetName.isEmpty() , GisDataSet::getDataSetName, normalizedDataSetName)
                 .orderByDesc(GisDataSet::getCreateTime);
 
         Page<GisDataSet> page = gisDataSetMapper.selectPage(

@@ -45,6 +45,7 @@ public class GisFileMetaService {
             Long dataSetId,
             Long categoryId,
             Long taskId,
+            Integer deleted,
             String originalName,
             String extension,
             String uploadStatus) {
@@ -64,6 +65,7 @@ public class GisFileMetaService {
                                 + "WHERE category_id = {0} AND deleted = 0)",
                         categoryId)
                 .eq(taskId != null, GisFileMeta::getTaskId, taskId)
+                .eq(deleted != null, GisFileMeta::getDeleted, deleted)
                 .like(normalizedName != null, GisFileMeta::getOriginalName, normalizedName)
                 .eq(normalizedExtension != null, GisFileMeta::getExtension, normalizedExtension)
                 .eq(normalizedStatus != null, GisFileMeta::getUploadStatus, normalizedStatus)

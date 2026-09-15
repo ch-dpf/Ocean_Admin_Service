@@ -40,11 +40,12 @@ public class GisFileMetaController {
             @RequestParam(required = false) Long dataSetId,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) Long taskId,
+            @RequestParam(required = false, defaultValue = "0") Integer deleted,
             @RequestParam(required = false) String originalName,
             @RequestParam(required = false) String extension,
             @RequestParam(required = false) String uploadStatus) {
         return ResponseResult.success(gisFileMetaService.getFileMetaPage(
-                current, size, dataSetId, categoryId, taskId, originalName, extension, uploadStatus));
+                current, size, dataSetId, categoryId, taskId, deleted,originalName, extension, uploadStatus));
     }
 
     @PostMapping("/create")
