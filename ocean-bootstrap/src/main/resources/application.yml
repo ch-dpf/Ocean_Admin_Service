@@ -43,7 +43,7 @@ spring:
   # Flyway 迁移配置
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
-    locations: classpath:db/migration
+    locations: filesystem:./db/migration
     baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
     validate-on-migrate: true
     clean-disabled: true

@@ -10,6 +10,9 @@
     </parent>
     <artifactId>ocean-kernel</artifactId>
     <name>Ocean Admin Kernel</name>
+    <properties>
+        <flyway.skip>true</flyway.skip>
+    </properties>
     <dependencies>
         <!-- lombok -->
         <dependency>

@@ -11,6 +11,10 @@
     <artifactId>ocean-bootstrap</artifactId>
     <name>Ocean Admin Bootstrap</name>
 
+    <properties>
+        <flyway.skip>true</flyway.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.ocean.admin</groupId>
