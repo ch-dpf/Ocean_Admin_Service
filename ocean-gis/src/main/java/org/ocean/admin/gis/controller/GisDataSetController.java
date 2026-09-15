@@ -24,7 +24,7 @@ import java.util.List;
 @RequestMapping("/api/gis/dataSet")
 @Tag(name = "GIS数据集管理", description = "GIS数据集管理接口")
 @RequiredArgsConstructor
-public class DataSetController {
+public class GisDataSetController {
 
     private final GisDataSetService gisDataSetService;
 
