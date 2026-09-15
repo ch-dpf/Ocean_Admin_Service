@@ -148,8 +148,8 @@ public class SysUserService {
 
     @Transactional
     public boolean deleteUser(Long id) {
-        jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id = ?", id);
-        jdbcTemplate.update("DELETE FROM sys_user_platform WHERE user_id = ?", id);
+        jdbcTemplate.update("DELETE FROM ocean_platform.sys_user_role WHERE user_id = ?", id);
+        jdbcTemplate.update("DELETE FROM ocean_platform.sys_user_platform WHERE user_id = ?", id);
         return userMapper.deleteById(id) > 0;
     }
 
@@ -340,11 +340,11 @@ public class SysUserService {
             throw new RuntimeException("用户ID不能为空");
         }
 
-        jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM ocean_platform.sys_user_role WHERE user_id = ?", userId);
         for (String roleCode : roleCodes) {
             Integer updated = jdbcTemplate.update(
-                    "INSERT INTO sys_user_role (user_id, role_id, create_time) " +
-                            "SELECT ?, id, NOW() FROM sys_role WHERE role_code = ? AND deleted = 0",
+                    "INSERT INTO ocean_platform.sys_user_role (user_id, role_id, create_time) " +
+                            "SELECT ?, id, NOW() FROM ocean_platform.sys_role WHERE role_code = ? AND deleted = 0",
                     userId, roleCode
             );
             if (updated <= 0) {
@@ -358,11 +358,11 @@ public class SysUserService {
             throw new RuntimeException("用户ID不能为空");
         }
 
-        jdbcTemplate.update("DELETE FROM sys_user_platform WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM ocean_platform.sys_user_platform WHERE user_id = ?", userId);
         for (String platformCode : platformCodes) {
             Integer updated = jdbcTemplate.update(
-                    "INSERT INTO sys_user_platform (user_id, platform_id, create_time) " +
-                            "SELECT ?, id, NOW() FROM sys_platform WHERE platform_code = ? AND deleted = 0 AND status = 1",
+                    "INSERT INTO ocean_platform.sys_user_platform (user_id, platform_id, create_time) " +
+                            "SELECT ?, id, NOW() FROM ocean_platform.sys_platform WHERE platform_code = ? AND deleted = 0 AND status = 1",
                     userId, platformCode
             );
             if (updated <= 0) {

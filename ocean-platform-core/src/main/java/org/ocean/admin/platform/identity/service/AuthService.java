@@ -92,15 +92,16 @@ public class AuthService {
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SysUser::getUsername, username);
         SysUser user = userMapper.selectOne(wrapper);
-
         if (user == null) {
-            throw new RuntimeException("用户名或密码错误");
+            throw new RuntimeException("用户不存在");
         }
 
+        // 确认用户未被锁定
         securityPolicyService.assertUserNotLocked(user);
 
         // 验证密码
         if (!passwordEncoder.matches(password, user.getPassword())) {
+            // 密码失败时
             securityPolicyService.onPasswordFailure(user);
             throw new RuntimeException("用户名或密码错误");
         }
@@ -111,12 +112,16 @@ public class AuthService {
         }
 
         LocalDateTime now = LocalDateTime.now();
+        // 用户是否不在有效期内
         if (!isUserWithinValidPeriod(user, now)) {
             throw new RuntimeException("当前账号不在有效期内，无法登录");
         }
 
+        // 最大登录设备数量
         int maxDevices = resolveMaxLoginDevices(user);
+        // 活跃会话数量
         int activeSessions = countActiveSessions(user.getId());
+
         String requestedPlatformCode = resolvePlatformCode(platform);
         String resolvedDeviceId = resolveDeviceId(deviceId, requestedPlatformCode, userAgent, ipAddress);
         String resolvedUserAgent = userAgent;
@@ -163,7 +168,6 @@ public class AuthService {
         result.put("token", loginSession.getToken());
         result.put("username", user.getUsername());
         result.put("userId", user.getId());
-
         result.put("role", roleCodes.isEmpty() ? "USER" : String.join(",", roleCodes));
         result.put("roles", roleCodes);
         result.put("roleType", roleType);

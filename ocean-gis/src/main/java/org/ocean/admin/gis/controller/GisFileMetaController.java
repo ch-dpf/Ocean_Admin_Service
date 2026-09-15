@@ -5,7 +5,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisFileProcessRequest;
-import org.ocean.admin.gis.service.GisFileProcessingService;
+import org.ocean.admin.gis.service.GisProcessingService;
 import org.ocean.admin.gis.service.GisFileMetaService;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.gis.vo.GisProcessingTaskVO;
@@ -30,7 +30,7 @@ import java.util.List;
 public class GisFileMetaController {
 
     private final GisFileMetaService gisFileMetaService;
-    private final GisFileProcessingService gisFileProcessingService;
+    private final GisProcessingService gisProcessingService;
 
     @GetMapping("/page")
     @Operation(summary = "分页查询文件元数据")
@@ -100,6 +100,6 @@ public class GisFileMetaController {
             @PathVariable Long id,
             @Valid @RequestBody GisFileProcessRequest request) {
         return ResponseResult.success("处理任务已提交",
-                gisFileProcessingService.submit(id, request));
+                gisProcessingService.submitSingle(id, request));
     }
 }

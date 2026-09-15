@@ -9,7 +9,7 @@ import java.util.concurrent.Executor;
 
 @EnableAsync
 @Configuration
-public class GisAsyncConfig {
+public class AsyncTaskConfig {
 
     @Bean("gisTaskExecutor")
     public Executor gisTaskExecutor() {

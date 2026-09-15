@@ -9,6 +9,7 @@ import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngineRegistry;
+import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.kernel.task.TaskProgressService;
 
 import java.nio.file.Path;
@@ -18,11 +19,11 @@ import java.util.function.Consumer;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-class GisBatchProcessingWorkerTest {
+class GisProcessingWorkerBatchTest {
     @Test
     @SuppressWarnings("unchecked")
     void recordsPartialFailureAndContinuesWithNextFile() {
-        FileStorageService storage = mock(FileStorageService.class);
+        FileUploadUtil storage = mock(FileUploadUtil.class);
         GisFileProcessingEngineRegistry registry = mock(GisFileProcessingEngineRegistry.class);
         GisFileProcessingEngine engine = mock(GisFileProcessingEngine.class);
         GisProcessingTaskFileMapper fileMapper = mock(GisProcessingTaskFileMapper.class);
@@ -48,8 +49,8 @@ class GisBatchProcessingWorkerTest {
                 1L, "TASK", GisProcessingType.TERRAIN, workspace,
                 List.of(file(11L, 1), file(12L, 2)));
 
-        new GisBatchProcessingWorker(storage, registry, fileMapper,
-                taskService, progress).process(execution);
+        new GisProcessingWorker(storage, registry, fileMapper,
+                new GisTaskLifecycleService(taskService, progress)).process(execution);
 
         verify(storage, atLeastOnce()).resolveStoredPath(any());
         verify(engine, times(2)).process(any(), any(Consumer.class));

@@ -2,6 +2,9 @@ package org.ocean.admin.gis.service;
 
 import org.junit.jupiter.api.Test;
 import org.ocean.admin.gis.processing.GisFolderProcessingExecution;
+import org.ocean.admin.gis.mapper.GisDataSetMapper;
+import org.ocean.admin.gis.mapper.GisProcessingTaskFileMapper;
+import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
@@ -20,33 +23,37 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class GisFolderProcessingServiceTest {
+class GisProcessingServiceFolderTest {
 
     @Test
     void submitsArbitraryServerFolderAsOneTerrainTask() throws Exception {
         Path folder = Files.createTempDirectory("gis-server-folder");
         Files.writeString(folder.resolve("dem.tif"), "test");
         GisProcessingStorageService storageService = mock(GisProcessingStorageService.class);
-        GisFolderProcessingTaskService transactionService = mock(GisFolderProcessingTaskService.class);
-        GisFolderProcessingWorker worker = mock(GisFolderProcessingWorker.class);
+        GisProcessingTaskService transactionService = mock(GisProcessingTaskService.class);
+        GisProcessingWorker worker = mock(GisProcessingWorker.class);
         GisFileProcessingEngineRegistry engineRegistry = mock(GisFileProcessingEngineRegistry.class);
         TaskProgressService progressService = mock(TaskProgressService.class);
         GisProcessingWorkspace workspace = new GisProcessingWorkspace(
                 "terrain/folders/TASK", Path.of("tiles"), Path.of("temp"), Path.of("engine.log"));
         when(storageService.folderWorkspace(eq(GisProcessingType.TERRAIN), any()))
                 .thenReturn(workspace);
-        when(transactionService.create(any(), eq(folder.toAbsolutePath().normalize()), eq(workspace)))
+        when(transactionService.createFolder(any(), eq(folder.toAbsolutePath().normalize()), eq(workspace)))
                 .thenAnswer(invocation -> new GisFolderProcessingExecution(
                         10L, invocation.getArgument(0), folder, workspace));
-        GisFolderProcessingService service = new GisFolderProcessingService(
+        GisProcessingService service = new GisProcessingService(
+                mock(GisFileMetaService.class),
+                mock(GisDataSetMapper.class),
+                mock(FileUploadUtil.class),
                 storageService,
                 engineRegistry,
                 transactionService,
                 worker,
+                new GisTaskLifecycleService(mock(GisTaskService.class), progressService),
                 mock(GisTaskService.class),
-                progressService);
+                mock(GisProcessingTaskFileMapper.class));
 
-        GisProcessingTaskVO result = service.submit(folder.toString());
+        GisProcessingTaskVO result = service.submitFolder(folder.toString());
 
         assertEquals(10L, result.getTaskId());
         assertEquals("TERRAIN", result.getProcessingType());
@@ -59,16 +66,20 @@ class GisFolderProcessingServiceTest {
 
     @Test
     void rejectsMissingOrEmptyFolder() throws Exception {
-        GisFolderProcessingService service = new GisFolderProcessingService(
+        GisProcessingService service = new GisProcessingService(
+                mock(GisFileMetaService.class),
+                mock(GisDataSetMapper.class),
+                mock(FileUploadUtil.class),
                 mock(GisProcessingStorageService.class),
                 mock(GisFileProcessingEngineRegistry.class),
-                mock(GisFolderProcessingTaskService.class),
-                mock(GisFolderProcessingWorker.class),
+                mock(GisProcessingTaskService.class),
+                mock(GisProcessingWorker.class),
+                mock(GisTaskLifecycleService.class),
                 mock(GisTaskService.class),
-                mock(TaskProgressService.class));
+                mock(GisProcessingTaskFileMapper.class));
         Path emptyFolder = Files.createTempDirectory("gis-empty-folder");
 
-        assertThrows(IllegalArgumentException.class, () -> service.submit("missing-folder"));
-        assertThrows(IllegalArgumentException.class, () -> service.submit(emptyFolder.toString()));
+        assertThrows(IllegalArgumentException.class, () -> service.submitFolder("missing-folder"));
+        assertThrows(IllegalArgumentException.class, () -> service.submitFolder(emptyFolder.toString()));
     }
 }

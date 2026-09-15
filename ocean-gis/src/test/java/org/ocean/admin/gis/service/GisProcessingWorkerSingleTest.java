@@ -2,6 +2,8 @@ package org.ocean.admin.gis.service;
 
 import org.junit.jupiter.api.Test;
 import org.ocean.admin.gis.entity.GisTask;
+import org.ocean.admin.gis.mapper.GisProcessingTaskFileMapper;
+import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.gis.processing.GisProcessingExecution;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
@@ -19,7 +21,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class GisFileProcessingWorkerTest {
+class GisProcessingWorkerSingleTest {
 
     @Test
     void completesDatabaseAndRealtimeProgressTogether() {
@@ -31,8 +33,10 @@ class GisFileProcessingWorkerTest {
         finished.setTaskStatus("COMPLETED");
         when(registry.require(GisProcessingType.TERRAIN)).thenReturn(engine);
         when(taskService.finish(1L)).thenReturn(finished);
-        GisFileProcessingWorker worker =
-                new GisFileProcessingWorker(registry, taskService, progressService);
+        GisProcessingWorker worker =
+                new GisProcessingWorker(mock(FileUploadUtil.class), registry,
+                        mock(GisProcessingTaskFileMapper.class),
+                        new GisTaskLifecycleService(taskService, progressService));
 
         worker.process(execution());
 
@@ -54,8 +58,10 @@ class GisFileProcessingWorkerTest {
         when(registry.require(GisProcessingType.TERRAIN)).thenReturn(engine);
         doThrow(new IllegalStateException("engine failed"))
                 .when(engine).process(any(), any(Consumer.class));
-        GisFileProcessingWorker worker =
-                new GisFileProcessingWorker(registry, taskService, progressService);
+        GisProcessingWorker worker =
+                new GisProcessingWorker(mock(FileUploadUtil.class), registry,
+                        mock(GisProcessingTaskFileMapper.class),
+                        new GisTaskLifecycleService(taskService, progressService));
 
         worker.process(execution());
 

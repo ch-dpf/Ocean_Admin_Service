@@ -1,10 +1,9 @@
-package org.ocean.admin.gis.service;
+package org.ocean.admin.gis.util;
 
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.dto.GisStagedFile;
 import org.ocean.admin.gis.dto.GisStoredFile;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -17,19 +16,38 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
-/** 文件存储服务。 */
+/** GIS 文件上传的批量校验与文件暂存、转存。 */
 @Slf4j
-@Service
-public class FileStorageService {
+@Component
+public class FileUploadUtil {
 
     private static final long MAX_FILE_SIZE = 500L * 1024 * 1024;
-    private final Path storageRoot;
+    private final UploadPathResolver pathResolver;
 
-    public FileStorageService(@Value("${gis.upload.base-path:uploads/gis}") String basePath) {
-        this.storageRoot = Path.of(basePath).toAbsolutePath().normalize();
+    public FileUploadUtil(UploadPathResolver pathResolver) {
+        this.pathResolver = pathResolver;
+    }
+
+    public static void validateBatch(List<MultipartFile> files, int maxFiles, long maxTotalSize,
+            String countMessage, String emptyFileMessage, String sizeMessage) {
+        if (files == null || files.isEmpty() || files.size() > maxFiles) {
+            throw new IllegalArgumentException(countMessage);
+        }
+        long totalSize = 0;
+        for (MultipartFile file : files) {
+            if (file == null || file.isEmpty()) {
+                throw new IllegalArgumentException(emptyFileMessage);
+            }
+            long fileSize = file.getSize();
+            if (fileSize > maxTotalSize - totalSize) {
+                throw new IllegalArgumentException(sizeMessage);
+            }
+            totalSize += fileSize;
+        }
     }
 
     /** 在 HTTP 请求生命周期内将 MultipartFile 转存到受控临时目录。 */
@@ -65,9 +83,9 @@ public class FileStorageService {
 
     /** 将暂存文件移动到数据集正式目录。 */
     public GisStoredFile commit(String dataSetCode, String taskNo, GisStagedFile stagedFile) {
-        String storageKey = "datasets/" + safeSegment(dataSetCode)
-                + "/" + safeSegment(taskNo)
-                + "/" + safeSegment(stagedFile.getStorageName());
+        String storageKey = "datasets/" + pathResolver.safeSegment(dataSetCode)
+                + "/" + pathResolver.safeSegment(taskNo)
+                + "/" + pathResolver.safeSegment(stagedFile.getStorageName());
         Path source = resolveKey(stagedFile.getStagingKey());
         Path target = resolveKey(storageKey);
         try {
@@ -94,8 +112,8 @@ public class FileStorageService {
 
     /** 将请求期暂存文件转为可供异步处理的持久输入。 */
     public GisStoredFile commitForProcessing(String taskNo, GisStagedFile stagedFile) {
-        String storageKey = "processing/" + safeSegment(taskNo) + "/"
-                + safeSegment(stagedFile.getStorageName());
+        String storageKey = "processing/" + pathResolver.safeSegment(taskNo) + "/"
+                + pathResolver.safeSegment(stagedFile.getStorageName());
         Path source = resolveKey(stagedFile.getStagingKey());
         Path target = resolveKey(storageKey);
         try {
@@ -172,21 +190,7 @@ public class FileStorageService {
     }
 
     private Path resolveKey(String key) {
-        if (key == null || key.isBlank()) {
-            throw new IllegalArgumentException("存储Key不能为空");
-        }
-        Path resolved = storageRoot.resolve(key.replace('/', java.io.File.separatorChar)).normalize();
-        if (!resolved.startsWith(storageRoot)) {
-            throw new IllegalArgumentException("非法存储Key: " + key);
-        }
-        return resolved;
-    }
-
-    private String safeSegment(String value) {
-        if (value == null || !value.matches("[A-Za-z0-9_.-]+")) {
-            throw new IllegalArgumentException("非法存储路径片段: " + value);
-        }
-        return value;
+        return pathResolver.resolveKey(key);
     }
 
     private void delete(Path path) {

@@ -18,7 +18,6 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
@@ -219,10 +218,7 @@ public class TerrainPublicationService {
 
     private GisTask createCompletedPublishTask(GisTask sourceTask, LocalDateTime now) {
         GisTask task = new GisTask();
-        task.setTaskNo("GIS_TERRAIN_PUBLISH_"
-                + now.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")) + "_"
-                + UUID.randomUUID().toString().replace("-", "")
-                .substring(0, 12).toUpperCase(Locale.ROOT));
+        task.setTaskNo(GisTaskFactory.generateTaskNo("GIS_TERRAIN_PUBLISH", now));
         task.setTaskName("发布地形服务：" + sourceTask.getTaskName());
         task.setTaskType(3L);
         task.setPriority(0);

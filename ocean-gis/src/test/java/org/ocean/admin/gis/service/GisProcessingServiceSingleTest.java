@@ -1,16 +1,20 @@
 package org.ocean.admin.gis.service;
 
 import org.junit.jupiter.api.Test;
+import org.ocean.admin.gis.config.FileUploadConfig;
 import org.ocean.admin.gis.dto.GisFileProcessRequest;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
+import org.ocean.admin.gis.mapper.GisProcessingTaskFileMapper;
 import org.ocean.admin.gis.processing.GisProcessingExecution;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngineRegistry;
+import org.ocean.admin.gis.util.FileUploadUtil;
+import org.ocean.admin.gis.util.UploadPathResolver;
 import org.ocean.admin.gis.vo.GisProcessingTaskVO;
 import org.ocean.admin.kernel.task.TaskProgressService;
 
@@ -26,7 +30,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class GisFileProcessingServiceTest {
+class GisProcessingServiceSingleTest {
 
     private final Path tempDir = Path.of("target", "test-work", "file-processing");
 
@@ -36,8 +40,8 @@ class GisFileProcessingServiceTest {
         GisDataSetMapper dataSetMapper = mock(GisDataSetMapper.class);
         GisFileProcessingEngineRegistry registry = mock(GisFileProcessingEngineRegistry.class);
         GisFileProcessingEngine engine = mock(GisFileProcessingEngine.class);
-        GisFileProcessingTaskService transactionService = mock(GisFileProcessingTaskService.class);
-        GisFileProcessingWorker worker = mock(GisFileProcessingWorker.class);
+        GisProcessingTaskService transactionService = mock(GisProcessingTaskService.class);
+        GisProcessingWorker worker = mock(GisProcessingWorker.class);
         GisTaskService taskService = mock(GisTaskService.class);
         TaskProgressService progressService = mock(TaskProgressService.class);
         Path uploadRoot = tempDir.resolve("uploads");
@@ -52,7 +56,7 @@ class GisFileProcessingServiceTest {
         when(metaService.getRequiredEntity(20L)).thenReturn(meta);
         when(dataSetMapper.selectById(10L)).thenReturn(dataSet);
         when(registry.require(GisProcessingType.TERRAIN)).thenReturn(engine);
-        when(transactionService.create(any(), eq(meta), eq(GisProcessingType.TERRAIN),
+        when(transactionService.createSingle(any(), eq(meta), eq(GisProcessingType.TERRAIN),
                 any(Path.class), any())).thenAnswer(invocation -> {
                     String taskNo = invocation.getArgument(0);
                     Path resolvedInput = invocation.getArgument(3);
@@ -61,20 +65,21 @@ class GisFileProcessingServiceTest {
                             30L, taskNo, 20L, GisProcessingType.TERRAIN, resolvedInput, workspace);
                 });
 
-        GisFileProcessingService service = new GisFileProcessingService(
+        GisProcessingService service = new GisProcessingService(
                 metaService,
                 dataSetMapper,
-                new FileStorageService(uploadRoot.toString()),
+                new FileUploadUtil(uploadPathResolver(uploadRoot)),
                 new GisProcessingStorageService(tempDir.resolve("processed").toString()),
                 registry,
                 transactionService,
                 worker,
+                new GisTaskLifecycleService(taskService, progressService),
                 taskService,
-                progressService);
+                mock(GisProcessingTaskFileMapper.class));
         GisFileProcessRequest request = new GisFileProcessRequest();
         request.setProcessingType(GisProcessingType.TERRAIN);
 
-        GisProcessingTaskVO result = service.submit(20L, request);
+        GisProcessingTaskVO result = service.submitSingle(20L, request);
 
         assertEquals(30L, result.getTaskId());
         assertEquals("TERRAIN", result.getProcessingType());
@@ -96,20 +101,21 @@ class GisFileProcessingServiceTest {
         dataSet.setCategoryId(0L);
         when(metaService.getRequiredEntity(20L)).thenReturn(meta);
         when(dataSetMapper.selectById(10L)).thenReturn(dataSet);
-        GisFileProcessingService service = new GisFileProcessingService(
+        GisProcessingService service = new GisProcessingService(
                 metaService,
                 dataSetMapper,
-                mock(FileStorageService.class),
+                mock(FileUploadUtil.class),
                 mock(GisProcessingStorageService.class),
                 registry,
-                mock(GisFileProcessingTaskService.class),
-                mock(GisFileProcessingWorker.class),
+                mock(GisProcessingTaskService.class),
+                mock(GisProcessingWorker.class),
+                mock(GisTaskLifecycleService.class),
                 mock(GisTaskService.class),
-                mock(TaskProgressService.class));
+                mock(GisProcessingTaskFileMapper.class));
         GisFileProcessRequest request = new GisFileProcessRequest();
         request.setProcessingType(GisProcessingType.TERRAIN);
 
-        assertThrows(IllegalArgumentException.class, () -> service.submit(20L, request));
+        assertThrows(IllegalArgumentException.class, () -> service.submitSingle(20L, request));
         verify(registry, never()).require(any());
     }
 
@@ -124,5 +130,11 @@ class GisFileProcessingServiceTest {
         meta.setExtension("tif");
         meta.setUploadStatus("READY");
         return meta;
+    }
+
+    private UploadPathResolver uploadPathResolver(Path uploadRoot) {
+        FileUploadConfig config = new FileUploadConfig();
+        config.setBasePath(uploadRoot.toString());
+        return new UploadPathResolver(config);
     }
 }
