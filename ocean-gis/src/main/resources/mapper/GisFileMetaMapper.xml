@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisFileMetaMapper">
+
+    <select id="selectDeletedPage" resultType="org.ocean.admin.gis.vo.GisFileMetaVO">
+        SELECT fm.id,
+               fm.data_set_id,
+               ds.category_id,
+               fm.task_id,
+               fm.original_name,
+               fm.storage_name,
+               fm.storage_key,
+
+
+
+               fm.extension,
+               fm.size_bytes,
+               fm.sha256,
+               fm.uploaded_by,
+               fm.upload_status,
+               fm.error_message,
+               fm.create_time,
+               fm.update_time,
+               fm.deleted
+        FROM ocean_gis.gis_file_meta fm
+        LEFT JOIN ocean_gis.gis_data_set ds ON ds.id = fm.data_set_id
+        WHERE fm.deleted = 1
+        <if test="dataSetId != null">
+            AND fm.data_set_id = #{dataSetId}
+        </if>
+        <if test="categoryId != null">
+            AND ds.category_id = #{categoryId}
+        </if>
+        <if test="taskId != null">
+            AND fm.task_id = #{taskId}
+        </if>
+        <if test="originalName != null">
+            AND fm.original_name LIKE CONCAT('%', #{originalName}, '%')
+        </if>
+        <if test="extension != null">
+            AND fm.extension = #{extension}
+        </if>
+        <if test="uploadStatus != null">
+            AND fm.upload_status = #{uploadStatus}
+        </if>
+        ORDER BY fm.create_time DESC
+    </select>
+
+</mapper>

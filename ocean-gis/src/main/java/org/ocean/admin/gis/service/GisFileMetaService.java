@@ -45,7 +45,6 @@ public class GisFileMetaService {
             Long dataSetId,
             Long categoryId,
             Long taskId,
-            Integer deleted,
             String originalName,
             String extension,
             String uploadStatus) {
@@ -65,7 +64,6 @@ public class GisFileMetaService {
                                 + "WHERE category_id = {0} AND deleted = 0)",
                         categoryId)
                 .eq(taskId != null, GisFileMeta::getTaskId, taskId)
-                .eq(deleted != null, GisFileMeta::getDeleted, deleted)
                 .like(normalizedName != null, GisFileMeta::getOriginalName, normalizedName)
                 .eq(normalizedExtension != null, GisFileMeta::getExtension, normalizedExtension)
                 .eq(normalizedStatus != null, GisFileMeta::getUploadStatus, normalizedStatus)
@@ -74,6 +72,35 @@ public class GisFileMetaService {
         List<GisFileMetaVO> records = page.getRecords().stream().map(this::toVO).toList();
         populateCategoryIds(records);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), records);
+    }
+
+    public PageResult<List<GisFileMetaVO>> getDeletedFileMetaPage(
+            Integer current,
+            Integer size,
+            Long dataSetId,
+            Long categoryId,
+            Long taskId,
+            String originalName,
+            String extension,
+            String uploadStatus) {
+        long currentPage = current == null || current < 1 ? 1L : current;
+        long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
+        String normalizedName = trimToNull(originalName);
+        String normalizedExtension = normalizeExtension(extension);
+        String normalizedStatus = normalizeUpper(uploadStatus);
+        if (normalizedStatus != null && !UPLOAD_STATUSES.contains(normalizedStatus)) {
+            throw new IllegalArgumentException("上传状态只能为 PENDING、READY 或 FAILED");
+        }
+
+        Page<GisFileMetaVO> page = gisFileMetaMapper.selectDeletedPage(
+                new Page<>(currentPage, pageSize),
+                dataSetId,
+                categoryId,
+                taskId,
+                normalizedName,
+                normalizedExtension,
+                normalizedStatus);
+        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
     }
 
     @Transactional(rollbackFor = Exception.class)

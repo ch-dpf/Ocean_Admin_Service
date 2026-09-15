@@ -33,6 +33,21 @@ public class GisProcessingStorageService {
                 taskRoot.resolve("logs").resolve("engine.log"));
     }
 
+    /** 为不依赖文件元数据的服务器目录切片任务创建工作目录。 */
+    public GisProcessingWorkspace folderWorkspace(GisProcessingType type, String taskNo) {
+        if (type == null || taskNo == null || !taskNo.matches("[A-Za-z0-9_.-]+")) {
+            throw new IllegalArgumentException("无法创建非法的 GIS 目录处理工作目录");
+        }
+        String outputKey = type.name().toLowerCase(Locale.ROOT)
+                + "/folders/" + taskNo;
+        Path taskRoot = resolve(outputKey);
+        return new GisProcessingWorkspace(
+                outputKey,
+                taskRoot.resolve("tiles"),
+                taskRoot.resolve("temp"),
+                taskRoot.resolve("logs").resolve("engine.log"));
+    }
+
     /** 将数据库中的产物 Key 安全解析到切片目录。 */
     public Path resolveTiles(String outputKey) {
         if (outputKey == null || outputKey.isBlank()) {

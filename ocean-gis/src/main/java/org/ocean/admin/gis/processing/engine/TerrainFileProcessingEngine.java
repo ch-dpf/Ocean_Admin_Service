@@ -2,6 +2,7 @@ package org.ocean.admin.gis.processing.engine;
 
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.processing.GisProcessingExecution;
+import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.terrain.engine.TerrainEngine;
 import org.ocean.admin.gis.terrain.engine.TerrainGenerationRequest;
@@ -46,6 +47,21 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
                         execution.workspace().outputPath(),
                         execution.workspace().tempPath(),
                         execution.workspace().logPath(),
+                        TerrainOptions.defaults()),
+                outputListener::accept);
+    }
+
+    @Override
+    public void processFolder(
+            Path inputFolder,
+            GisProcessingWorkspace workspace,
+            Consumer<String> outputListener) {
+        terrainEngine.generate(
+                new TerrainGenerationRequest(
+                        java.util.List.of(inputFolder),
+                        workspace.outputPath(),
+                        workspace.tempPath(),
+                        workspace.logPath(),
                         TerrainOptions.defaults()),
                 outputListener::accept);
     }

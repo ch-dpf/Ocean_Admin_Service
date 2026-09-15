@@ -56,4 +56,23 @@ class TerrainFileProcessingEngineTest {
         assertThrows(IllegalArgumentException.class,
                 () -> engine.validate(meta, tempDir.resolve("height.png")));
     }
+
+    @Test
+    void adaptsServerFolderToTerrainEngineRequest() {
+        TerrainEngine terrainEngine = mock(TerrainEngine.class);
+        TerrainFileProcessingEngine engine = new TerrainFileProcessingEngine(terrainEngine);
+        Path inputFolder = tempDir.resolve("dem-folder");
+        GisProcessingWorkspace workspace = new GisProcessingWorkspace(
+                "terrain/folders/task", tempDir.resolve("tiles"),
+                tempDir.resolve("temp"), tempDir.resolve("engine.log"));
+
+        engine.processFolder(inputFolder, workspace, line -> { });
+
+        ArgumentCaptor<TerrainGenerationRequest> requestCaptor =
+                ArgumentCaptor.forClass(TerrainGenerationRequest.class);
+        verify(terrainEngine).generate(requestCaptor.capture(), any(TerrainProgressListener.class));
+        TerrainGenerationRequest request = requestCaptor.getValue();
+        assertEquals(java.util.List.of(inputFolder), request.inputPaths());
+        assertEquals(workspace.outputPath(), request.outputPath());
+    }
 }

@@ -1,12 +1,14 @@
 package org.ocean.admin.gis.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisTask;
 import org.ocean.admin.gis.entity.GisTerrainPublication;
 import org.ocean.admin.gis.mapper.GisTerrainPublicationMapper;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.vo.GisTerrainPublicationVO;
+import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,7 +20,9 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
@@ -31,6 +35,7 @@ public class TerrainPublicationService {
     private static final String PUBLISHED = "PUBLISHED";
     private static final String DISABLED = "DISABLED";
     private static final String TERRAIN_PREFIX = "terrain/";
+    private static final Set<String> PUBLICATION_STATUSES = Set.of(PUBLISHED, DISABLED);
 
     private final GisTerrainPublicationMapper publicationMapper;
     private final GisTaskService gisTaskService;
@@ -39,6 +44,52 @@ public class TerrainPublicationService {
 
     @Value("${gis.publication.public-base-url:http://localhost:8090}")
     private String publicBaseUrl;
+
+    public PageResult<List<GisTerrainPublicationVO>> getPublicationPage(
+            Integer current,
+            Integer size,
+            String serviceCode,
+            String status,
+            Long dataSetId,
+            LocalDateTime publishTimeStart,
+            LocalDateTime publishTimeEnd) {
+        long currentPage = current == null || current < 1 ? 1L : current;
+        long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
+        String normalizedServiceCode = trimToNull(serviceCode);
+        if (normalizedServiceCode != null) {
+            normalizedServiceCode = normalizedServiceCode.toUpperCase(Locale.ROOT);
+        }
+        String normalizedStatus = trimToNull(status);
+        if (normalizedStatus != null) {
+            normalizedStatus = normalizedStatus.toUpperCase(Locale.ROOT);
+        }
+        if (normalizedStatus != null && !PUBLICATION_STATUSES.contains(normalizedStatus)) {
+            throw new IllegalArgumentException("发布状态只能为 PUBLISHED 或 DISABLED");
+        }
+        if (publishTimeStart != null && publishTimeEnd != null
+                && publishTimeStart.isAfter(publishTimeEnd)) {
+            throw new IllegalArgumentException("发布开始时间不能晚于发布结束时间");
+        }
+
+        LambdaQueryWrapper<GisTerrainPublication> query =
+                new LambdaQueryWrapper<GisTerrainPublication>()
+                        .like(normalizedServiceCode != null,
+                                GisTerrainPublication::getServiceCode, normalizedServiceCode)
+                        .eq(normalizedStatus != null,
+                                GisTerrainPublication::getStatus, normalizedStatus)
+                        .eq(dataSetId != null, GisTerrainPublication::getDataSetId, dataSetId)
+                        .ge(publishTimeStart != null,
+                                GisTerrainPublication::getPublishTime, publishTimeStart)
+                        .le(publishTimeEnd != null,
+                                GisTerrainPublication::getPublishTime, publishTimeEnd)
+                        .orderByDesc(GisTerrainPublication::getPublishTime);
+        Page<GisTerrainPublication> page = publicationMapper.selectPage(
+                new Page<>(currentPage, pageSize), query);
+        List<GisTerrainPublicationVO> records = page.getRecords().stream()
+                .map(this::toVO)
+                .toList();
+        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), records);
+    }
 
     @Transactional(rollbackFor = Exception.class)
     public GisTerrainPublicationVO publish(Long sourceTaskId) {
@@ -206,6 +257,14 @@ public class TerrainPublicationService {
             throw new IllegalArgumentException("非法地形服务编码");
         }
         return serviceCode.toUpperCase(Locale.ROOT);
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private GisTerrainPublicationVO toVO(GisTerrainPublication publication) {

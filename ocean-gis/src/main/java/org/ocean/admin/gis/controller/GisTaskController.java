@@ -6,7 +6,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.service.FileUploadService;
+import org.ocean.admin.gis.service.GisFolderProcessingService;
 import org.ocean.admin.gis.service.GisTaskService;
+import org.ocean.admin.gis.vo.GisProcessingTaskVO;
 import org.ocean.admin.gis.vo.GisTaskVO;
 import org.ocean.admin.gis.vo.GisUploadTaskVO;
 import org.ocean.admin.kernel.common.PageResult;
@@ -36,6 +38,7 @@ public class GisTaskController {
 
     private final FileUploadService fileUploadService;
     private final GisTaskService gisTaskService;
+    private final GisFolderProcessingService gisFolderProcessingService;
 
     @GetMapping("/page")
     @Operation(summary = "分页条件查询 GIS 任务")
@@ -78,5 +81,17 @@ public class GisTaskController {
             @Parameter(description = "文件列表", required = true)  @RequestPart("files") List<MultipartFile> files){
         return ResponseResult.success(
                 fileUploadService.createUploadTask(dataSetId, files));
+    }
+
+    @PostMapping("/process-folder")
+    @Operation(summary = "提交服务器文件夹切片任务",
+            description = "将服务器任意目录作为一个整体输入，异步处理目录下的所有地形文件")
+    @OperationLog(module = "GIS_TASK", type = OperationType.SUBMIT,
+            description = "提交GIS服务器文件夹切片任务", recordResponse = true)
+    public ResponseResult<GisProcessingTaskVO> processFolder(
+            @Parameter(description = "服务器文件夹路径", required = true)
+            @RequestParam("folderPath") String folderPath) {
+        return ResponseResult.success("文件夹处理任务已提交",
+                gisFolderProcessingService.submit(folderPath));
     }
 }
