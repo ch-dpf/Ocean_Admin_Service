@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisImportExportRecordMapper">
+
+    <sql id="recordColumns">
+        r.id,
+        r.record_no,
+        r.operation_type,
+        r.data_set_id,
+        ds.data_set_name,
+        ds.category_id,
+        r.total_count,
+        r.completed_count,
+        r.failed_count,
+        r.record_status,
+        r.current_stage,
+        r.result_storage_key,
+        r.error_message,
+        r.operator_id,
+        r.version,
+        CASE
+            WHEN r.total_count = 0 THEN 0
+            ELSE CAST(((r.completed_count + r.failed_count) * 100) / r.total_count AS INTEGER)
+        END AS progress,
+        r.start_time,
+        r.finish_time,
+        r.create_time,
+        r.update_time
+    </sql>
+
+    <select id="selectImportRecordPage" resultType="org.ocean.admin.gis.vo.GisFileOptRecordVO">
+        SELECT <include refid="recordColumns"/>
+        FROM ocean_gis.gis_import_export_record r
+        JOIN ocean_gis.gis_data_set ds ON ds.id = r.data_set_id
+        WHERE r.deleted = 0
+          AND r.operation_type = 'IMPORT'
+        <if test="dataSetId != null">
+            AND r.data_set_id = #{dataSetId}
+        </if>
+        <if test="categoryId != null">
+            AND ds.category_id = #{categoryId}
+        </if>
+        <if test="recordNo != null">
+            AND r.record_no LIKE CONCAT('%', #{recordNo}, '%')
+        </if>
+        <if test="recordStatus != null">
+            AND r.record_status = #{recordStatus}
+        </if>
+        <if test="createTimeStart != null">
+            AND r.create_time &gt;= #{createTimeStart}
+        </if>
+        <if test="createTimeEnd != null">
+            AND r.create_time &lt;= #{createTimeEnd}
+        </if>
+        <if test="originalName != null or extension != null or uploadStatus != null">
+            AND EXISTS (
+                SELECT 1
+                FROM ocean_gis.gis_file_meta fm
+                WHERE fm.import_export_record_id = r.id
+                  AND fm.deleted = 0
+                <if test="originalName != null">
+                    AND fm.original_name LIKE CONCAT('%', #{originalName}, '%')
+                </if>
+                <if test="extension != null">
+                    AND fm.extension = #{extension}
+                </if>
+                <if test="uploadStatus != null">
+                    AND fm.upload_status = #{uploadStatus}
+                </if>
+            )
+        </if>
+        ORDER BY r.create_time DESC, r.id DESC
+    </select>
+
+    <select id="selectImportRecordByNo" resultType="org.ocean.admin.gis.vo.GisFileOptRecordVO">
+        SELECT <include refid="recordColumns"/>
+        FROM ocean_gis.gis_import_export_record r
+        JOIN ocean_gis.gis_data_set ds ON ds.id = r.data_set_id
+        WHERE r.deleted = 0
+          AND r.operation_type = 'IMPORT'
+          AND r.record_no = #{recordNo}
+    </select>
+
+</mapper>

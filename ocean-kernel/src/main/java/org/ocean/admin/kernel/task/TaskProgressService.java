@@ -8,7 +8,18 @@ package org.ocean.admin.kernel.task;
 public interface TaskProgressService {
 
     /** 使用业务侧稳定任务编号注册进度任务。 */
-    String registerTask(String taskId, String taskName, int totalCount, String taskType);
+    default String registerTask(String taskId, String taskName, int totalCount, String taskType) {
+        return registerTask(taskId, taskName, totalCount, taskType, 0, 0);
+    }
+
+    /** 使用已有成功、失败计数注册进度任务。 */
+    String registerTask(
+            String taskId,
+            String taskName,
+            int totalCount,
+            String taskType,
+            int completedCount,
+            int failedCount);
 
     /** 上报一个工作项的处理结果。 */
     void updateProgress(String taskId, boolean success);

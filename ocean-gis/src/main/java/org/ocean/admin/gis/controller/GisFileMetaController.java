@@ -105,7 +105,7 @@ public class GisFileMetaController {
             @Parameter(description = "文件列表", required = true)
             @RequestPart("files") List<MultipartFile> files){
         return ResponseResult.success(
-                gisFileService.createImportBatchTask(dataSetId, files));
+                gisFileService.importBatch(dataSetId, files));
     }
 
     @PostMapping("/{id}/process")

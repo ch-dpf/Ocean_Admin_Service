@@ -105,13 +105,27 @@ public class AsyncTaskService implements TaskProgressService {
      */
     @Override
     public String registerTask(String taskId, String taskName, int totalCount, String taskType) {
+        return registerTask(taskId, taskName, totalCount, taskType, 0, 0);
+    }
+
+    @Override
+    public String registerTask(
+            String taskId,
+            String taskName,
+            int totalCount,
+            String taskType,
+            int completedCount,
+            int failedCount) {
         if (taskId == null || taskId.isBlank()) {
             throw new IllegalArgumentException("任务ID不能为空");
         }
         if (totalCount < 1) {
             throw new IllegalArgumentException("任务总数必须大于0");
         }
-        initializeTask(taskId, taskName, totalCount, taskType, null, null);
+        if (completedCount < 0 || failedCount < 0 || completedCount + failedCount > totalCount) {
+            throw new IllegalArgumentException("任务初始计数不合法");
+        }
+        initializeTask(taskId, taskName, totalCount, taskType, null, null, completedCount, failedCount);
         return taskId;
     }
 
@@ -121,12 +135,23 @@ public class AsyncTaskService implements TaskProgressService {
                                 String taskType,
                                 String fileType,
                                 Long fileId) {
+        initializeTask(taskId, taskName, totalCount, taskType, fileType, fileId, 0, 0);
+    }
+
+    private void initializeTask(String taskId,
+                                String taskName,
+                                int totalCount,
+                                String taskType,
+                                String fileType,
+                                Long fileId,
+                                int completedCount,
+                                int failedCount) {
         TaskInfo taskInfo = new TaskInfo();
         taskInfo.setTaskId(taskId);
         taskInfo.setTaskName(taskName);
         taskInfo.setTotalCount(totalCount);
-        taskInfo.setCompletedCount(0);
-        taskInfo.setFailedCount(0);
+        taskInfo.setCompletedCount(completedCount);
+        taskInfo.setFailedCount(failedCount);
         taskInfo.setStatus("running");
         taskInfo.setStartTime(LocalDateTime.now());
         taskInfo.setTaskType(taskType != null ? taskType : "GENERAL");

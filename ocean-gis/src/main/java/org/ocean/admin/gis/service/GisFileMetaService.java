@@ -119,6 +119,7 @@ public class GisFileMetaService {
         GisFileMeta meta = new GisFileMeta();
         applyEditableFields(meta, reqVO, storageType, storageKey);
         meta.setUploadStatus(defaultStatus(reqVO.getUploadStatus()));
+        meta.setCleanupStatus("NOT_REQUIRED");
         meta.setCreateTime(now);
         meta.setUpdateTime(now);
         meta.setDeleted(0);
@@ -149,6 +150,8 @@ public class GisFileMetaService {
         GisFileMeta updatedMeta = new GisFileMeta();
         updatedMeta.setId(existing.getId());
         applyEditableFields(updatedMeta, reqVO, storageType, storageKey);
+        updatedMeta.setImportExportRecordId(existing.getImportExportRecordId());
+        updatedMeta.setCleanupStatus(existing.getCleanupStatus());
         String requestedStatus = normalizeUpper(reqVO.getUploadStatus());
         updatedMeta.setUploadStatus(requestedStatus == null ? existing.getUploadStatus() : requestedStatus);
         updatedMeta.setUpdateTime(LocalDateTime.now());
@@ -296,6 +299,7 @@ public class GisFileMetaService {
         result.setId(meta.getId());
         result.setDataSetId(meta.getDataSetId());
         result.setTaskId(meta.getTaskId());
+        result.setImportExportRecordId(meta.getImportExportRecordId());
         result.setOriginalName(meta.getOriginalName());
         result.setStorageName(meta.getStorageName());
         result.setStorageKey(meta.getStorageKey());
@@ -305,6 +309,7 @@ public class GisFileMetaService {
         result.setSha256(meta.getSha256());
         result.setUploadedBy(meta.getUploadedBy());
         result.setUploadStatus(meta.getUploadStatus());
+        result.setCleanupStatus(meta.getCleanupStatus());
         result.setErrorMessage(meta.getErrorMessage());
         result.setCreateTime(meta.getCreateTime());
         result.setUpdateTime(meta.getUpdateTime());
@@ -389,6 +394,7 @@ public class GisFileMetaService {
             meta.setSizeBytes(staged.getSizeBytes());
             meta.setSha256(staged.getSha256());
             meta.setUploadStatus("PENDING");
+            meta.setCleanupStatus("NOT_REQUIRED");
             meta.setCreateTime(now);
             meta.setUpdateTime(now);
             meta.setDeleted(0);
