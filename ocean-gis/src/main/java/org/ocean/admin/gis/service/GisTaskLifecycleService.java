@@ -2,7 +2,6 @@ package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisTask;
-import org.ocean.admin.kernel.task.TaskProgressService;
 import org.springframework.stereotype.Service;
 
 import java.util.function.Function;
@@ -12,7 +11,7 @@ import java.util.function.Function;
 @RequiredArgsConstructor
 public class GisTaskLifecycleService {
     private final GisTaskService taskService;
-    private final TaskProgressService progressService;
+    private final AsyncTaskService progressService;
 
     public void dispatch(Long taskId, String taskNo, String taskName, int totalCount,
             String progressType, Runnable workerDispatch, String failureMessage) {

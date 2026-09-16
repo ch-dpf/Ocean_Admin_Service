@@ -21,12 +21,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 @Slf4j
 @Component
-public class TaskProgressWebSocketHandler extends TextWebSocketHandler {
+public class TaskWebSocketHandler extends TextWebSocketHandler {
 
     // 存储所有连接的会话
     private static final List<WebSocketSession> sessions = new CopyOnWriteArrayList<>();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         sessions.add(session);

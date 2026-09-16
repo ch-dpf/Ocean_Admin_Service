@@ -25,15 +25,18 @@ public class GisFileMetaVO {
     @Schema(description = "所属上传任务 ID")
     private Long taskId;
 
+    @Schema(description = "关联的文件导入导出记录 ID", accessMode = Schema.AccessMode.READ_ONLY)
+    private Long importExportRecordId;
+
     @Schema(description = "用户上传时的文件名", requiredMode = Schema.RequiredMode.REQUIRED)
     @Size(max = 255, message = "原始文件名长度不能超过255个字符")
     private String originalName;
 
-    @Schema(description = "系统存储文件名", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "系统存储文件名；失败且尚未形成存储对象时为空")
     @Size(max = 255, message = "存储文件名长度不能超过255个字符")
     private String storageName;
 
-    @Schema(description = "相对存储路径或对象存储 Key", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "相对存储路径或对象存储 Key；失败且尚未形成存储对象时为空")
     @Size(max = 1000, message = "存储 Key 长度不能超过1000个字符")
     private String storageKey;
 
@@ -59,6 +62,11 @@ public class GisFileMetaVO {
     @Schema(description = "上传状态", allowableValues = {"PENDING", "READY", "FAILED"}, example = "READY")
     @Pattern(regexp = "(?i)PENDING|READY|FAILED", message = "上传状态只能为 PENDING、READY 或 FAILED")
     private String uploadStatus;
+
+    @Schema(description = "失败文件资源清理状态",
+            allowableValues = {"NOT_REQUIRED", "PENDING", "COMPLETED", "FAILED"},
+            accessMode = Schema.AccessMode.READ_ONLY)
+    private String cleanupStatus;
 
     @Schema(description = "处理错误信息")
     @Size(max = 1000, message = "错误信息长度不能超过1000个字符")

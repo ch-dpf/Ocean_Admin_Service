@@ -61,7 +61,7 @@ public class GisProcessingTaskService {
     public GisFolderProcessingExecution createFolder(
             String taskNo, Path inputFolder, GisProcessingWorkspace workspace) {
         GisTask task = GisTaskFactory.queued(taskNo,
-                "地形目录处理：" + GisProcessingService.displayName(inputFolder),
+                "地形目录处理：" + ProcessingService.displayName(inputFolder),
                 2L, 1L, "QUEUED");
         task.setProcessingType(GisProcessingType.TERRAIN.name());
         task.setOutputKey(workspace.outputKey());

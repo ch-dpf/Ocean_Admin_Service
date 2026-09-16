@@ -7,12 +7,17 @@ import org.apache.ibatis.annotations.Param;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 
+import java.util.List;
+
 /**
  * @author DeepOcean
  * @since 2026-09-11
  */
 @Mapper
 public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
+
+    /** 使用单条 SQL 批量写入文件元数据。 */
+    int insertBatch(@Param("records") List<GisFileMeta> records);
 
     /**
      * 分页查询已逻辑删除的文件元数据。

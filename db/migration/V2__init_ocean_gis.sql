@@ -42,26 +42,101 @@ CREATE INDEX idx_gis_data_set_create_time
 
 
 -- =========================================================
+-- GIS 文件导入导出记录
+-- =========================================================
+
+CREATE TABLE ocean_gis.gis_import_export_record (
+    id                  BIGINT        PRIMARY KEY,
+    record_no           VARCHAR(64)   NOT NULL,
+    operation_type      VARCHAR(16)   NOT NULL,
+    data_set_id         BIGINT        NOT NULL,
+    total_count         INTEGER       NOT NULL DEFAULT 0,
+    completed_count     INTEGER       NOT NULL DEFAULT 0,
+    failed_count        INTEGER       NOT NULL DEFAULT 0,
+    record_status       VARCHAR(20)   NOT NULL DEFAULT 'QUEUED',
+    current_stage       VARCHAR(32),
+    result_storage_key  VARCHAR(1000),
+    error_message       VARCHAR(1000),
+    operator_id         BIGINT,
+    version             BIGINT        NOT NULL DEFAULT 0,
+    start_time          TIMESTAMP,
+    finish_time         TIMESTAMP,
+    create_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted             INTEGER       NOT NULL DEFAULT 0,
+    CONSTRAINT uk_gis_import_export_record_no
+        UNIQUE (record_no),
+    CONSTRAINT fk_gis_import_export_record_data_set
+        FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id),
+    CONSTRAINT ck_gis_import_export_record_operation
+        CHECK (operation_type IN ('IMPORT', 'EXPORT')),
+    CONSTRAINT ck_gis_import_export_record_status
+        CHECK (record_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'PARTIAL_FAILED', 'FAILED')),
+    CONSTRAINT ck_gis_import_export_record_counts
+        CHECK (
+            total_count >= 0
+            AND completed_count >= 0
+            AND failed_count >= 0
+            AND completed_count + failed_count <= total_count
+        ),
+    CONSTRAINT ck_gis_import_export_record_version
+        CHECK (version >= 0),
+    CONSTRAINT ck_gis_import_export_record_timing
+        CHECK (
+            (record_status = 'QUEUED' AND finish_time IS NULL)
+            OR (record_status = 'RUNNING' AND start_time IS NOT NULL AND finish_time IS NULL)
+            OR (
+                record_status IN ('COMPLETED', 'PARTIAL_FAILED', 'FAILED')
+                AND start_time IS NOT NULL
+                AND finish_time IS NOT NULL
+                AND completed_count + failed_count = total_count
+            )
+        ),
+    CONSTRAINT ck_gis_import_export_record_deleted
+        CHECK (deleted IN (0, 1))
+);
+
+COMMENT ON TABLE ocean_gis.gis_import_export_record IS 'GIS 文件导入导出记录';
+COMMENT ON COLUMN ocean_gis.gis_import_export_record.record_no IS '对外暴露的稳定导入导出记录编号';
+COMMENT ON COLUMN ocean_gis.gis_import_export_record.operation_type IS '操作类型：IMPORT-导入，EXPORT-导出';
+COMMENT ON COLUMN ocean_gis.gis_import_export_record.record_status IS '记录状态：QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED';
+COMMENT ON COLUMN ocean_gis.gis_import_export_record.result_storage_key IS '导出结果的相对存储路径或对象存储 Key';
+COMMENT ON COLUMN ocean_gis.gis_import_export_record.version IS '状态版本号，用于进度快照与实时事件合并';
+
+CREATE INDEX idx_gis_import_export_record_data_set
+    ON ocean_gis.gis_import_export_record (data_set_id, operation_type, create_time DESC)
+    WHERE deleted = 0;
+
+CREATE INDEX idx_gis_import_export_record_status
+    ON ocean_gis.gis_import_export_record (record_status, create_time)
+    WHERE deleted = 0;
+
+
+-- =========================================================
 -- GIS 文件元数据
 -- =========================================================
 
 CREATE TABLE ocean_gis.gis_file_meta (
-    id              BIGINT        PRIMARY KEY,
-    data_set_id     BIGINT        NOT NULL,
-    original_name   VARCHAR(255)  NOT NULL,
-    storage_name    VARCHAR(255)  NOT NULL,
-    storage_key     VARCHAR(1000) NOT NULL,
-    storage_type    VARCHAR(20)   NOT NULL DEFAULT 'LOCAL',
-    extension       VARCHAR(32),
-    size_bytes      BIGINT        NOT NULL DEFAULT 0,
-    sha256          VARCHAR(64),
-    uploaded_by     BIGINT,
-    task_id         BIGINT,
-    upload_status   VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
-    error_message   VARCHAR(1000),
-    create_time     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted         INTEGER       NOT NULL DEFAULT 0,
+    id                       BIGINT        PRIMARY KEY,
+    data_set_id              BIGINT        NOT NULL,
+    import_export_record_id  BIGINT,
+    original_name            VARCHAR(255)  NOT NULL,
+    storage_name             VARCHAR(255),
+    storage_key              VARCHAR(1000),
+    storage_type             VARCHAR(20)   NOT NULL DEFAULT 'LOCAL',
+    extension                VARCHAR(32),
+    size_bytes               BIGINT        NOT NULL DEFAULT 0,
+    sha256                   VARCHAR(64),
+    uploaded_by              BIGINT,
+    task_id                  BIGINT,
+    upload_status            VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
+    cleanup_status           VARCHAR(20)   NOT NULL DEFAULT 'NOT_REQUIRED',
+    error_message            VARCHAR(1000),
+    create_time              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                  INTEGER       NOT NULL DEFAULT 0,
+    CONSTRAINT fk_gis_file_meta_import_export_record
+        FOREIGN KEY (import_export_record_id) REFERENCES ocean_gis.gis_import_export_record (id),
     CONSTRAINT ck_gis_file_meta_storage_type
         CHECK (storage_type IN ('LOCAL', 'MINIO', 'S3')),
     CONSTRAINT ck_gis_file_meta_size
@@ -69,12 +144,30 @@ CREATE TABLE ocean_gis.gis_file_meta (
     CONSTRAINT ck_gis_file_meta_deleted
         CHECK (deleted IN (0, 1)),
     CONSTRAINT ck_gis_file_meta_upload_status
-        CHECK (upload_status IN ('PENDING', 'READY', 'FAILED'))
+        CHECK (upload_status IN ('PENDING', 'READY', 'FAILED')),
+    CONSTRAINT ck_gis_file_meta_cleanup_status
+        CHECK (cleanup_status IN ('NOT_REQUIRED', 'PENDING', 'COMPLETED', 'FAILED')),
+    CONSTRAINT ck_gis_file_meta_storage_required
+        CHECK (upload_status = 'FAILED' OR (storage_name IS NOT NULL AND storage_key IS NOT NULL)),
+    CONSTRAINT ck_gis_file_meta_cleanup_upload_status
+        CHECK (upload_status = 'FAILED' OR cleanup_status = 'NOT_REQUIRED'),
+    CONSTRAINT ck_gis_file_meta_cleanup_pending_key
+        CHECK (
+            cleanup_status NOT IN ('PENDING', 'FAILED')
+            OR (upload_status = 'FAILED' AND storage_key IS NOT NULL)
+        ),
+    CONSTRAINT ck_gis_file_meta_cleanup_completed
+        CHECK (
+            cleanup_status <> 'COMPLETED'
+            OR (upload_status = 'FAILED' AND storage_key IS NULL)
+        )
 );
 
 COMMENT ON TABLE ocean_gis.gis_file_meta IS 'GIS 文件元数据';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_key IS '相对存储路径或对象存储 Key';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_type IS '存储类型：LOCAL、MINIO 或 S3';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.import_export_record_id IS '关联的文件导入导出记录 ID';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.cleanup_status IS '失败文件资源清理状态：NOT_REQUIRED、PENDING、COMPLETED、FAILED';
 
 CREATE UNIQUE INDEX uk_gis_file_meta_active_storage
     ON ocean_gis.gis_file_meta (storage_type, storage_key)
@@ -91,6 +184,10 @@ CREATE INDEX idx_gis_file_meta_sha256
 CREATE INDEX idx_gis_file_meta_task
     ON ocean_gis.gis_file_meta (task_id, create_time)
     WHERE deleted = 0 AND task_id IS NOT NULL;
+
+CREATE INDEX idx_gis_file_meta_import_export_record
+    ON ocean_gis.gis_file_meta (import_export_record_id, create_time)
+    WHERE deleted = 0 AND import_export_record_id IS NOT NULL;
 
 
 -- =========================================================

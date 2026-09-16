@@ -21,7 +21,7 @@ import java.nio.file.Path;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class GisProcessingWorker {
+public class ProcessingWorker {
     private final FileUploadUtil fileUploadUtil;
     private final GisFileProcessingEngineRegistry engineRegistry;
     private final GisProcessingTaskFileMapper fileMapper;

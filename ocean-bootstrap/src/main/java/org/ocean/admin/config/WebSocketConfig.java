@@ -1,7 +1,7 @@
 package org.ocean.admin.config;
 
 import org.ocean.admin.platform.workbench.websocket.SystemMetricsWebSocketHandler;
-import org.ocean.admin.gis.websocket.TaskProgressWebSocketHandler;
+import org.ocean.admin.gis.websocket.TaskWebSocketHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
@@ -15,12 +15,12 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final SystemMetricsWebSocketHandler systemMetricsWebSocketHandler;
-    private final TaskProgressWebSocketHandler taskProgressWebSocketHandler;
+    private final TaskWebSocketHandler taskWebSocketHandler;
 
     public WebSocketConfig(SystemMetricsWebSocketHandler systemMetricsWebSocketHandler,
-                           TaskProgressWebSocketHandler taskProgressWebSocketHandler) {
+                           TaskWebSocketHandler taskWebSocketHandler) {
         this.systemMetricsWebSocketHandler = systemMetricsWebSocketHandler;
-        this.taskProgressWebSocketHandler = taskProgressWebSocketHandler;
+        this.taskWebSocketHandler = taskWebSocketHandler;
     }
 
     @Override
@@ -29,7 +29,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
         registry.addHandler(systemMetricsWebSocketHandler, "/ws/system-metrics")
                 .setAllowedOriginPatterns("*");
         // 注册任务进度WebSocket端点
-        registry.addHandler(taskProgressWebSocketHandler, "ws/task")
+        registry.addHandler(taskWebSocketHandler, "ws/task")
                 .setAllowedOriginPatterns("*");
     }
 }

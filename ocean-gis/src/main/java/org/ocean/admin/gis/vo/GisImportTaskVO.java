@@ -12,7 +12,17 @@ import lombok.Data;
 @Data
 @Builder
 public class GisImportTaskVO {
+    private Long recordId;
+    private String recordNo;
+    private Integer acceptedCount;
+    private Integer failedCount;
+
+    /** @deprecated 新导入不再创建 gis_task。 */
+    @Deprecated
     private Long taskId;
+
+    /** @deprecated 请使用 recordNo。 */
+    @Deprecated
     private String taskNo;
     private Long dataSetId;
     private Integer totalCount;

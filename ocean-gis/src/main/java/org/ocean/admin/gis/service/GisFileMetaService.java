@@ -5,9 +5,6 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.dto.TempFile;
-import org.ocean.admin.gis.dto.GisStoredFile;
-import org.ocean.admin.gis.dto.GisUploadFileItem;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
@@ -18,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -119,6 +115,7 @@ public class GisFileMetaService {
         GisFileMeta meta = new GisFileMeta();
         applyEditableFields(meta, reqVO, storageType, storageKey);
         meta.setUploadStatus(defaultStatus(reqVO.getUploadStatus()));
+        meta.setCleanupStatus("NOT_REQUIRED");
         meta.setCreateTime(now);
         meta.setUpdateTime(now);
         meta.setDeleted(0);
@@ -149,6 +146,8 @@ public class GisFileMetaService {
         GisFileMeta updatedMeta = new GisFileMeta();
         updatedMeta.setId(existing.getId());
         applyEditableFields(updatedMeta, reqVO, storageType, storageKey);
+        updatedMeta.setImportExportRecordId(existing.getImportExportRecordId());
+        updatedMeta.setCleanupStatus(existing.getCleanupStatus());
         String requestedStatus = normalizeUpper(reqVO.getUploadStatus());
         updatedMeta.setUploadStatus(requestedStatus == null ? existing.getUploadStatus() : requestedStatus);
         updatedMeta.setUpdateTime(LocalDateTime.now());
@@ -296,6 +295,7 @@ public class GisFileMetaService {
         result.setId(meta.getId());
         result.setDataSetId(meta.getDataSetId());
         result.setTaskId(meta.getTaskId());
+        result.setImportExportRecordId(meta.getImportExportRecordId());
         result.setOriginalName(meta.getOriginalName());
         result.setStorageName(meta.getStorageName());
         result.setStorageKey(meta.getStorageKey());
@@ -305,6 +305,7 @@ public class GisFileMetaService {
         result.setSha256(meta.getSha256());
         result.setUploadedBy(meta.getUploadedBy());
         result.setUploadStatus(meta.getUploadStatus());
+        result.setCleanupStatus(meta.getCleanupStatus());
         result.setErrorMessage(meta.getErrorMessage());
         result.setCreateTime(meta.getCreateTime());
         result.setUpdateTime(meta.getUpdateTime());
@@ -368,80 +369,5 @@ public class GisFileMetaService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
-    }
-
-    public List<GisUploadFileItem> createPendingFiles(
-            Long taskId,
-            Long dataSetId,
-            List<TempFile> stagedFiles) {
-        LocalDateTime now = LocalDateTime.now();
-        List<GisUploadFileItem> items = new ArrayList<>(stagedFiles.size());
-
-        for (TempFile staged : stagedFiles) {
-            GisFileMeta meta = new GisFileMeta();
-            meta.setTaskId(taskId);
-            meta.setDataSetId(dataSetId);
-            meta.setOriginalName(staged.getOriginalName());
-            meta.setStorageName(staged.getStorageName());
-            meta.setStorageKey(staged.getStagingKey());
-            meta.setStorageType("LOCAL");
-            meta.setExtension(staged.getExtension());
-            meta.setSizeBytes(staged.getSizeBytes());
-            meta.setSha256(staged.getSha256());
-            meta.setUploadStatus("PENDING");
-            meta.setCreateTime(now);
-            meta.setUpdateTime(now);
-            meta.setDeleted(0);
-            if (gisFileMetaMapper.insert(meta) != 1) {
-                throw new IllegalStateException("文件元数据创建失败: " + staged.getOriginalName());
-            }
-            items.add(new GisUploadFileItem(meta.getId(), staged));
-        }
-        return items;
-    }
-
-    public void markReady(Long fileMetaId, GisStoredFile storedFile) {
-        int updated = gisFileMetaMapper.update(null,
-                new LambdaUpdateWrapper<GisFileMeta>()
-                        .eq(GisFileMeta::getId, fileMetaId)
-                        .eq(GisFileMeta::getUploadStatus, "PENDING")
-                        .set(GisFileMeta::getStorageName, storedFile.getStorageName())
-                        .set(GisFileMeta::getStorageKey, storedFile.getStorageKey())
-                        .set(GisFileMeta::getStorageType, storedFile.getStorageType())
-                        .set(GisFileMeta::getSizeBytes, storedFile.getSizeBytes())
-                        .set(GisFileMeta::getSha256, storedFile.getSha256())
-                        .set(GisFileMeta::getUploadStatus, "READY")
-                        .set(GisFileMeta::getErrorMessage, null)
-                        .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
-        if (updated != 1) {
-            throw new IllegalStateException("文件元数据转正失败: " + fileMetaId);
-        }
-    }
-
-    public void markFailed(Long fileMetaId, String errorMessage) {
-        gisFileMetaMapper.update(null,
-                new LambdaUpdateWrapper<GisFileMeta>()
-                        .eq(GisFileMeta::getId, fileMetaId)
-                        .eq(GisFileMeta::getUploadStatus, "PENDING")
-                        .set(GisFileMeta::getUploadStatus, "FAILED")
-                        .set(GisFileMeta::getErrorMessage, abbreviate(errorMessage, 1000))
-                        .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
-    }
-
-    public void markTaskPendingFilesFailed(Long taskId, String errorMessage) {
-        gisFileMetaMapper.update(null,
-                new LambdaUpdateWrapper<GisFileMeta>()
-                        .eq(GisFileMeta::getTaskId, taskId)
-                        .eq(GisFileMeta::getUploadStatus, "PENDING")
-                        .set(GisFileMeta::getUploadStatus, "FAILED")
-                        .set(GisFileMeta::getErrorMessage, abbreviate(errorMessage, 1000))
-                        .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
-    }
-
-    private String abbreviate(String value, int maxLength) {
-        if (value == null || value.length() <= maxLength) {
-            return value;
-        }
-        return value.substring(0, maxLength);
     }
 }

@@ -6,8 +6,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisFileProcessRequest;
-import org.ocean.admin.gis.service.GisFileService;
-import org.ocean.admin.gis.service.GisProcessingService;
+import org.ocean.admin.gis.service.FileUploadService;
+import org.ocean.admin.gis.service.ProcessingService;
 import org.ocean.admin.gis.service.GisFileMetaService;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.gis.vo.GisProcessingTaskVO;
@@ -35,8 +35,8 @@ import java.util.List;
 public class GisFileMetaController {
 
     private final GisFileMetaService gisFileMetaService;
-    private final GisProcessingService gisProcessingService;
-    private final GisFileService gisFileService;
+    private final ProcessingService processingService;
+    private final FileUploadService fileUploadService;
 
     @GetMapping("/page")
     @Operation(summary = "分页查询文件元数据")
@@ -105,7 +105,7 @@ public class GisFileMetaController {
             @Parameter(description = "文件列表", required = true)
             @RequestPart("files") List<MultipartFile> files){
         return ResponseResult.success(
-                gisFileService.createImportBatchTask(dataSetId, files));
+                fileUploadService.importBatch(dataSetId, files));
     }
 
     @PostMapping("/{id}/process")
@@ -117,6 +117,6 @@ public class GisFileMetaController {
             @PathVariable Long id,
             @Valid @RequestBody GisFileProcessRequest request) {
         return ResponseResult.success("处理任务已提交",
-                gisProcessingService.submitSingle(id, request));
+                processingService.submitSingle(id, request));
     }
 }

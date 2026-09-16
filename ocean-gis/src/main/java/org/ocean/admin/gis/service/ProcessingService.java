@@ -36,7 +36,7 @@ import java.util.stream.Stream;
 /** 单文件、服务器目录和多文件 GIS 切片任务编排。 */
 @Service
 @RequiredArgsConstructor
-public class GisProcessingService {
+public class ProcessingService {
     private static final int MAX_FILES = 100;
     private static final long MAX_TOTAL_SIZE = 5L * 1024 * 1024 * 1024;
 
@@ -46,7 +46,7 @@ public class GisProcessingService {
     private final GisProcessingStorageService processingStorageService;
     private final GisFileProcessingEngineRegistry engineRegistry;
     private final GisProcessingTaskService transactionService;
-    private final GisProcessingWorker worker;
+    private final ProcessingWorker worker;
     private final GisTaskLifecycleService taskLifecycle;
     private final GisTaskService gisTaskService;
     private final GisProcessingTaskFileMapper fileMapper;

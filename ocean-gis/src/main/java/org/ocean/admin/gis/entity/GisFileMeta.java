@@ -24,6 +24,9 @@ public class GisFileMeta {
     /** 所属数据集 */
     private Long dataSetId;
 
+    /** 关联的文件导入导出记录 */
+    private Long importExportRecordId;
+
     /** 所属上传任务 */
     private Long taskId;
 
@@ -53,6 +56,9 @@ public class GisFileMeta {
 
     /** PENDING、READY、FAILED */
     private String uploadStatus;
+
+    /** NOT_REQUIRED、PENDING、COMPLETED、FAILED */
+    private String cleanupStatus;
 
     /** 文件处理错误信息 */
     private String errorMessage;

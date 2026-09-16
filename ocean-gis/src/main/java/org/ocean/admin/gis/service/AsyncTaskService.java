@@ -1,12 +1,11 @@
 package org.ocean.admin.gis.service;
 
 import org.ocean.admin.gis.dto.TaskProgressMessage;
-import org.ocean.admin.gis.websocket.TaskProgressWebSocketHandler;
+import org.ocean.admin.gis.websocket.TaskWebSocketHandler;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.kernel.task.TaskProgressService;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
@@ -25,7 +24,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
-public class AsyncTaskService implements TaskProgressService {
+public class AsyncTaskService {
 
     private static final String TASK_REDIS_KEY_PREFIX = "ocean-admin:async-task:";
     private static final Duration TASK_REDIS_TTL = Duration.ofHours(24);
@@ -33,11 +32,11 @@ public class AsyncTaskService implements TaskProgressService {
     // 存储所有正在进行的任务
     private final Map<String, TaskInfo> taskMap = new ConcurrentHashMap<>();
 
-    private final TaskProgressWebSocketHandler webSocketHandler;
+    private final TaskWebSocketHandler webSocketHandler;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
-    public AsyncTaskService(TaskProgressWebSocketHandler webSocketHandler,
+    public AsyncTaskService(TaskWebSocketHandler webSocketHandler,
                             @Nullable StringRedisTemplate redisTemplate,
                             ObjectMapper objectMapper) {
         this.webSocketHandler = webSocketHandler;
@@ -103,15 +102,27 @@ public class AsyncTaskService implements TaskProgressService {
     /**
      * 使用业务侧稳定任务编号注册进度任务。
      */
-    @Override
     public String registerTask(String taskId, String taskName, int totalCount, String taskType) {
+        return registerTask(taskId, taskName, totalCount, taskType, 0, 0);
+    }
+
+    public String registerTask(
+            String taskId,
+            String taskName,
+            int totalCount,
+            String taskType,
+            int completedCount,
+            int failedCount) {
         if (taskId == null || taskId.isBlank()) {
             throw new IllegalArgumentException("任务ID不能为空");
         }
         if (totalCount < 1) {
             throw new IllegalArgumentException("任务总数必须大于0");
         }
-        initializeTask(taskId, taskName, totalCount, taskType, null, null);
+        if (completedCount < 0 || failedCount < 0 || completedCount + failedCount > totalCount) {
+            throw new IllegalArgumentException("任务初始计数不合法");
+        }
+        initializeTask(taskId, taskName, totalCount, taskType, null, null, completedCount, failedCount);
         return taskId;
     }
 
@@ -121,12 +132,23 @@ public class AsyncTaskService implements TaskProgressService {
                                 String taskType,
                                 String fileType,
                                 Long fileId) {
+        initializeTask(taskId, taskName, totalCount, taskType, fileType, fileId, 0, 0);
+    }
+
+    private void initializeTask(String taskId,
+                                String taskName,
+                                int totalCount,
+                                String taskType,
+                                String fileType,
+                                Long fileId,
+                                int completedCount,
+                                int failedCount) {
         TaskInfo taskInfo = new TaskInfo();
         taskInfo.setTaskId(taskId);
         taskInfo.setTaskName(taskName);
         taskInfo.setTotalCount(totalCount);
-        taskInfo.setCompletedCount(0);
-        taskInfo.setFailedCount(0);
+        taskInfo.setCompletedCount(completedCount);
+        taskInfo.setFailedCount(failedCount);
         taskInfo.setStatus("running");
         taskInfo.setStartTime(LocalDateTime.now());
         taskInfo.setTaskType(taskType != null ? taskType : "GENERAL");
@@ -208,7 +230,6 @@ public class AsyncTaskService implements TaskProgressService {
     /**
      * 根据已累计的成功、失败数量结束任务。
      */
-    @Override
     public void finalizeTaskResult(String taskId, String message) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo == null) {
@@ -233,7 +254,6 @@ public class AsyncTaskService implements TaskProgressService {
     }
 
     /** 将任务标记为整体失败。 */
-    @Override
     public void finalizeTaskFailure(String taskId, String message) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo == null) {
@@ -258,7 +278,6 @@ public class AsyncTaskService implements TaskProgressService {
     /**
      * 更新任务进度
      */
-    @Override
     public void updateProgress(String taskId, boolean success) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo != null) {
@@ -278,10 +297,37 @@ public class AsyncTaskService implements TaskProgressService {
         }
     }
 
+    public void updateProgressCounts(
+            String taskId,
+            int completedCount,
+            int failedCount,
+            String stage,
+            String message) {
+        TaskInfo taskInfo = taskMap.get(taskId);
+        if (taskInfo == null) {
+            return;
+        }
+        synchronized (taskInfo) {
+            if (isTerminal(taskInfo.getStatus())) {
+                return;
+            }
+            if (completedCount < 0 || failedCount < 0
+                    || completedCount + failedCount > taskInfo.getTotalCount()) {
+                throw new IllegalArgumentException("任务进度计数不合法");
+            }
+            taskInfo.setCompletedCount(completedCount);
+            taskInfo.setFailedCount(failedCount);
+            taskInfo.setManualProgress(null);
+            taskInfo.setStage(stage);
+            taskInfo.setMessage(message);
+            taskInfo.setStatus("running");
+        }
+        pushProgress(taskId);
+    }
+
     /**
      * 手动更新任务进度
      */
-    @Override
     public void updateProgress(String taskId, int progress, String stage, String message) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo == null) {
@@ -352,7 +398,7 @@ public class AsyncTaskService implements TaskProgressService {
      */
     public List<TaskInfo> getRunningTasks() {
         return taskMap.values().stream()
-                .filter(task -> "running".equals(task.getStatus()) || "queued".equals(task.getStatus()))
+                .filter(task -> "running".equals(task.getStatus()))
                 .collect(Collectors.toList());
     }
 

@@ -5,7 +5,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.service.GisProcessingService;
+import org.ocean.admin.gis.service.ProcessingService;
 import org.ocean.admin.gis.vo.GisProcessingTaskFileVO;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
 import org.ocean.admin.gis.vo.GisBatchProcessingTaskVO;
@@ -39,7 +39,7 @@ import jakarta.validation.Valid;
 public class GisTaskController {
 
     private final GisTaskService gisTaskService;
-    private final GisProcessingService gisProcessingService;
+    private final ProcessingService processingService;
 
     @GetMapping("/page")
     @Operation(summary = "分页条件查询 GIS 任务")
@@ -83,14 +83,14 @@ public class GisTaskController {
             @Parameter(description = "待处理文件列表", required = true)
             @RequestPart("files") List<MultipartFile> files) {
         return ResponseResult.success("处理任务已提交",
-                gisProcessingService.submitBatch(request, files));
+                processingService.submitBatch(request, files));
     }
 
     @GetMapping("/{taskId}/processing-files")
     @Operation(summary = "查询多文件处理任务的逐文件结果")
     public ResponseResult<List<GisProcessingTaskFileVO>> getProcessingFiles(
             @PathVariable Long taskId) {
-        return ResponseResult.success(gisProcessingService.getBatchFiles(taskId));
+        return ResponseResult.success(processingService.getBatchFiles(taskId));
     }
 
     @PostMapping("/process-folder")
@@ -102,6 +102,6 @@ public class GisTaskController {
             @Parameter(description = "服务器文件夹路径", required = true)
             @RequestParam("folderPath") String folderPath) {
         return ResponseResult.success("文件夹处理任务已提交",
-                gisProcessingService.submitFolder(folderPath));
+                processingService.submitFolder(folderPath));
     }
 }
