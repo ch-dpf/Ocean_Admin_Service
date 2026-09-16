@@ -1,12 +1,12 @@
-package org.ocean.admin.platform.workbench.service;
+package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.dto.TaskProgressMessage;
+import org.ocean.admin.gis.websocket.TaskProgressWebSocketHandler;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.kernel.task.TaskProgressService;
-import org.ocean.admin.platform.workbench.dto.TaskProgressMessage;
-import org.ocean.admin.platform.workbench.websocket.TaskProgressWebSocketHandler;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;

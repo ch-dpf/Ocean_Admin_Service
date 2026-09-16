@@ -5,7 +5,6 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.service.FileUploadService;
 import org.ocean.admin.gis.service.GisProcessingService;
 import org.ocean.admin.gis.vo.GisProcessingTaskFileVO;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
@@ -13,7 +12,6 @@ import org.ocean.admin.gis.vo.GisBatchProcessingTaskVO;
 import org.ocean.admin.gis.service.GisTaskService;
 import org.ocean.admin.gis.vo.GisProcessingTaskVO;
 import org.ocean.admin.gis.vo.GisTaskVO;
-import org.ocean.admin.gis.vo.GisUploadTaskVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.ocean.admin.kernel.audit.OperationLog;
@@ -40,7 +38,6 @@ import jakarta.validation.Valid;
 @RequiredArgsConstructor
 public class GisTaskController {
 
-    private final FileUploadService fileUploadService;
     private final GisTaskService gisTaskService;
     private final GisProcessingService gisProcessingService;
 
@@ -74,19 +71,6 @@ public class GisTaskController {
                 dataSetId,
                 createTimeStart,
                 createTimeEnd));
-    }
-
-    @PostMapping(value = "/upload",consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "文件上传", description = "Gis文件批量导入")
-    @OperationLog(module = "GIS_TASK", type = OperationType.SUBMIT, description = "提交GIS文件上传任务",
-            recordResponse = true)
-    public ResponseResult<GisUploadTaskVO> upload(
-            @Parameter(description = "数据集ID")
-            @RequestParam Long dataSetId,
-            @Parameter(description = "文件列表", required = true)
-            @RequestPart("files") List<MultipartFile> files){
-        return ResponseResult.success(
-                fileUploadService.createUploadTask(dataSetId, files));
     }
 
     @PostMapping(value = "/process", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

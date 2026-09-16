@@ -1,24 +1,29 @@
 package org.ocean.admin.gis.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisFileProcessRequest;
+import org.ocean.admin.gis.service.GisFileService;
 import org.ocean.admin.gis.service.GisProcessingService;
 import org.ocean.admin.gis.service.GisFileMetaService;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.gis.vo.GisProcessingTaskVO;
+import org.ocean.admin.gis.vo.GisImportTaskVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
 /**
- * 地理文件数据管理
+ * GIS数据管理
  *
  * @author DeepOcean
  * @since 2026-09-11
@@ -31,6 +36,7 @@ public class GisFileMetaController {
 
     private final GisFileMetaService gisFileMetaService;
     private final GisProcessingService gisProcessingService;
+    private final GisFileService gisFileService;
 
     @GetMapping("/page")
     @Operation(summary = "分页查询文件元数据")
@@ -48,7 +54,7 @@ public class GisFileMetaController {
     }
 
     @GetMapping("/deleted/page")
-    @Operation(summary = "分页查询已逻辑删除的文件元数据")
+    @Operation(summary = "分页查询文件元数据(回收站)")
     public ResponseResult<PageResult<List<GisFileMetaVO>>> getDeletedFileMetaPage(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "10") Integer size,
@@ -91,11 +97,22 @@ public class GisFileMetaController {
         return ResponseResult.success(gisFileMetaService.getFileMetaDetail(id));
     }
 
+    @PostMapping(value = "/import/batch",consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "导入gis文件数据", description = "Gis文件批量导入")
+    public ResponseResult<GisImportTaskVO> importBatch(
+            @Parameter(description = "数据集ID")
+            @RequestParam Long dataSetId,
+            @Parameter(description = "文件列表", required = true)
+            @RequestPart("files") List<MultipartFile> files){
+        return ResponseResult.success(
+                gisFileService.createImportBatchTask(dataSetId, files));
+    }
+
     @PostMapping("/{id}/process")
-    @Operation(summary = "提交已入库单文件切片任务",
-            description = "按 TERRAIN、IMAGERY 或 VECTOR 选择处理引擎；任务异步执行")
+    @Operation(summary = "处理元数据",
+            description = "按 TERRAIN、IMAGERY 或 VECTOR 选择处理引擎；任务异步执行；提交已入库单文件切片任务")
     @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT,
-            description = "提交GIS单文件切片任务", recordResponse = true)
+            description = "提交GIS文件切片任务", recordResponse = true)
     public ResponseResult<GisProcessingTaskVO> processFile(
             @PathVariable Long id,
             @Valid @RequestBody GisFileProcessRequest request) {

@@ -1,8 +1,7 @@
 package org.ocean.admin.config;
 
-
 import org.ocean.admin.platform.workbench.websocket.SystemMetricsWebSocketHandler;
-import org.ocean.admin.platform.workbench.websocket.TaskProgressWebSocketHandler;
+import org.ocean.admin.gis.websocket.TaskProgressWebSocketHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;

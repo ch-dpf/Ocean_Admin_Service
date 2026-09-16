@@ -39,6 +39,15 @@ public class GisDataSetController {
                 gisDataSetService.getDataSetPage(current, size, categoryId, dataSetName)
         );
     }
+    @GetMapping("/query")
+    @Operation(summary = "获取全部数据集列表")
+    public ResponseResult<List<GisDataSet>> getDataSets(
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) String dataSetName) {
+        return ResponseResult.success(
+                gisDataSetService.getDataSets(categoryId, dataSetName)
+        );
+    }
 
     @PostMapping("/create")
     @Operation(summary = "创建数据集")

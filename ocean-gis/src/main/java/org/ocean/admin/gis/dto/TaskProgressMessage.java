@@ -1,12 +1,12 @@
-package org.ocean.admin.platform.workbench.dto;
+package org.ocean.admin.gis.dto;
 
 import lombok.Data;
 
 /**
- * 任务进度消息
+ * 类的功能描述
  *
  * @author DeepOcean
- * @since 2026-09-11
+ * @since 2026-09-16
  */
 @Data
 public class TaskProgressMessage {

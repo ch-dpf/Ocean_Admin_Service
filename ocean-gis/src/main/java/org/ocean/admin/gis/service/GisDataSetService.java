@@ -80,6 +80,15 @@ public class GisDataSetService {
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
     }
 
+    public List<GisDataSet> getDataSets(Long categoryId, String dataSetName) {
+        String normalizedDataSetName = dataSetName == null ? "" : dataSetName.trim();
+        LambdaQueryWrapper<GisDataSet> queryWrapper = new LambdaQueryWrapper<GisDataSet>()
+                .eq(categoryId != null, GisDataSet::getCategoryId, categoryId)
+                .like(!normalizedDataSetName.isEmpty() , GisDataSet::getDataSetName, normalizedDataSetName)
+                .orderByDesc(GisDataSet::getCreateTime);
+        return gisDataSetMapper.selectList(queryWrapper);
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public GisDataSetVO createProject(GisDataSetVO reqVO) {
         // 校验数据集是否存在，不存在则新增，存在则返回错误原因提示

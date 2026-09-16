@@ -1,13 +1,15 @@
-package org.ocean.admin.platform.workbench.websocket;
+package org.ocean.admin.gis.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.platform.workbench.dto.TaskProgressMessage;
+
+import org.ocean.admin.gis.dto.TaskProgressMessage;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
+
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 

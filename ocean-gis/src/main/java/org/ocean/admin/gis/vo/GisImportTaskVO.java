@@ -11,7 +11,7 @@ import lombok.Data;
  */
 @Data
 @Builder
-public class GisUploadTaskVO {
+public class GisImportTaskVO {
     private Long taskId;
     private String taskNo;
     private Long dataSetId;

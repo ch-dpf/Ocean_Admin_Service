@@ -7,7 +7,7 @@ import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
-import org.ocean.admin.gis.vo.GisUploadTaskVO;
+import org.ocean.admin.gis.vo.GisImportTaskVO;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -20,7 +20,7 @@ import java.util.Set;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class FileUploadService {
+public class GisFileService {
     // 单次任务文件数量
     private static final int MAX_FILES_PER_TASK = 100;
     // 单次上传文件总大小
@@ -42,11 +42,13 @@ public class FileUploadService {
     private final UploadTaskService uploadTaskService;
     private final FileUploadWorker uploadWorker;
 
-    public GisUploadTaskVO createUploadTask(Long dataSetId, List<MultipartFile> files) {
+    private final static String GIS_UPLOAD = "GIS_UPLOAD";
+
+    public GisImportTaskVO createImportBatchTask(Long dataSetId, List<MultipartFile> files) {
         // 校验请求、生成任务编码
         GisDataSet dataSet = validateRequest(dataSetId, files);
-        String taskNo = GisTaskFactory.generateTaskNo("GIS_UPLOAD");
-        log.info("文件上传--任务编号: {}",taskNo);
+        String taskNo = GisTaskFactory.generateTaskNo(GIS_UPLOAD);
+        log.info("任务类别： {} - 任务编号: {}",GIS_UPLOAD,taskNo);
         // 暂存的临时文件
         List<TempFile> tempFiles = new ArrayList<>(files.size());
         UploadTask preparedUpload = null;
@@ -65,7 +67,7 @@ public class FileUploadService {
                     "GIS_UPLOAD", () -> uploadWorker.process(readyUpload),
                     "上传任务启动失败: ");
 
-            return GisUploadTaskVO.builder()
+            return GisImportTaskVO.builder()
                     .taskId(preparedUpload.taskId())
                     .taskNo(taskNo)
                     .dataSetId(dataSetId)
