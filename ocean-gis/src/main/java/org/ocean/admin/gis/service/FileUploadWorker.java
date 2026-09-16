@@ -2,7 +2,7 @@ package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.dto.GisPreparedUpload;
+import org.ocean.admin.gis.dto.UploadTask;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.dto.GisUploadFileItem;
 import org.ocean.admin.gis.util.FileUploadUtil;
@@ -21,7 +21,7 @@ public class FileUploadWorker {
     private final GisTaskLifecycleService taskLifecycle;
 
     @Async("gisTaskExecutor")
-    public void process(GisPreparedUpload upload) {
+    public void process(UploadTask upload) {
         long successCount = 0;
         try {
             taskLifecycle.start(upload.taskId(), upload.taskNo(), 0, "开始处理上传文件");
@@ -55,7 +55,7 @@ public class FileUploadWorker {
         }
     }
 
-    private boolean processFile(GisPreparedUpload upload, GisUploadFileItem item) {
+    private boolean processFile(UploadTask upload, GisUploadFileItem item) {
         GisStoredFile storedFile = null;
         try {
             storedFile = fileUploadUtil.commit(

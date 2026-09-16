@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.dto.GisStagedFile;
+import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.dto.GisUploadFileItem;
 import org.ocean.admin.gis.entity.GisDataSet;
@@ -373,11 +373,11 @@ public class GisFileMetaService {
     public List<GisUploadFileItem> createPendingFiles(
             Long taskId,
             Long dataSetId,
-            List<GisStagedFile> stagedFiles) {
+            List<TempFile> stagedFiles) {
         LocalDateTime now = LocalDateTime.now();
         List<GisUploadFileItem> items = new ArrayList<>(stagedFiles.size());
 
-        for (GisStagedFile staged : stagedFiles) {
+        for (TempFile staged : stagedFiles) {
             GisFileMeta meta = new GisFileMeta();
             meta.setTaskId(taskId);
             meta.setDataSetId(dataSetId);

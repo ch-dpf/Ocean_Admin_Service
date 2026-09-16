@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
-import org.ocean.admin.gis.dto.GisStagedFile;
+import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisProcessingTaskFile;
@@ -71,8 +71,8 @@ public class GisProcessingTaskService {
 
     @Transactional(rollbackFor = Exception.class)
     public GisBatchProcessingExecution createBatch(String taskNo,
-            GisCreateProcessingTaskRequest request, GisProcessingWorkspace workspace,
-            List<GisStagedFile> stagedFiles, List<GisStoredFile> storedFiles) {
+                                                   GisCreateProcessingTaskRequest request, GisProcessingWorkspace workspace,
+                                                   List<TempFile> stagedFiles, List<GisStoredFile> storedFiles) {
         GisProcessingParameters parameters = request.parameters();
         GisTask task = GisTaskFactory.queued(taskNo, request.taskName().trim(),
                 2L, storedFiles.size(), "QUEUED");

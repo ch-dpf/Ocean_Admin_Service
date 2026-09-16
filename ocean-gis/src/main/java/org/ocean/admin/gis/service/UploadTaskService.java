@@ -1,8 +1,8 @@
 package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.dto.GisPreparedUpload;
-import org.ocean.admin.gis.dto.GisStagedFile;
+import org.ocean.admin.gis.dto.UploadTask;
+import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.dto.GisUploadFileItem;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisTask;
@@ -19,10 +19,10 @@ public class UploadTaskService {
     private final GisFileMetaService gisFileMetaService;
 
     @Transactional(rollbackFor = Exception.class)
-    public GisPreparedUpload create(
+    public UploadTask create(
             String taskNo,
             GisDataSet dataSet,
-            List<GisStagedFile> stagedFiles) {
+            List<TempFile> stagedFiles) {
         GisTask task = GisTaskFactory.queued(taskNo,
                 "上传数据集：" + dataSet.getDataSetName(), 1L, stagedFiles.size(), "STAGED");
         task.setDataSetId(dataSet.getId());
@@ -30,7 +30,7 @@ public class UploadTaskService {
 
         List<GisUploadFileItem> items = gisFileMetaService.createPendingFiles(
                 task.getId(), dataSet.getId(), stagedFiles);
-        return new GisPreparedUpload(
+        return new UploadTask(
                 task.getId(), taskNo, dataSet.getId(), dataSet.getDataSetCode(), items);
     }
 }

@@ -1,7 +1,7 @@
 package org.ocean.admin.gis.util;
 
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.dto.GisStagedFile;
+import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
@@ -51,7 +51,7 @@ public class FileUploadUtil {
     }
 
     /** 在 HTTP 请求生命周期内将 MultipartFile 转存到受控临时目录。 */
-    public GisStagedFile stage(String taskNo, MultipartFile file) {
+    public TempFile stage(String taskNo, MultipartFile file) {
         validateMultipartFile(file);
         String originalName = safeOriginalName(file.getOriginalFilename());
         String extension = extensionOf(originalName);
@@ -66,7 +66,7 @@ public class FileUploadUtil {
                  DigestInputStream digestInput = new DigestInputStream(input, digest)) {
                 Files.copy(digestInput, target, StandardCopyOption.REPLACE_EXISTING);
             }
-            return GisStagedFile.builder()
+            return TempFile.builder()
                     .originalName(originalName)
                     .storageName(storageName)
                     .stagingKey(stagingKey)
@@ -82,7 +82,7 @@ public class FileUploadUtil {
     }
 
     /** 将暂存文件移动到数据集正式目录。 */
-    public GisStoredFile commit(String dataSetCode, String taskNo, GisStagedFile stagedFile) {
+    public GisStoredFile commit(String dataSetCode, String taskNo, TempFile stagedFile) {
         String storageKey = "datasets/" + pathResolver.safeSegment(dataSetCode)
                 + "/" + pathResolver.safeSegment(taskNo)
                 + "/" + pathResolver.safeSegment(stagedFile.getStorageName());
@@ -111,7 +111,7 @@ public class FileUploadUtil {
     }
 
     /** 将请求期暂存文件转为可供异步处理的持久输入。 */
-    public GisStoredFile commitForProcessing(String taskNo, GisStagedFile stagedFile) {
+    public GisStoredFile commitForProcessing(String taskNo, TempFile stagedFile) {
         String storageKey = "processing/" + pathResolver.safeSegment(taskNo) + "/"
                 + pathResolver.safeSegment(stagedFile.getStorageName());
         Path source = resolveKey(stagedFile.getStagingKey());

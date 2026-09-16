@@ -77,12 +77,14 @@ public class GisTaskController {
     }
 
     @PostMapping(value = "/upload",consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "多文件上传", description = "一次上传多个Gis文件")
+    @Operation(summary = "文件上传", description = "Gis文件批量导入")
     @OperationLog(module = "GIS_TASK", type = OperationType.SUBMIT, description = "提交GIS文件上传任务",
             recordResponse = true)
     public ResponseResult<GisUploadTaskVO> upload(
-            @Parameter(description = "数据集ID") @RequestParam Long dataSetId,
-            @Parameter(description = "文件列表", required = true)  @RequestPart("files") List<MultipartFile> files){
+            @Parameter(description = "数据集ID")
+            @RequestParam Long dataSetId,
+            @Parameter(description = "文件列表", required = true)
+            @RequestPart("files") List<MultipartFile> files){
         return ResponseResult.success(
                 fileUploadService.createUploadTask(dataSetId, files));
     }

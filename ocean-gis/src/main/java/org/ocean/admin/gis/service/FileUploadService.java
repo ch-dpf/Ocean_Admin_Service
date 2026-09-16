@@ -2,8 +2,8 @@ package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.dto.GisPreparedUpload;
-import org.ocean.admin.gis.dto.GisStagedFile;
+import org.ocean.admin.gis.dto.UploadTask;
+import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** GIS 数据文件上传编排服务。 */
+/** 文件上传服务 */
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -39,28 +39,29 @@ public class FileUploadService {
     private final GisFileMetaService gisFileMetaService;
     private final GisTaskLifecycleService taskLifecycle;
     private final FileUploadUtil fileUploadUtil;
-    private final UploadTaskService transactionService;
+    private final UploadTaskService uploadTaskService;
     private final FileUploadWorker uploadWorker;
 
     public GisUploadTaskVO createUploadTask(Long dataSetId, List<MultipartFile> files) {
         // 校验请求、生成任务编码
         GisDataSet dataSet = validateRequest(dataSetId, files);
         String taskNo = GisTaskFactory.generateTaskNo("GIS_UPLOAD");
-        // 暂存待入库文件
-        List<GisStagedFile> stagedFiles = new ArrayList<>(files.size());
-        GisPreparedUpload preparedUpload = null;
+        log.info("文件上传--任务编号: {}",taskNo);
+        // 暂存的临时文件
+        List<TempFile> tempFiles = new ArrayList<>(files.size());
+        UploadTask preparedUpload = null;
 
         try {
             for (MultipartFile file : files) {
                 validateFile(dataSet, file);
-                stagedFiles.add(fileUploadUtil.stage(taskNo, file));
+                tempFiles.add(fileUploadUtil.stage(taskNo, file));
             }
 
             // 已完成暂存和数据库建档、可以交给异步线程处理的上传任务
-            preparedUpload = transactionService.create(taskNo, dataSet, stagedFiles);
-            GisPreparedUpload readyUpload = preparedUpload;
+            preparedUpload = uploadTaskService.create(taskNo, dataSet, tempFiles);
+            UploadTask readyUpload = preparedUpload;
             taskLifecycle.dispatch(preparedUpload.taskId(), taskNo,
-                    "上传数据集：" + dataSet.getDataSetName(), stagedFiles.size(),
+                    "上传数据集：" + dataSet.getDataSetName(), tempFiles.size(),
                     "GIS_UPLOAD", () -> uploadWorker.process(readyUpload),
                     "上传任务启动失败: ");
 
@@ -68,14 +69,14 @@ public class FileUploadService {
                     .taskId(preparedUpload.taskId())
                     .taskNo(taskNo)
                     .dataSetId(dataSetId)
-                    .totalCount(stagedFiles.size())
+                    .totalCount(tempFiles.size())
                     .status("QUEUED")
                     .build();
         } catch (Exception ex) {
             if (preparedUpload != null) {
                 gisFileMetaService.markTaskPendingFilesFailed(preparedUpload.taskId(), ex.getMessage());
             }
-            stagedFiles.forEach(file -> deleteStagedQuietly(file, taskNo));
+            tempFiles.forEach(file -> deleteStagedQuietly(file, taskNo));
             throw ex;
         }
     }
@@ -119,7 +120,7 @@ public class FileUploadService {
         }
     }
 
-    private void deleteStagedQuietly(GisStagedFile file, String taskNo) {
+    private void deleteStagedQuietly(TempFile file, String taskNo) {
         try {
             fileUploadUtil.deleteStaged(file.getStagingKey());
         } catch (Exception cleanupEx) {

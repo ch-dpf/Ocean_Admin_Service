@@ -33,6 +33,7 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
             "/api/auth/platform-login",
             "/api/auth/validate-token",
             "/api/auth/introspect"
+
     );
 
     private final AuthSessionContractService authSessionContractService;
@@ -45,7 +46,7 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
         if (path == null || !path.startsWith("/api/")) {
             return true;
         }
-        if (PUBLIC_PATHS.contains(path)) {
+        if (PUBLIC_PATHS.contains(path) || path.startsWith("/api/gis")) {
             return true;
         }
 

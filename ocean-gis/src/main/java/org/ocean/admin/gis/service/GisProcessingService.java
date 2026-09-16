@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
 import org.ocean.admin.gis.dto.GisFileProcessRequest;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
-import org.ocean.admin.gis.dto.GisStagedFile;
+import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
@@ -121,18 +121,18 @@ public class GisProcessingService {
                 "GIS_" + request.processingType().name() + "_BATCH");
         GisProcessingWorkspace workspace = processingStorageService.batchWorkspace(
                 request.processingType(), taskNo);
-        List<GisStagedFile> staged = new ArrayList<>(files.size());
+        List<TempFile> staged = new ArrayList<>(files.size());
         List<GisStoredFile> stored = new ArrayList<>(files.size());
         try {
             for (MultipartFile file : files) {
-                GisStagedFile stagedFile = fileUploadUtil.stage(taskNo, file);
+                TempFile stagedFile = fileUploadUtil.stage(taskNo, file);
                 staged.add(stagedFile);
                 GisFileMeta meta = new GisFileMeta();
                 meta.setExtension(stagedFile.getExtension());
                 meta.setOriginalName(stagedFile.getOriginalName());
                 engine.validate(meta, fileUploadUtil.resolveStoredPath(stagedFile.getStagingKey()));
             }
-            for (GisStagedFile stagedFile : staged) {
+            for (TempFile stagedFile : staged) {
                 stored.add(fileUploadUtil.commitForProcessing(taskNo, stagedFile));
             }
             GisBatchProcessingExecution execution = transactionService.createBatch(

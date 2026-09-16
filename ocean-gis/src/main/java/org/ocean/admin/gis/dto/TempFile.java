@@ -9,7 +9,7 @@ import lombok.Data;
  */
 @Data
 @Builder
-public class GisStagedFile {
+public class TempFile {
 
     /** 用户上传的原始文件名 */
     private String originalName;

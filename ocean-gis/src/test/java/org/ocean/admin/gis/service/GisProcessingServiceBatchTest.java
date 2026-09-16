@@ -3,7 +3,7 @@ package org.ocean.admin.gis.service;
 import org.junit.jupiter.api.Test;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
-import org.ocean.admin.gis.dto.GisStagedFile;
+import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisProcessingTaskFileMapper;
@@ -41,7 +41,7 @@ class GisProcessingServiceBatchTest {
         GisTaskService taskService = mock(GisTaskService.class);
         TaskProgressService progress = mock(TaskProgressService.class);
         MockMultipartFile file = new MockMultipartFile("files", "input.tif", "image/tiff", new byte[]{1});
-        GisStagedFile staged = GisStagedFile.builder()
+        TempFile staged = TempFile.builder()
                 .originalName("input.tif").stagingKey(".staging/TASK/input.tif")
                 .storageName("input.tif").extension("tif").build();
         GisStoredFile stored = GisStoredFile.builder()
