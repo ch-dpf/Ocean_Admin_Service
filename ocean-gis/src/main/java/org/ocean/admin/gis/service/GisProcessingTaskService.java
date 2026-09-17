@@ -49,8 +49,6 @@ public class GisProcessingTaskService {
         task.setProcessingType(processingType.name());
         task.setSourceFileMetaId(fileMeta.getId());
         task.setOutputKey(workspace.outputKey());
-        task.setParentTaskId(fileMeta.getTaskId());
-        task.setRootTaskId(fileMeta.getTaskId());
         gisTaskService.insert(task);
 
         return new GisProcessingExecution(

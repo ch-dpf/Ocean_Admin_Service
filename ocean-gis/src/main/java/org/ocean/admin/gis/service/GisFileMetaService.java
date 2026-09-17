@@ -40,7 +40,6 @@ public class GisFileMetaService {
             Integer size,
             Long dataSetId,
             Long categoryId,
-            Long taskId,
             String originalName,
             String extension,
             String uploadStatus) {
@@ -59,7 +58,6 @@ public class GisFileMetaService {
                         "data_set_id IN (SELECT id FROM ocean_gis.gis_data_set "
                                 + "WHERE category_id = {0} AND deleted = 0)",
                         categoryId)
-                .eq(taskId != null, GisFileMeta::getTaskId, taskId)
                 .like(normalizedName != null, GisFileMeta::getOriginalName, normalizedName)
                 .eq(normalizedExtension != null, GisFileMeta::getExtension, normalizedExtension)
                 .eq(normalizedStatus != null, GisFileMeta::getUploadStatus, normalizedStatus)
@@ -75,7 +73,6 @@ public class GisFileMetaService {
             Integer size,
             Long dataSetId,
             Long categoryId,
-            Long taskId,
             String originalName,
             String extension,
             String uploadStatus) {
@@ -92,7 +89,6 @@ public class GisFileMetaService {
                 new Page<>(currentPage, pageSize),
                 dataSetId,
                 categoryId,
-                taskId,
                 normalizedName,
                 normalizedExtension,
                 normalizedStatus);
@@ -155,7 +151,6 @@ public class GisFileMetaService {
                 new LambdaUpdateWrapper<GisFileMeta>()
                         .eq(GisFileMeta::getId, existing.getId())
                         .set(GisFileMeta::getDataSetId, updatedMeta.getDataSetId())
-                        .set(GisFileMeta::getTaskId, updatedMeta.getTaskId())
                         .set(GisFileMeta::getOriginalName, updatedMeta.getOriginalName())
                         .set(GisFileMeta::getStorageName, updatedMeta.getStorageName())
                         .set(GisFileMeta::getStorageKey, updatedMeta.getStorageKey())
@@ -266,7 +261,6 @@ public class GisFileMetaService {
     private void applyEditableFields(
             GisFileMeta target, GisFileMetaVO source, String storageType, String storageKey) {
         target.setDataSetId(source.getDataSetId());
-        target.setTaskId(source.getTaskId());
         target.setOriginalName(source.getOriginalName().trim());
         target.setStorageName(source.getStorageName().trim());
         target.setStorageKey(storageKey);
@@ -294,7 +288,6 @@ public class GisFileMetaService {
         GisFileMetaVO result = new GisFileMetaVO();
         result.setId(meta.getId());
         result.setDataSetId(meta.getDataSetId());
-        result.setTaskId(meta.getTaskId());
         result.setImportExportRecordId(meta.getImportExportRecordId());
         result.setOriginalName(meta.getOriginalName());
         result.setStorageName(meta.getStorageName());

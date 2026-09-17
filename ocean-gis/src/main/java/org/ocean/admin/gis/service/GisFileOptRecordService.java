@@ -332,7 +332,6 @@ public class GisFileOptRecordService {
         vo.setId(meta.getId());
         vo.setDataSetId(meta.getDataSetId());
         vo.setCategoryId(categoryId);
-        vo.setTaskId(meta.getTaskId());
         vo.setImportExportRecordId(meta.getImportExportRecordId());
         vo.setOriginalName(meta.getOriginalName());
         vo.setStorageName(meta.getStorageName());

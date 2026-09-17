@@ -26,7 +26,6 @@ public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
             Page<GisFileMetaVO> page,
             @Param("dataSetId") Long dataSetId,
             @Param("categoryId") Long categoryId,
-            @Param("taskId") Long taskId,
             @Param("originalName") String originalName,
             @Param("extension") String extension,
             @Param("uploadStatus") String uploadStatus);

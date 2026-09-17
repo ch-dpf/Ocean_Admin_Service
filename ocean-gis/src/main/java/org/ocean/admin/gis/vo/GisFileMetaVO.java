@@ -22,9 +22,6 @@ public class GisFileMetaVO {
             allowableValues = {"0", "1", "2"}, accessMode = Schema.AccessMode.READ_ONLY)
     private Long categoryId;
 
-    @Schema(description = "所属上传任务 ID")
-    private Long taskId;
-
     @Schema(description = "关联的文件导入导出记录 ID", accessMode = Schema.AccessMode.READ_ONLY)
     private Long importExportRecordId;
 

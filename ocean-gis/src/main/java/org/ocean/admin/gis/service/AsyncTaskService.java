@@ -77,29 +77,6 @@ public class AsyncTaskService {
     }
 
     /**
-     * 创建新任务
-     */
-    public String createTask(String taskName, int totalCount) {
-        return createTask(taskName, totalCount, "GENERAL", null, null);
-    }
-
-    /**
-     * 创建新任务（可选任务类型和关联文件ID）
-     */
-    public String createTask(String taskName, int totalCount, String taskType, Long fileId) {
-        return createTask(taskName, totalCount, taskType, null, fileId);
-    }
-
-    /**
-     * 创建新任务（可选任务类型、文件类型和关联文件ID）
-     */
-    public String createTask(String taskName, int totalCount, String taskType, String fileType, Long fileId) {
-        String taskId = generateTaskId();
-        initializeTask(taskId, taskName, totalCount, taskType, fileType, fileId);
-        return taskId;
-    }
-
-    /**
      * 使用业务侧稳定任务编号注册进度任务。
      */
     public String registerTask(String taskId, String taskName, int totalCount, String taskType) {
@@ -124,15 +101,6 @@ public class AsyncTaskService {
         }
         initializeTask(taskId, taskName, totalCount, taskType, null, null, completedCount, failedCount);
         return taskId;
-    }
-
-    private void initializeTask(String taskId,
-                                String taskName,
-                                int totalCount,
-                                String taskType,
-                                String fileType,
-                                Long fileId) {
-        initializeTask(taskId, taskName, totalCount, taskType, fileType, fileId, 0, 0);
     }
 
     private void initializeTask(String taskId,
@@ -198,33 +166,6 @@ public class AsyncTaskService {
         }
 
         pushProgress(taskId);
-    }
-
-    /**
-     * 将任务一次性标记为成功结束（100%、已完成计数对齐总数）并只推送一次进度。
-     * 用于避免先 {@link #updateTaskProgress} / {@link #updateProgress(String, int, String, String)} 再
-     * {@link #updateProgress(String, boolean)} 造成的重复 WebSocket 推送。
-     */
-    public void finalizeTaskSuccess(String taskId, String message) {
-        TaskInfo taskInfo = taskMap.get(taskId);
-        if (taskInfo == null) {
-            return;
-        }
-        if ("completed".equals(taskInfo.getStatus())) {
-            return;
-        }
-        taskInfo.setManualProgress(100);
-        taskInfo.setStage("completed");
-        taskInfo.setMessage(message != null && !message.isEmpty() ? message : "任务完成");
-        taskInfo.setCompletedCount(taskInfo.getTotalCount());
-        taskInfo.setFailedCount(0);
-        taskInfo.setStatus("completed");
-        taskInfo.setEndTime(LocalDateTime.now());
-
-        pushProgress(taskId);
-        log.info("✅ 任务完成: taskId={}, status={}, completed={}, failed={}, progress={}%",
-                taskId, taskInfo.getStatus(), taskInfo.getCompletedCount(), taskInfo.getFailedCount(),
-                taskInfo.getProgress());
     }
 
     /**
@@ -362,10 +303,6 @@ public class AsyncTaskService {
         pushProgress(taskId, "task_update");
     }
 
-    public void pushTaskSnapshot(String taskId) {
-        pushProgress(taskId, "task_snapshot");
-    }
-
     private void pushProgress(String taskId, String eventType) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo != null) {
@@ -453,13 +390,6 @@ public class AsyncTaskService {
         } catch (Exception e) {
             log.debug("删除Redis任务快照失败: taskId={}, error={}", taskId, e.getMessage());
         }
-    }
-
-    /**
-     * 生成任务ID
-     */
-    private String generateTaskId() {
-        return "TASK_" + System.currentTimeMillis() + "_" + (int)(Math.random() * 10000);
     }
 
     private boolean isTerminal(String status) {

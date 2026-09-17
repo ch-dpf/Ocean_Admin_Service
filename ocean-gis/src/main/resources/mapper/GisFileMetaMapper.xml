@@ -8,7 +8,7 @@
         INSERT INTO ocean_gis.gis_file_meta (
             id, data_set_id, import_export_record_id, original_name,
             storage_name, storage_key, storage_type, extension,
-            size_bytes, sha256, uploaded_by, task_id,
+            size_bytes, sha256, uploaded_by,
             upload_status, cleanup_status, error_message,
             create_time, update_time, deleted
         ) VALUES
@@ -16,7 +16,7 @@
             (
                 #{item.id}, #{item.dataSetId}, #{item.importExportRecordId}, #{item.originalName},
                 #{item.storageName}, #{item.storageKey}, #{item.storageType}, #{item.extension},
-                #{item.sizeBytes}, #{item.sha256}, #{item.uploadedBy}, #{item.taskId},
+                #{item.sizeBytes}, #{item.sha256}, #{item.uploadedBy},
                 #{item.uploadStatus}, #{item.cleanupStatus}, #{item.errorMessage},
                 #{item.createTime}, #{item.updateTime}, #{item.deleted}
             )
@@ -27,7 +27,6 @@
         SELECT fm.id,
                fm.data_set_id,
                ds.category_id,
-               fm.task_id,
                fm.import_export_record_id,
                fm.original_name,
                fm.storage_name,
@@ -51,9 +50,6 @@
         </if>
         <if test="categoryId != null">
             AND ds.category_id = #{categoryId}
-        </if>
-        <if test="taskId != null">
-            AND fm.task_id = #{taskId}
         </if>
         <if test="originalName != null">
             AND fm.original_name LIKE CONCAT('%', #{originalName}, '%')
