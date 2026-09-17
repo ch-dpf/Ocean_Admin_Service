@@ -4,20 +4,21 @@ import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.dto.TempFile;
-import org.ocean.admin.gis.dto.GisUploadFileItem;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisImportExportRecord;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
-import org.ocean.admin.gis.vo.GisImportTaskVO;
+import org.ocean.admin.gis.vo.GisFileOptRecordVO;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /** 文件上传服务。 */
@@ -37,180 +38,239 @@ public class FileUploadService {
 
     private final GisDataSetMapper gisDataSetMapper;
     private final FileUploadUtil fileUploadUtil;
-    private final GisFileOptRecordService fileOptService;
     private final FileUploadWorker fileUploadWorker;
     private final AsyncTaskService asyncTaskService;
+    private final GisFileOptRecordService gisFileOptRecordService;
 
-    public GisImportTaskVO importBatch(Long dataSetId, List<MultipartFile> files) {
-        // 输入校验
-        GisDataSet dataSet = validateRequest(dataSetId, files);
-        GisImportExportRecord record = fileOptService.createImportRecord(dataSetId, files.size());
-        registerImportProgress(record, dataSet);
+    public Map<String, Object> processRegistry(Long dataSetId, Integer totalCount) {
+        if (dataSetId == null) {
+            throw new IllegalArgumentException("数据集ID不能为空");
+        }
+        if (totalCount == null || totalCount < 1 || totalCount > MAX_FILES_PER_REQUEST) {
+            throw new IllegalArgumentException(
+                    "预计导入文件数量必须在1到" + MAX_FILES_PER_REQUEST + "之间");
+        }
+        GisDataSet dataSet = gisDataSetMapper.selectById(dataSetId);
+        if (dataSet == null) {
+            throw new IllegalArgumentException("数据集不存在或已删除: " + dataSetId);
+        }
+        if (dataSet.getCategoryId() == null
+                || dataSet.getCategoryId() < 0
+                || dataSet.getCategoryId() > 2) {
+            throw new IllegalArgumentException("未知GIS数据类别: " + dataSet.getCategoryId());
+        }
 
-        // MultipartFile文件转存
+        GisImportExportRecord record = gisFileOptRecordService.createImportRecord(
+                dataSetId, totalCount);
+        try {
+            asyncTaskService.registerTask(
+                    record.getRecordNo(), "Gis文件批量导入", totalCount, "GIS_IMPORT");
+        } catch (RuntimeException ex) {
+            gisFileOptRecordService.markPreparationFailed(record, ex.getMessage());
+            throw ex;
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("recordId", record.getId());
+        data.put("recordNo", record.getRecordNo());
+        data.put("taskId", record.getRecordNo());
+        data.put("dataSetId", dataSetId);
+        data.put("totalCount", totalCount);
+        data.put("status", record.getRecordStatus());
+        data.put("stage", record.getCurrentStage());
+        return data;
+    }
+
+    public Map<String, Object> importBatch(String taskId, List<MultipartFile> files) {
+        if (taskId == null || taskId.isBlank()) {
+            throw new IllegalArgumentException("导入任务ID不能为空");
+        }
+        GisFileOptRecordVO recordDetail = gisFileOptRecordService.getImportRecordDetail(taskId);
+        taskId = recordDetail.getRecordNo();
+        if (!"QUEUED".equals(recordDetail.getRecordStatus())
+                || !"VALIDATING".equals(recordDetail.getCurrentStage())) {
+            throw new IllegalStateException("当前导入任务不允许重复上传: " + taskId);
+        }
+        if (files == null || files.size() != recordDetail.getTotalCount()) {
+            throw new IllegalArgumentException(
+                    "实际文件数量必须与创建任务时的预计数量一致: " + recordDetail.getTotalCount());
+        }
+        GisDataSet dataSet = validateRequest(recordDetail.getDataSetId(), files);
+        GisImportExportRecord record = new GisImportExportRecord();
+        record.setId(recordDetail.getId());
+        record.setRecordNo(recordDetail.getRecordNo());
+        record.setDataSetId(recordDetail.getDataSetId());
+        record.setTotalCount(recordDetail.getTotalCount());
+        record.setCompletedCount(recordDetail.getCompletedCount());
+        record.setFailedCount(recordDetail.getFailedCount());
+        record.setRecordStatus(recordDetail.getRecordStatus());
+        record.setCurrentStage(recordDetail.getCurrentStage());
+        record.setVersion(recordDetail.getVersion());
+
         List<GisFileMeta> fileMetas = new ArrayList<>(files.size());
-        List<TempFile> tempFiles = new ArrayList<>(files.size());
-        List<GisUploadFileItem> uploadItems = new ArrayList<>(files.size());
-        int pendingCount = 0;
+        List<FileUploadWorker.PendingUploadFile> pendingFiles = new ArrayList<>(files.size());
         int failedCount = 0;
 
         for (int index = 0; index < files.size(); index++) {
-            PreparedFile prepared = prepareFile(record, dataSet, files.get(index), index + 1);
-            fileMetas.add(prepared.fileMeta());
-            if (prepared.stagedFile() != null) {
-                tempFiles.add(prepared.stagedFile());
-                uploadItems.add(new GisUploadFileItem(
-                        prepared.fileMeta().getId(), prepared.stagedFile()));
-                pendingCount++;
-            } else {
+            MultipartFile file = files.get(index);
+            GisFileMeta meta = newBaseMeta(recordDetail.getDataSetId(), file, index + 1);
+            meta.setImportExportRecordId(recordDetail.getId());
+            try {
+                validateFileCategory(dataSet, file);
+                TempFile stagedFile = fileUploadUtil.stage(taskId, file);
+
+                meta.setOriginalName(stagedFile.getOriginalName());
+                meta.setStorageName(stagedFile.getStorageName());
+                meta.setStorageKey(stagedFile.getStagingKey());
+                meta.setExtension(stagedFile.getExtension());
+                meta.setSizeBytes(stagedFile.getSizeBytes());
+                meta.setSha256(stagedFile.getSha256());
+                meta.setUploadStatus("PENDING");
+                pendingFiles.add(new FileUploadWorker.PendingUploadFile(meta.getId(), stagedFile));
+            } catch (Exception ex) {
                 failedCount++;
+                meta.setStorageName(null);
+                meta.setStorageKey(null);
+                meta.setUploadStatus("FAILED");
+                meta.setCleanupStatus("COMPLETED");
+                meta.setErrorMessage(abbreviate(ex.getMessage(), 1000));
+                log.warn("GIS文件暂存失败: taskId={}, file={}, error={}",
+                        taskId, meta.getOriginalName(), ex.getMessage());
             }
-            asyncTaskService.updateProgress(
-                    record.getRecordNo(),
-                    0,
-                    "staging",
+            fileMetas.add(meta);
+            int progress = (int) (((index + 1L) * 30) / files.size());
+            asyncTaskService.updateProgress(taskId, progress, "staging",
                     "正在暂存文件（" + (index + 1) + "/" + files.size() + "）："
-                            + prepared.fileMeta().getOriginalName());
+                            + meta.getOriginalName());
         }
 
         try {
-            fileOptService.savePreparedFiles(record, fileMetas, pendingCount, failedCount);
+            gisFileOptRecordService.savePreparedFiles(
+                    record, fileMetas, pendingFiles.size(), failedCount);
         } catch (Exception ex) {
-            tempFiles.forEach(file -> deleteStagedQuietly(file, record.getRecordNo()));
-            try {
-                fileOptService.markPreparationFailed(record, ex.getMessage());
-            } catch (Exception finalizeEx) {
-                ex.addSuppressed(finalizeEx);
+            for (FileUploadWorker.PendingUploadFile file : pendingFiles) {
+                deleteStagedQuietly(file.stagedFile(), taskId);
             }
-            asyncTaskService.finalizeTaskFailure(
-                    record.getRecordNo(), "导入准备失败: " + ex.getMessage());
+            GisFileOptRecordVO latest = gisFileOptRecordService.getImportRecordDetail(taskId);
+            if ("QUEUED".equals(latest.getRecordStatus())
+                    && "VALIDATING".equals(latest.getCurrentStage())) {
+                gisFileOptRecordService.markPreparationFailed(record, ex.getMessage());
+                asyncTaskService.finalizeTaskFailure(
+                        taskId, "文件元数据批量入库失败: " + ex.getMessage());
+            }
             throw ex;
         }
 
-        dispatchImport(record, dataSet, uploadItems, failedCount);
+        asyncTaskService.updateProgressCounts(
+                taskId, 0, failedCount, "staged", "文件暂存和元数据建档完成");
 
-        log.info("GIS导入请求建档完成: recordNo={}, dataSetId={}, pending={}, failed={}",
-                record.getRecordNo(), dataSetId, pendingCount, failedCount);
-        return GisImportTaskVO.builder()
-                .recordId(record.getId())
-                .recordNo(record.getRecordNo())
-                .dataSetId(dataSetId)
-                .totalCount(files.size())
-                .acceptedCount(pendingCount)
-                .failedCount(failedCount)
-                .status(record.getRecordStatus())
-                .build();
-    }
+        if (pendingFiles.isEmpty()) {
+            asyncTaskService.finalizeTaskResult(taskId, "所有文件均未通过校验或暂存失败");
+            return buildResult(
+                    taskId, record.getDataSetId(), files.size(), 0, failedCount, "FAILED");
+        }
 
-    private void registerImportProgress(GisImportExportRecord record, GisDataSet dataSet) {
+        FileUploadWorker.BatchUploadContext context = new FileUploadWorker.BatchUploadContext(
+                taskId,
+                record.getId(),
+                record.getDataSetId(),
+                dataSet.getDataSetCode(),
+                files.size(),
+                failedCount,
+                List.copyOf(pendingFiles));
         try {
-            asyncTaskService.registerTask(
-                    record.getRecordNo(),
-                    "导入数据集：" + dataSet.getDataSetName(),
-                    record.getTotalCount(),
-                    "GIS_IMPORT");
-            asyncTaskService.updateProgress(
-                    record.getRecordNo(), 0, "staging", "开始校验并暂存上传文件");
-        } catch (Exception ex) {
-            try {
-                fileOptService.markPreparationFailed(record, ex.getMessage());
-            } catch (Exception finalizeEx) {
-                ex.addSuppressed(finalizeEx);
-            }
+            fileUploadWorker.asyncUploadBatchFiles(context);
+        } catch (RuntimeException ex) {
+            closeDispatchFailure(taskId, record.getId(), pendingFiles, ex);
             throw ex;
         }
+
+        return buildResult(
+                taskId, record.getDataSetId(), files.size(), pendingFiles.size(), failedCount, "QUEUED");
     }
 
-    private void dispatchImport(
-            GisImportExportRecord record,
-            GisDataSet dataSet,
-            List<GisUploadFileItem> uploadItems,
-            int failedCount) {
-        String recordNo = record.getRecordNo();
-        try {
-            asyncTaskService.updateProgressCounts(
-                    recordNo,
-                    0,
-                    failedCount,
-                    "staged",
-                    "文件暂存和元数据建档完成");
-            if (uploadItems.isEmpty()) {
-                asyncTaskService.finalizeTaskResult(recordNo, "没有可导入的有效文件");
-                return;
-            }
-            fileUploadWorker.processImport(
-                    record.getId(),
-                    recordNo,
-                    dataSet.getId(),
-                    dataSet.getDataSetCode(),
-                    record.getTotalCount(),
-                    List.copyOf(uploadItems));
-        } catch (Exception ex) {
-            for (GisUploadFileItem item : uploadItems) {
-                boolean cleaned = deleteStagedQuietly(item.stagedFile(), recordNo);
-                try {
-                    fileOptService.markImportFileFailed(
-                            record.getId(), item.fileMetaId(), ex.getMessage(), cleaned, null);
-                } catch (Exception persistEx) {
-                    ex.addSuppressed(persistEx);
-                }
-            }
-            try {
-                fileOptService.finishImport(record.getId());
-            } catch (Exception finishEx) {
-                ex.addSuppressed(finishEx);
-            }
-            asyncTaskService.finalizeTaskFailure(recordNo, "导入任务启动失败: " + ex.getMessage());
-            throw ex;
-        }
-    }
-
-    private PreparedFile prepareFile(
-            GisImportExportRecord record,
-            GisDataSet dataSet,
-            MultipartFile file,
-            int fileIndex) {
+    private GisFileMeta newBaseMeta(Long dataSetId, MultipartFile file, int index) {
         LocalDateTime now = LocalDateTime.now();
         GisFileMeta meta = new GisFileMeta();
         meta.setId(IdWorker.getId());
-        meta.setDataSetId(dataSet.getId());
-        meta.setImportExportRecordId(record.getId());
-        meta.setOriginalName(displayFileName(file, fileIndex));
-        meta.setStorageType("LOCAL");
+        meta.setDataSetId(dataSetId);
+        meta.setOriginalName(displayFileName(file, index));
         meta.setExtension(extensionOrNull(meta.getOriginalName()));
+        meta.setStorageType("LOCAL");
         meta.setSizeBytes(file == null ? 0L : Math.max(0L, file.getSize()));
-        meta.setTaskId(null);
         meta.setCleanupStatus("NOT_REQUIRED");
         meta.setCreateTime(now);
         meta.setUpdateTime(now);
         meta.setDeleted(0);
+        return meta;
+    }
 
-        try {
-            validateFile(dataSet, file);
-            TempFile staged = fileUploadUtil.stage(record.getRecordNo(), file);
-            meta.setOriginalName(staged.getOriginalName());
-            meta.setStorageName(staged.getStorageName());
-            meta.setStorageKey(staged.getStagingKey());
-            meta.setExtension(staged.getExtension());
-            meta.setSizeBytes(staged.getSizeBytes());
-            meta.setSha256(staged.getSha256());
-            meta.setUploadStatus("PENDING");
-            return new PreparedFile(meta, staged);
-        } catch (Exception ex) {
-            meta.setStorageName(null);
-            meta.setStorageKey(null);
-            meta.setSha256(null);
-            meta.setUploadStatus("FAILED");
-            meta.setErrorMessage(abbreviate(ex.getMessage(), 1000));
-            log.warn("GIS导入文件准备失败: recordNo={}, file={}, error={}",
-                    record.getRecordNo(), meta.getOriginalName(), ex.getMessage());
-            return new PreparedFile(meta, null);
+    private void validateFileCategory(GisDataSet dataSet, MultipartFile file) {
+        FileUploadUtil.validateMultipartFile(file);
+        String extension = FileUploadUtil.extensionOf(file.getOriginalFilename());
+        Set<String> allowed = switch (dataSet.getCategoryId().intValue()) {
+            case 0 -> IMAGE_EXTENSIONS;
+            case 1 -> TERRAIN_EXTENSIONS;
+            case 2 -> VECTOR_EXTENSIONS;
+            default -> throw new IllegalArgumentException(
+                    "未知GIS数据类别: " + dataSet.getCategoryId());
+        };
+        if (!allowed.contains(extension)) {
+            throw new IllegalArgumentException(
+                    "文件类型与数据集类别不匹配: " + file.getOriginalFilename());
         }
     }
 
-    /**
-     * 校验请求与数据集
-     */
+    private void closeDispatchFailure(
+            String taskId,
+            Long recordId,
+            List<FileUploadWorker.PendingUploadFile> pendingFiles,
+            RuntimeException cause) {
+        for (FileUploadWorker.PendingUploadFile file : pendingFiles) {
+            boolean cleaned = deleteStagedQuietly(file.stagedFile(), taskId);
+            try {
+                gisFileOptRecordService.markImportFileFailed(
+                        recordId, file.fileMetaId(), cause.getMessage(), cleaned, null);
+            } catch (Exception persistEx) {
+                cause.addSuppressed(persistEx);
+            }
+        }
+        try {
+            gisFileOptRecordService.finishImport(recordId);
+        } catch (Exception persistEx) {
+            cause.addSuppressed(persistEx);
+        }
+        asyncTaskService.finalizeTaskFailure(taskId, "异步上传任务提交失败: " + cause.getMessage());
+    }
+
+    private boolean deleteStagedQuietly(TempFile file, String taskId) {
+        try {
+            fileUploadUtil.deleteStaged(file.getStagingKey());
+            return true;
+        } catch (Exception ex) {
+            log.warn("清理暂存文件失败: taskId={}, key={}", taskId, file.getStagingKey(), ex);
+            return false;
+        }
+    }
+
+    private Map<String, Object> buildResult(
+            String taskId,
+            Long dataSetId,
+            int totalCount,
+            int acceptedCount,
+            int failedCount,
+            String status) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("taskId", taskId);
+        data.put("dataSetId", dataSetId);
+        data.put("totalCount", totalCount);
+        data.put("acceptedCount", acceptedCount);
+        data.put("failedCount", failedCount);
+        data.put("status", status);
+        data.put("message", "GIS文件批量导入任务已创建，请在消息中查看进度");
+        return data;
+    }
+
     private GisDataSet validateRequest(Long dataSetId, List<MultipartFile> files) {
         if (dataSetId == null) {
             throw new IllegalArgumentException("数据集ID不能为空");
@@ -243,49 +303,17 @@ public class FileUploadService {
         return dataSet;
     }
 
-    private void validateFile(GisDataSet dataSet, MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("上传文件不能为空");
+    private String displayFileName(MultipartFile file, int index) {
+        if (file == null || file.getOriginalFilename() == null
+                || file.getOriginalFilename().isBlank()) {
+            return "__unnamed_file_" + index;
         }
-        String name = file.getOriginalFilename();
-        if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("上传文件名不能为空");
+        try {
+            String name = FileUploadUtil.safeOriginalName(file.getOriginalFilename());
+            return name.length() <= 255 ? name : name.substring(0, 255);
+        } catch (Exception ex) {
+            return "__invalid_file_" + index;
         }
-        String displayName = normalizedFileName(name);
-        if (displayName.length() > 255) {
-            throw new IllegalArgumentException("上传文件名长度不能超过255个字符");
-        }
-        String extension = extensionOrNull(name);
-        if (extension == null) {
-            throw new IllegalArgumentException("文件扩展名不能为空: " + name);
-        }
-        Set<String> allowed = switch (dataSet.getCategoryId().intValue()) {
-            case 0 -> IMAGE_EXTENSIONS;
-            case 1 -> TERRAIN_EXTENSIONS;
-            case 2 -> VECTOR_EXTENSIONS;
-            default -> throw new IllegalArgumentException("未知GIS数据类别: " + dataSet.getCategoryId());
-        };
-        if (!allowed.contains(extension)) {
-            throw new IllegalArgumentException(
-                    "文件类型与数据集类别不匹配: " + name + ", categoryId=" + dataSet.getCategoryId());
-        }
-    }
-
-    private String displayFileName(MultipartFile file, int fileIndex) {
-        if (file == null || file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()) {
-            return "__unnamed_file_" + fileIndex;
-        }
-        String normalized = file.getOriginalFilename().replace('\\', '/');
-        String name = normalized.substring(normalized.lastIndexOf('/') + 1).trim();
-        if (name.isEmpty()) {
-            return "__unnamed_file_" + fileIndex;
-        }
-        return name.length() <= 255 ? name : name.substring(0, 255);
-    }
-
-    private String normalizedFileName(String originalName) {
-        String normalized = originalName.replace('\\', '/');
-        return normalized.substring(normalized.lastIndexOf('/') + 1).trim();
     }
 
     private String extensionOrNull(String fileName) {
@@ -297,24 +325,10 @@ public class FileUploadService {
         return extension.matches("[a-z0-9]{1,16}") ? extension : null;
     }
 
-    private boolean deleteStagedQuietly(TempFile file, String recordNo) {
-        try {
-            fileUploadUtil.deleteStaged(file.getStagingKey());
-            return true;
-        } catch (Exception cleanupEx) {
-            log.warn("清理上传临时文件失败: recordNo={}, key={}",
-                    recordNo, file.getStagingKey(), cleanupEx);
-            return false;
-        }
-    }
-
     private String abbreviate(String value, int maxLength) {
         if (value == null || value.length() <= maxLength) {
             return value;
         }
         return value.substring(0, maxLength);
-    }
-
-    private record PreparedFile(GisFileMeta fileMeta, TempFile stagedFile) {
     }
 }

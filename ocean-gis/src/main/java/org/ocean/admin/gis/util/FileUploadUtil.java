@@ -155,7 +155,7 @@ public class FileUploadUtil {
         return path;
     }
 
-    private void validateMultipartFile(MultipartFile file) {
+    public static void validateMultipartFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("上传文件不能为空");
         }
@@ -168,7 +168,7 @@ public class FileUploadUtil {
         extensionOf(file.getOriginalFilename());
     }
 
-    private String extensionOf(String fileName) {
+    public static String extensionOf(String fileName) {
         int index = fileName.lastIndexOf('.');
         if (index < 1 || index == fileName.length() - 1) {
             throw new IllegalArgumentException("文件扩展名不能为空: " + fileName);
@@ -180,7 +180,7 @@ public class FileUploadUtil {
         return extension;
     }
 
-    private String safeOriginalName(String originalFilename) {
+    public static String safeOriginalName(String originalFilename) {
         String normalized = originalFilename.replace('\\', '/');
         String fileName = normalized.substring(normalized.lastIndexOf('/') + 1).trim();
         if (fileName.isEmpty() || ".".equals(fileName) || "..".equals(fileName)) {

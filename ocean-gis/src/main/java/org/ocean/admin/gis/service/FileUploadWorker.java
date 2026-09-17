@@ -3,11 +3,12 @@ package org.ocean.admin.gis.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.dto.GisStoredFile;
-import org.ocean.admin.gis.dto.GisUploadFileItem;
-import org.ocean.admin.gis.entity.GisImportExportRecord;
+import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 /** GIS 上传后台执行器。 */
 @Service
@@ -15,129 +16,156 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class FileUploadWorker {
 
-    private final FileUploadUtil fileUploadUtil;
-    private final GisFileOptRecordService fileOptRecordService;
     private final AsyncTaskService asyncTaskService;
+    private final GisFileOptRecordService gisFileOptRecordService;
+    private final FileUploadUtil fileUploadUtil;
 
-    /** 不创建 gis_task，使用导入记录编号异步转存并推送逐文件进度。 */
-    @Async("gisTaskExecutor")
-    public void processImport(
+    public record PendingUploadFile(Long fileMetaId, TempFile stagedFile) {
+    }
+
+    public record BatchUploadContext(
+            String taskId,
             Long recordId,
-            String recordNo,
             Long dataSetId,
             String dataSetCode,
             int totalCount,
-            java.util.List<GisUploadFileItem> files) {
-        int initialFailed = totalCount - files.size();
-        try {
-            fileOptRecordService.markImportRunning(recordId);
-            asyncTaskService.updateProgress(recordNo,
-                    percent(initialFailed, totalCount),
-                    "transferring",
-                    "开始正式转存文件");
-        } catch (Exception ex) {
-            closeFailedImport(recordId, recordNo, files, ex);
+            int initialFailedCount,
+            List<PendingUploadFile> files) {
+    }
+
+    @Async("gisTaskExecutor")
+    public void asyncUploadBatchFiles(BatchUploadContext context) {
+        if (context == null || context.files() == null || context.files().isEmpty()) {
             return;
         }
 
-        for (GisUploadFileItem item : files) {
-            try {
-                boolean success = processImportFile(recordId, recordNo, dataSetId, dataSetCode, item);
-                asyncTaskService.updateProgress(recordNo, success);
-            } catch (Exception ex) {
-                closeFailedImport(recordId, recordNo, files, ex);
-                return;
-            }
-        }
-
+        int successCount = 0;
+        int transferFailedCount = 0;
         try {
-            GisImportExportRecord finished = fileOptRecordService.finishImport(recordId);
-            asyncTaskService.finalizeTaskResult(recordNo,
-                    "COMPLETED".equals(finished.getRecordStatus())
-                            ? "全部文件导入完成"
-                            : "导入结束，成功" + finished.getCompletedCount()
-                            + "个，失败" + finished.getFailedCount() + "个");
+            gisFileOptRecordService.markImportRunning(context.recordId());
+            for (int index = 0; index < context.files().size(); index++) {
+                PendingUploadFile file = context.files().get(index);
+                boolean success = processUploadedFile(
+                        context,
+                        file,
+                        context.initialFailedCount() + index,
+                        context.totalCount());
+                if (success) {
+                    successCount++;
+                } else {
+                    transferFailedCount++;
+                }
+                asyncTaskService.updateProgress(context.taskId(), success);
+            }
+
+            int totalFailed = context.initialFailedCount() + transferFailedCount;
+            gisFileOptRecordService.finishImport(context.recordId());
+            asyncTaskService.finalizeTaskResult(
+                    context.taskId(),
+                    totalFailed == 0
+                            ? "全部文件上传完成"
+                            : "上传结束，成功" + successCount + "个，失败" + totalFailed + "个");
         } catch (Exception ex) {
-            asyncTaskService.finalizeTaskFailure(recordNo, "导入记录收口失败: " + ex.getMessage());
-            log.error("GIS导入记录收口失败: recordNo={}", recordNo, ex);
+            if (successCount == 0 && transferFailedCount == 0) {
+                for (PendingUploadFile file : context.files()) {
+                    boolean cleaned = cleanupFailedFile(file, null, ex);
+                    try {
+                        gisFileOptRecordService.markImportFileFailed(
+                                context.recordId(), file.fileMetaId(),
+                                ex.getMessage(), cleaned, null);
+                        asyncTaskService.updateProgress(context.taskId(), false);
+                    } catch (Exception persistEx) {
+                        ex.addSuppressed(persistEx);
+                    }
+                }
+                try {
+                    gisFileOptRecordService.finishImport(context.recordId());
+                } catch (Exception persistEx) {
+                    ex.addSuppressed(persistEx);
+                }
+            }
+            asyncTaskService.finalizeTaskFailure(
+                    context.taskId(), "批量上传执行失败: " + ex.getMessage());
+            log.error("GIS批量上传执行失败: taskId={}", context.taskId(), ex);
         }
     }
-    private boolean processImportFile(
-            Long recordId,
-            String recordNo,
-            Long dataSetId,
-            String dataSetCode,
-            GisUploadFileItem item) {
+
+    private boolean processUploadedFile(
+            BatchUploadContext context,
+            PendingUploadFile file,
+            int fileIndex,
+            int totalFiles) {
         GisStoredFile storedFile = null;
         try {
-            storedFile = fileUploadUtil.commit(dataSetCode, recordNo, item.stagedFile());
-            fileOptRecordService.markImportFileReady(
-                    recordId, dataSetId, item.fileMetaId(), storedFile);
+            reportUploadProgress(
+                    context.taskId(), fileIndex, totalFiles, 5,
+                    "saving", "正在保存文件：" + file.stagedFile().getOriginalName());
+            storedFile = fileUploadUtil.commit(
+                    context.dataSetCode(), context.taskId(), file.stagedFile());
+            gisFileOptRecordService.markImportFileReady(
+                    context.recordId(), context.dataSetId(), file.fileMetaId(), storedFile);
+            reportUploadProgress(
+                    context.taskId(), fileIndex, totalFiles, 100,
+                    "completed", "已完成：" + file.stagedFile().getOriginalName());
+            log.info("文件上传完成: taskId={}, fileName={}, fileId={}",
+                    context.taskId(), file.stagedFile().getOriginalName(), file.fileMetaId());
             return true;
         } catch (Exception ex) {
-            boolean cleaned = cleanupImportFile(item, storedFile);
+            boolean cleaned = cleanupFailedFile(file, storedFile, ex);
             try {
-                fileOptRecordService.markImportFileFailed(
-                        recordId, item.fileMetaId(), ex.getMessage(), cleaned, storedFile);
+                gisFileOptRecordService.markImportFileFailed(
+                        context.recordId(), file.fileMetaId(), ex.getMessage(), cleaned, storedFile);
             } catch (Exception persistEx) {
                 ex.addSuppressed(persistEx);
-                throw ex;
+                log.error("GIS文件失败状态更新异常: taskId={}, fileMetaId={}",
+                        context.taskId(), file.fileMetaId(), persistEx);
             }
-            log.error("GIS导入文件转存失败: recordNo={}, file={}",
-                    recordNo, item.stagedFile().getOriginalName(), ex);
+            log.error("GIS文件上传失败: taskId={}, file={}",
+                    context.taskId(), file.stagedFile().getOriginalName(), ex);
             return false;
         }
     }
 
-    private void failUnprocessedImportFiles(
-            Long recordId,
-            String recordNo,
-            java.util.List<GisUploadFileItem> files,
+    private boolean cleanupFailedFile(
+            PendingUploadFile file,
+            GisStoredFile storedFile,
             Exception cause) {
-        for (GisUploadFileItem item : files) {
-            boolean cleaned = cleanupImportFile(item, null);
-            try {
-                fileOptRecordService.markImportFileFailed(
-                        recordId, item.fileMetaId(), cause.getMessage(), cleaned, null);
-                asyncTaskService.updateProgress(recordNo, false);
-            } catch (Exception ignored) {
-                log.warn("GIS导入未处理文件收口失败: recordNo={}, fileMetaId={}",
-                        recordNo, item.fileMetaId(), ignored);
-            }
-        }
-    }
-
-    private void closeFailedImport(
-            Long recordId,
-            String recordNo,
-            java.util.List<GisUploadFileItem> files,
-            Exception cause) {
-        failUnprocessedImportFiles(recordId, recordNo, files, cause);
         try {
-            fileOptRecordService.finishImport(recordId);
-        } catch (Exception finishEx) {
-            cause.addSuppressed(finishEx);
-        }
-        asyncTaskService.finalizeTaskFailure(recordNo, "文件导入失败: " + cause.getMessage());
-        log.error("GIS导入异步转存失败: recordNo={}", recordNo, cause);
-    }
-
-    private boolean cleanupImportFile(GisUploadFileItem item, GisStoredFile storedFile) {
-        try {
-            if (storedFile == null) {
-                fileUploadUtil.deleteStaged(item.stagedFile().getStagingKey());
-            } else {
+            if (storedFile != null) {
                 fileUploadUtil.deleteStored(storedFile.getStorageKey());
+            } else {
+                fileUploadUtil.deleteStaged(file.stagedFile().getStagingKey());
             }
             return true;
         } catch (Exception cleanupEx) {
-            log.warn("清理导入失败文件异常: file={}",
-                    item.stagedFile().getOriginalName(), cleanupEx);
+            cause.addSuppressed(cleanupEx);
+            log.warn("清理失败文件异常: file={}",
+                    file.stagedFile().getOriginalName(), cleanupEx);
             return false;
         }
     }
 
-    private int percent(int processed, int total) {
-        return total == 0 ? 0 : (int) ((processed * 100L) / total);
+    private void reportUploadProgress(
+            String taskId,
+            int fileIndex,
+            int totalFiles,
+            int stagePercent,
+            String stage,
+            String message) {
+        if (taskId == null || totalFiles <= 0) {
+            return;
+        }
+        int safeFileIndex = Math.max(0, fileIndex);
+        int safeStagePercent = Math.max(0, Math.min(100, stagePercent));
+        int progress = (int) Math.round(
+                (((double) safeFileIndex) + safeStagePercent / 100.0d)
+                        / Math.max(1, totalFiles) * 100.0d);
+        asyncTaskService.updateTaskProgress(
+                taskId,
+                Math.max(0, Math.min(100, progress)),
+                stage,
+                message,
+                "running",
+                false);
     }
 }

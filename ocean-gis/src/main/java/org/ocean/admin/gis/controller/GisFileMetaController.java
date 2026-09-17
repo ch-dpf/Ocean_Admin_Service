@@ -11,7 +11,6 @@ import org.ocean.admin.gis.service.ProcessingService;
 import org.ocean.admin.gis.service.GisFileMetaService;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.gis.vo.GisProcessingTaskVO;
-import org.ocean.admin.gis.vo.GisImportTaskVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
@@ -21,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * GIS数据管理
@@ -97,15 +97,25 @@ public class GisFileMetaController {
         return ResponseResult.success(gisFileMetaService.getFileMetaDetail(id));
     }
 
-    @PostMapping(value = "/import/batch",consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/import/batch/{taskId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "导入gis文件数据", description = "Gis文件批量导入")
-    public ResponseResult<GisImportTaskVO> importBatch(
-            @Parameter(description = "数据集ID")
-            @RequestParam Long dataSetId,
+    public ResponseResult<Map<String, Object>> importBatch(
+            @Parameter(description = "导入任务ID", required = true)
+            @PathVariable String taskId,
             @Parameter(description = "文件列表", required = true)
             @RequestPart("files") List<MultipartFile> files){
         return ResponseResult.success(
-                fileUploadService.importBatch(dataSetId, files));
+                fileUploadService.importBatch(taskId, files));
+    }
+
+    @PostMapping("/import/task")
+    @Operation(summary = "创建GIS文件导入任务", description = "创建导入记录并返回进度任务ID")
+    public ResponseResult<Map<String, Object>> createImportTask(
+            @Parameter(description = "数据集ID", required = true)
+            @RequestParam Long dataSetId,
+            @Parameter(description = "预计导入文件数量", required = true)
+            @RequestParam Integer totalCount) {
+        return ResponseResult.success(fileUploadService.processRegistry(dataSetId, totalCount));
     }
 
     @PostMapping("/{id}/process")
