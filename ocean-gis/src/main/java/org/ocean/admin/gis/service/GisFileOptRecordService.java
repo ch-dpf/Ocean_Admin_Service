@@ -5,12 +5,12 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.entity.GisImportExportRecord;
+import org.ocean.admin.gis.entity.GisFileOptRecord;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
-import org.ocean.admin.gis.mapper.GisImportExportRecordMapper;
+import org.ocean.admin.gis.mapper.GisFileOptRecordMapper;
 import org.ocean.admin.gis.vo.GisFileOptRecordVO;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.common.PageResult;
@@ -95,15 +95,15 @@ public class GisFileOptRecordService {
 
     private static final DateTimeFormatter RECORD_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
-    private final GisImportExportRecordMapper recordMapper;
+    private final GisFileOptRecordMapper recordMapper;
     private final GisFileMetaMapper fileMetaMapper;
     private final GisDataSetMapper dataSetMapper;
 
     /** 先独立提交导入记录，确保后续批量文件元数据能够引用它。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisImportExportRecord createImportRecord(Long dataSetId, int totalCount) {
+    public GisFileOptRecord createImportRecord(Long dataSetId, int totalCount) {
         LocalDateTime now = LocalDateTime.now();
-        GisImportExportRecord record = new GisImportExportRecord();
+        GisFileOptRecord record = new GisFileOptRecord();
         record.setRecordNo(generateRecordNo(now));
         record.setOperationType("IMPORT");
         record.setDataSetId(dataSetId);
@@ -125,7 +125,7 @@ public class GisFileOptRecordService {
     /** 批量插入全部文件元数据，并原子更新准备阶段的汇总状态。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void savePreparedFiles(
-            GisImportExportRecord record,
+            GisFileOptRecord record,
             List<GisFileMeta> fileMetas,
             int pendingCount,
             int failedCount) {
@@ -140,7 +140,7 @@ public class GisFileOptRecordService {
 
         LocalDateTime now = LocalDateTime.now();
         boolean allFailed = pendingCount == 0;
-        UpdateWrapper<GisImportExportRecord> update = new UpdateWrapper<GisImportExportRecord>()
+        UpdateWrapper<GisFileOptRecord> update = new UpdateWrapper<GisFileOptRecord>()
                 .eq("id", record.getId())
                 .eq("record_status", "QUEUED")
                 .eq("current_stage", "VALIDATING")
@@ -168,9 +168,9 @@ public class GisFileOptRecordService {
 
     /** 准备阶段发生数据库级故障时，尽力把导入记录收口为失败。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void markPreparationFailed(GisImportExportRecord record, String errorMessage) {
+    public void markPreparationFailed(GisFileOptRecord record, String errorMessage) {
         LocalDateTime now = LocalDateTime.now();
-        recordMapper.update(null, new UpdateWrapper<GisImportExportRecord>()
+        recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
                 .eq("id", record.getId())
                 .eq("record_status", "QUEUED")
                 .eq("current_stage", "VALIDATING")
@@ -188,7 +188,7 @@ public class GisFileOptRecordService {
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void markImportRunning(Long recordId) {
         LocalDateTime now = LocalDateTime.now();
-        int updated = recordMapper.update(null, new UpdateWrapper<GisImportExportRecord>()
+        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
                 .eq("id", recordId)
                 .eq("record_status", "QUEUED")
                 .set("record_status", "RUNNING")
@@ -267,8 +267,8 @@ public class GisFileOptRecordService {
 
     /** 按最终计数将导入记录收口为成功、部分失败或失败。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisImportExportRecord finishImport(Long recordId) {
-        GisImportExportRecord record = recordMapper.selectById(recordId);
+    public GisFileOptRecord finishImport(Long recordId) {
+        GisFileOptRecord record = recordMapper.selectById(recordId);
         if (record == null) {
             throw new IllegalStateException("导入记录不存在: " + recordId);
         }
@@ -279,7 +279,7 @@ public class GisFileOptRecordService {
         }
         String status = failed == 0 ? "COMPLETED" : completed == 0 ? "FAILED" : "PARTIAL_FAILED";
         LocalDateTime now = LocalDateTime.now();
-        int updated = recordMapper.update(null, new UpdateWrapper<GisImportExportRecord>()
+        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
                 .eq("id", recordId)
                 .in("record_status", List.of("QUEUED", "RUNNING"))
                 .set("record_status", status)
@@ -298,7 +298,7 @@ public class GisFileOptRecordService {
     }
 
     private void incrementRecordCount(Long recordId, String countColumn, LocalDateTime now) {
-        int updated = recordMapper.update(null, new UpdateWrapper<GisImportExportRecord>()
+        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
                 .eq("id", recordId)
                 .in("record_status", List.of("QUEUED", "RUNNING"))
                 .apply("completed_count + failed_count < total_count")

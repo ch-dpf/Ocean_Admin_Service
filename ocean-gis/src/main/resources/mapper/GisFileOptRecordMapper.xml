@@ -2,7 +2,7 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="org.ocean.admin.gis.mapper.GisImportExportRecordMapper">
+<mapper namespace="org.ocean.admin.gis.mapper.GisFileOptRecordMapper">
 
     <sql id="recordColumns">
         r.id,
@@ -32,7 +32,7 @@
 
     <select id="selectImportRecordPage" resultType="org.ocean.admin.gis.vo.GisFileOptRecordVO">
         SELECT <include refid="recordColumns"/>
-        FROM ocean_gis.gis_import_export_record r
+        FROM ocean_gis.gis_file_opt_record r
         JOIN ocean_gis.gis_data_set ds ON ds.id = r.data_set_id
         WHERE r.deleted = 0
           AND r.operation_type = 'IMPORT'
@@ -76,7 +76,7 @@
 
     <select id="selectImportRecordByNo" resultType="org.ocean.admin.gis.vo.GisFileOptRecordVO">
         SELECT <include refid="recordColumns"/>
-        FROM ocean_gis.gis_import_export_record r
+        FROM ocean_gis.gis_file_opt_record r
         JOIN ocean_gis.gis_data_set ds ON ds.id = r.data_set_id
         WHERE r.deleted = 0
           AND r.operation_type = 'IMPORT'

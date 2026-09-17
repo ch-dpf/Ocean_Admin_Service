@@ -97,6 +97,16 @@ public class GisFileMetaController {
         return ResponseResult.success(gisFileMetaService.getFileMetaDetail(id));
     }
 
+    @PostMapping("/import/task")
+    @Operation(summary = "创建GIS文件导入任务", description = "创建导入记录并返回进度任务ID")
+    public ResponseResult<Map<String, Object>> createImportTask(
+            @Parameter(description = "数据集ID", required = true)
+            @RequestParam Long dataSetId,
+            @Parameter(description = "预计导入文件数量", required = true)
+            @RequestParam Integer totalCount) {
+        return ResponseResult.success(fileUploadService.importTaskRegistry(dataSetId, totalCount));
+    }
+
     @PostMapping(value = "/import/batch/{taskId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "导入gis文件数据", description = "Gis文件批量导入")
     public ResponseResult<Map<String, Object>> importBatch(
@@ -106,16 +116,6 @@ public class GisFileMetaController {
             @RequestPart("files") List<MultipartFile> files){
         return ResponseResult.success(
                 fileUploadService.importBatch(taskId, files));
-    }
-
-    @PostMapping("/import/task")
-    @Operation(summary = "创建GIS文件导入任务", description = "创建导入记录并返回进度任务ID")
-    public ResponseResult<Map<String, Object>> createImportTask(
-            @Parameter(description = "数据集ID", required = true)
-            @RequestParam Long dataSetId,
-            @Parameter(description = "预计导入文件数量", required = true)
-            @RequestParam Integer totalCount) {
-        return ResponseResult.success(fileUploadService.processRegistry(dataSetId, totalCount));
     }
 
     @PostMapping("/{id}/process")

@@ -6,7 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.entity.GisImportExportRecord;
+import org.ocean.admin.gis.entity.GisFileOptRecord;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.gis.vo.GisFileOptRecordVO;
@@ -42,7 +42,7 @@ public class FileUploadService {
     private final AsyncTaskService asyncTaskService;
     private final GisFileOptRecordService gisFileOptRecordService;
 
-    public Map<String, Object> processRegistry(Long dataSetId, Integer totalCount) {
+    public Map<String, Object> importTaskRegistry(Long dataSetId, Integer totalCount) {
         if (dataSetId == null) {
             throw new IllegalArgumentException("数据集ID不能为空");
         }
@@ -60,7 +60,7 @@ public class FileUploadService {
             throw new IllegalArgumentException("未知GIS数据类别: " + dataSet.getCategoryId());
         }
 
-        GisImportExportRecord record = gisFileOptRecordService.createImportRecord(
+        GisFileOptRecord record = gisFileOptRecordService.createImportRecord(
                 dataSetId, totalCount);
         try {
             asyncTaskService.registerTask(
@@ -96,7 +96,7 @@ public class FileUploadService {
                     "实际文件数量必须与创建任务时的预计数量一致: " + recordDetail.getTotalCount());
         }
         GisDataSet dataSet = validateRequest(recordDetail.getDataSetId(), files);
-        GisImportExportRecord record = new GisImportExportRecord();
+        GisFileOptRecord record = new GisFileOptRecord();
         record.setId(recordDetail.getId());
         record.setRecordNo(recordDetail.getRecordNo());
         record.setDataSetId(recordDetail.getDataSetId());

@@ -45,7 +45,7 @@ CREATE INDEX idx_gis_data_set_create_time
 -- GIS 文件导入导出记录
 -- =========================================================
 
-CREATE TABLE ocean_gis.gis_import_export_record (
+CREATE TABLE ocean_gis.gis_file_opt_record (
     id                  BIGINT        PRIMARY KEY,
     record_no           VARCHAR(64)   NOT NULL,
     operation_type      VARCHAR(16)   NOT NULL,
@@ -64,24 +64,24 @@ CREATE TABLE ocean_gis.gis_import_export_record (
     create_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted             INTEGER       NOT NULL DEFAULT 0,
-    CONSTRAINT uk_gis_import_export_record_no
+    CONSTRAINT uk_gis_file_opt_record_no
         UNIQUE (record_no),
-    CONSTRAINT fk_gis_import_export_record_data_set
+    CONSTRAINT fk_gis_file_opt_record_data_set
         FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id),
-    CONSTRAINT ck_gis_import_export_record_operation
+    CONSTRAINT ck_gis_file_opt_record_operation
         CHECK (operation_type IN ('IMPORT', 'EXPORT')),
-    CONSTRAINT ck_gis_import_export_record_status
+    CONSTRAINT ck_gis_file_opt_record_status
         CHECK (record_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'PARTIAL_FAILED', 'FAILED')),
-    CONSTRAINT ck_gis_import_export_record_counts
+    CONSTRAINT ck_gis_file_opt_record_counts
         CHECK (
             total_count >= 0
             AND completed_count >= 0
             AND failed_count >= 0
             AND completed_count + failed_count <= total_count
         ),
-    CONSTRAINT ck_gis_import_export_record_version
+    CONSTRAINT ck_gis_file_opt_record_version
         CHECK (version >= 0),
-    CONSTRAINT ck_gis_import_export_record_timing
+    CONSTRAINT ck_gis_file_opt_record_timing
         CHECK (
             (record_status = 'QUEUED' AND finish_time IS NULL)
             OR (record_status = 'RUNNING' AND start_time IS NOT NULL AND finish_time IS NULL)
@@ -92,23 +92,23 @@ CREATE TABLE ocean_gis.gis_import_export_record (
                 AND completed_count + failed_count = total_count
             )
         ),
-    CONSTRAINT ck_gis_import_export_record_deleted
+    CONSTRAINT ck_gis_file_opt_record_deleted
         CHECK (deleted IN (0, 1))
 );
 
-COMMENT ON TABLE ocean_gis.gis_import_export_record IS 'GIS 文件导入导出记录';
-COMMENT ON COLUMN ocean_gis.gis_import_export_record.record_no IS '对外暴露的稳定导入导出记录编号';
-COMMENT ON COLUMN ocean_gis.gis_import_export_record.operation_type IS '操作类型：IMPORT-导入，EXPORT-导出';
-COMMENT ON COLUMN ocean_gis.gis_import_export_record.record_status IS '记录状态：QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED';
-COMMENT ON COLUMN ocean_gis.gis_import_export_record.result_storage_key IS '导出结果的相对存储路径或对象存储 Key';
-COMMENT ON COLUMN ocean_gis.gis_import_export_record.version IS '状态版本号，用于进度快照与实时事件合并';
+COMMENT ON TABLE ocean_gis.gis_file_opt_record IS 'GIS 文件导入导出记录';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record.record_no IS '对外暴露的稳定导入导出记录编号';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record.operation_type IS '操作类型：IMPORT-导入，EXPORT-导出';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record.record_status IS '记录状态：QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record.result_storage_key IS '导出结果的相对存储路径或对象存储 Key';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record.version IS '状态版本号，用于进度快照与实时事件合并';
 
-CREATE INDEX idx_gis_import_export_record_data_set
-    ON ocean_gis.gis_import_export_record (data_set_id, operation_type, create_time DESC)
+CREATE INDEX idx_gis_file_opt_record_data_set
+    ON ocean_gis.gis_file_opt_record (data_set_id, operation_type, create_time DESC)
     WHERE deleted = 0;
 
-CREATE INDEX idx_gis_import_export_record_status
-    ON ocean_gis.gis_import_export_record (record_status, create_time)
+CREATE INDEX idx_gis_file_opt_record_status
+    ON ocean_gis.gis_file_opt_record (record_status, create_time)
     WHERE deleted = 0;
 
 
@@ -136,7 +136,7 @@ CREATE TABLE ocean_gis.gis_file_meta (
     update_time              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted                  INTEGER       NOT NULL DEFAULT 0,
     CONSTRAINT fk_gis_file_meta_import_export_record
-        FOREIGN KEY (import_export_record_id) REFERENCES ocean_gis.gis_import_export_record (id),
+        FOREIGN KEY (import_export_record_id) REFERENCES ocean_gis.gis_file_opt_record (id),
     CONSTRAINT ck_gis_file_meta_storage_type
         CHECK (storage_type IN ('LOCAL', 'MINIO', 'S3')),
     CONSTRAINT ck_gis_file_meta_size
