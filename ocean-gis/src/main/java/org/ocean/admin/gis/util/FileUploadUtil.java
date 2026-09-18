@@ -8,6 +8,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +20,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.function.LongConsumer;
 
 /** GIS 文件上传的批量校验与文件暂存、转存。 */
 @Slf4j
@@ -52,6 +54,11 @@ public class FileUploadUtil {
 
     /** 在 HTTP 请求生命周期内将 MultipartFile 转存到受控临时目录。 */
     public TempFile stage(String taskNo, MultipartFile file) {
+        return stage(taskNo, file, ignored -> { });
+    }
+
+    /** 在暂存过程中按已写入字节回报进度。 */
+    public TempFile stage(String taskNo, MultipartFile file, LongConsumer progressListener) {
         validateMultipartFile(file);
         String originalName = safeOriginalName(file.getOriginalFilename());
         String extension = extensionOf(originalName);
@@ -61,23 +68,59 @@ public class FileUploadUtil {
 
         try {
             Files.createDirectories(target.getParent());
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = file.getInputStream();
-                 DigestInputStream digestInput = new DigestInputStream(input, digest)) {
-                Files.copy(digestInput, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            String sha256 = copyWithDigest(
+                    taskNo, originalName, file, target, progressListener);
             return TempFile.builder()
                     .originalName(originalName)
                     .storageName(storageName)
                     .stagingKey(stagingKey)
                     .extension(extension)
                     .sizeBytes(Files.size(target))
-                    .sha256(HexFormat.of().formatHex(digest.digest()))
+                    .sha256(sha256)
                     .contentType(file.getContentType())
                     .build();
         } catch (IOException | NoSuchAlgorithmException ex) {
             deleteQuietly(target);
             throw new IllegalStateException("文件暂存失败: " + originalName, ex);
+        }
+    }
+
+    /** 直接写入数据集正式目录，写入完成前使用 .part 后缀隔离半成品。 */
+    public GisStoredFile store(
+            String dataSetCode,
+            String taskNo,
+            MultipartFile file,
+            LongConsumer progressListener) {
+        validateMultipartFile(file);
+        String originalName = safeOriginalName(file.getOriginalFilename());
+        String extension = extensionOf(originalName);
+        String storageName = UUID.randomUUID().toString().replace("-", "") + "." + extension;
+        String storageKey = "datasets/" + pathResolver.safeSegment(dataSetCode)
+                + "/" + pathResolver.safeSegment(taskNo)
+                + "/" + storageName;
+        Path target = resolveKey(storageKey);
+        Path partial = target.resolveSibling(target.getFileName() + ".part");
+
+        try {
+            Files.createDirectories(target.getParent());
+            String sha256 = copyWithDigest(
+                    taskNo, originalName, file, partial, progressListener);
+            try {
+                Files.move(partial, target, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ex) {
+                Files.move(partial, target);
+            }
+            return GisStoredFile.builder()
+                    .storageName(storageName)
+                    .storageKey(storageKey)
+                    .storageType("LOCAL")
+                    .sizeBytes(Files.size(target))
+                    .sha256(sha256)
+                    .build();
+        } catch (IOException | NoSuchAlgorithmException ex) {
+            deleteQuietly(partial);
+            deleteQuietly(target);
+            throw new IllegalStateException("文件存储失败: " + originalName, ex);
         }
     }
 
@@ -191,6 +234,35 @@ public class FileUploadUtil {
 
     private Path resolveKey(String key) {
         return pathResolver.resolveKey(key);
+    }
+
+    private String copyWithDigest(
+            String taskNo,
+            String originalName,
+            MultipartFile file,
+            Path target,
+            LongConsumer progressListener) throws IOException, NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = file.getInputStream();
+             DigestInputStream digestInput = new DigestInputStream(input, digest);
+             OutputStream output = Files.newOutputStream(target)) {
+            byte[] buffer = new byte[1024 * 1024];
+            long copiedBytes = 0;
+            int read;
+            while ((read = digestInput.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+                copiedBytes += read;
+                if (progressListener != null) {
+                    try {
+                        progressListener.accept(copiedBytes);
+                    } catch (RuntimeException progressEx) {
+                        log.debug("文件存储进度回报失败: taskNo={}, file={}, error={}",
+                                taskNo, originalName, progressEx.getMessage());
+                    }
+                }
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     private void delete(Path path) {

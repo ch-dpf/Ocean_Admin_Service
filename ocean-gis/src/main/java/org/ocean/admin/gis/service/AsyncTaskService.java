@@ -242,6 +242,7 @@ public class AsyncTaskService {
             String taskId,
             int completedCount,
             int failedCount,
+            int progress,
             String stage,
             String message) {
         TaskInfo taskInfo = taskMap.get(taskId);
@@ -258,7 +259,7 @@ public class AsyncTaskService {
             }
             taskInfo.setCompletedCount(completedCount);
             taskInfo.setFailedCount(failedCount);
-            taskInfo.setManualProgress(null);
+            taskInfo.setManualProgress(Math.max(0, Math.min(100, progress)));
             taskInfo.setStage(stage);
             taskInfo.setMessage(message);
             taskInfo.setStatus("running");

@@ -3,6 +3,7 @@ package org.ocean.admin.gis.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.entity.GisFileOptRecord;
 import org.ocean.admin.gis.service.GisFileMetaService;
 import org.ocean.admin.gis.service.GisFileOptRecordService;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
@@ -30,17 +31,12 @@ public class GisFileOptRecordController {
 
     // 上传导入记录
     @GetMapping("/uploadRecord")
-    @Operation(summary = "分页查询文件元数据")
-    public ResponseResult<PageResult<List<GisFileMetaVO>>> getFileMetaPage(
+    @Operation(summary = "分页查询上传记录")
+    public ResponseResult<PageResult<List<GisFileOptRecord>>> uploadRecord(
             @RequestParam(defaultValue = "1") Integer current,
-            @RequestParam(defaultValue = "10") Integer size,
-            @RequestParam(required = false) Long dataSetId,
-            @RequestParam(required = false) Long categoryId,
-            @RequestParam(required = false) Long taskId,
-            @RequestParam(required = false) String originalName,
-            @RequestParam(required = false) String extension,
-            @RequestParam(required = false) String uploadStatus) {
-        return null;
+            @RequestParam(defaultValue = "10") Integer size) {
+        String opt = "";
+        return gisFileOptRecordService.recordPages(current,size,opt);
     }
 
 

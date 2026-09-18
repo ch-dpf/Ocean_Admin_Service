@@ -7,13 +7,13 @@ import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileOptRecord;
 import org.ocean.admin.gis.entity.GisDataSet;
-import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileOptRecordMapper;
 import org.ocean.admin.gis.vo.GisFileOptRecordVO;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.common.PageResult;
+import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -122,48 +122,66 @@ public class GisFileOptRecordService {
         return record;
     }
 
-    /** 批量插入全部文件元数据，并原子更新准备阶段的汇总状态。 */
+    /** 原子保存同步上传结果，并收口导入记录与数据集文件数。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void savePreparedFiles(
+    public void saveImportResult(
             GisFileOptRecord record,
             List<GisFileMeta> fileMetas,
-            int pendingCount,
+            int completedCount,
             int failedCount) {
         if (fileMetas == null || fileMetas.isEmpty()) {
             throw new IllegalArgumentException("待保存的文件元数据不能为空");
         }
+        if (completedCount < 0 || failedCount < 0
+                || completedCount + failedCount != record.getTotalCount()
+                || fileMetas.size() != record.getTotalCount()) {
+            throw new IllegalArgumentException("导入结果计数不合法");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        String status = failedCount == 0
+                ? "COMPLETED"
+                : completedCount == 0 ? "FAILED" : "PARTIAL_FAILED";
+        int recordUpdated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
+                .eq("id", record.getId())
+                .eq("record_status", "QUEUED")
+                .eq("current_stage", "VALIDATING")
+                .set("completed_count", completedCount)
+                .set("failed_count", failedCount)
+                .set("record_status", status)
+                .set("current_stage", status)
+                .set("start_time", now)
+                .set("finish_time", now)
+                .set("update_time", now)
+                .setSql("version = version + 1"));
+        if (recordUpdated != 1) {
+            throw new IllegalStateException("导入记录无法提交上传结果: " + record.getRecordNo());
+        }
+
         int inserted = fileMetaMapper.insertBatch(fileMetas);
         if (inserted != fileMetas.size()) {
             throw new IllegalStateException(
                     "文件元数据批量写入不完整: expected=" + fileMetas.size() + ", actual=" + inserted);
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        boolean allFailed = pendingCount == 0;
-        UpdateWrapper<GisFileOptRecord> update = new UpdateWrapper<GisFileOptRecord>()
-                .eq("id", record.getId())
-                .eq("record_status", "QUEUED")
-                .eq("current_stage", "VALIDATING")
-                .set("failed_count", failedCount)
-                .set("current_stage", allFailed ? "FAILED" : "STAGED")
-                .set("record_status", allFailed ? "FAILED" : "QUEUED")
-                .set("update_time", now)
-                .set(allFailed, "start_time", now)
-                .set(allFailed, "finish_time", now)
-                .setSql("version = version + 1");
-        if (recordMapper.update(null, update) != 1) {
-            throw new IllegalStateException("导入记录准备状态更新失败: " + record.getRecordNo());
+        if (completedCount > 0) {
+            int dataSetUpdated = dataSetMapper.update(null, new UpdateWrapper<GisDataSet>()
+                    .eq("id", record.getDataSetId())
+                    .setSql("file_count = file_count + " + completedCount)
+                    .set("update_time", now));
+            if (dataSetUpdated != 1) {
+                throw new IllegalStateException("数据集文件数更新失败: " + record.getDataSetId());
+            }
         }
 
+        record.setCompletedCount(completedCount);
         record.setFailedCount(failedCount);
-        record.setCurrentStage(allFailed ? "FAILED" : "STAGED");
-        record.setRecordStatus(allFailed ? "FAILED" : "QUEUED");
+        record.setCurrentStage(status);
+        record.setRecordStatus(status);
         record.setVersion(record.getVersion() + 1);
+        record.setStartTime(now);
+        record.setFinishTime(now);
         record.setUpdateTime(now);
-        if (allFailed) {
-            record.setStartTime(now);
-            record.setFinishTime(now);
-        }
     }
 
     /** 准备阶段发生数据库级故障时，尽力把导入记录收口为失败。 */
@@ -182,131 +200,6 @@ public class GisFileOptRecordService {
                 .set("finish_time", now)
                 .set("update_time", now)
                 .setSql("version = version + 1"));
-    }
-
-    /** 将已建档的导入记录推进到异步转存阶段。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void markImportRunning(Long recordId) {
-        LocalDateTime now = LocalDateTime.now();
-        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
-                .eq("id", recordId)
-                .eq("record_status", "QUEUED")
-                .set("record_status", "RUNNING")
-                .set("current_stage", "TRANSFERRING")
-                .set("start_time", now)
-                .set("update_time", now)
-                .setSql("version = version + 1"));
-        if (updated != 1) {
-            throw new IllegalStateException("导入记录无法进入转存阶段: " + recordId);
-        }
-    }
-
-    /** 单文件转存成功：同时更新元数据、导入计数和数据集文件数。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void markImportFileReady(
-            Long recordId,
-            Long dataSetId,
-            Long fileMetaId,
-            GisStoredFile storedFile) {
-        LocalDateTime now = LocalDateTime.now();
-        int metaUpdated = fileMetaMapper.update(null, new UpdateWrapper<GisFileMeta>()
-                .eq("id", fileMetaId)
-                .eq("import_export_record_id", recordId)
-                .eq("upload_status", "PENDING")
-                .set("storage_name", storedFile.getStorageName())
-                .set("storage_key", storedFile.getStorageKey())
-                .set("storage_type", storedFile.getStorageType())
-                .set("size_bytes", storedFile.getSizeBytes())
-                .set("sha256", storedFile.getSha256())
-                .set("upload_status", "READY")
-                .set("cleanup_status", "NOT_REQUIRED")
-                .set("error_message", null)
-                .set("update_time", now));
-        if (metaUpdated != 1) {
-            throw new IllegalStateException("文件元数据转正失败: " + fileMetaId);
-        }
-        incrementRecordCount(recordId, "completed_count", now);
-        int dataSetUpdated = dataSetMapper.update(null, new UpdateWrapper<GisDataSet>()
-                .eq("id", dataSetId)
-                .setSql("file_count = file_count + 1")
-                .set("update_time", now));
-        if (dataSetUpdated != 1) {
-            throw new IllegalStateException("数据集文件数更新失败: " + dataSetId);
-        }
-    }
-
-    /** 单文件转存失败：保留失败信息并推进导入失败计数。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void markImportFileFailed(
-            Long recordId,
-            Long fileMetaId,
-            String errorMessage,
-            boolean cleaned,
-            GisStoredFile storedFile) {
-        LocalDateTime now = LocalDateTime.now();
-        UpdateWrapper<GisFileMeta> metaUpdate = new UpdateWrapper<GisFileMeta>()
-                .eq("id", fileMetaId)
-                .eq("import_export_record_id", recordId)
-                .eq("upload_status", "PENDING")
-                .set("upload_status", "FAILED")
-                .set("cleanup_status", cleaned ? "COMPLETED" : "FAILED")
-                .set("error_message", abbreviate(errorMessage, 1000))
-                .set("update_time", now);
-        if (cleaned) {
-            metaUpdate.set("storage_name", null).set("storage_key", null);
-        } else if (storedFile != null) {
-            metaUpdate.set("storage_name", storedFile.getStorageName())
-                    .set("storage_key", storedFile.getStorageKey())
-                    .set("storage_type", storedFile.getStorageType());
-        }
-        if (fileMetaMapper.update(null, metaUpdate) != 1) {
-            throw new IllegalStateException("文件元数据失败状态更新失败: " + fileMetaId);
-        }
-        incrementRecordCount(recordId, "failed_count", now);
-    }
-
-    /** 按最终计数将导入记录收口为成功、部分失败或失败。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileOptRecord finishImport(Long recordId) {
-        GisFileOptRecord record = recordMapper.selectById(recordId);
-        if (record == null) {
-            throw new IllegalStateException("导入记录不存在: " + recordId);
-        }
-        int completed = record.getCompletedCount();
-        int failed = record.getFailedCount();
-        if (completed + failed != record.getTotalCount()) {
-            throw new IllegalStateException("导入记录尚有文件未处理: " + record.getRecordNo());
-        }
-        String status = failed == 0 ? "COMPLETED" : completed == 0 ? "FAILED" : "PARTIAL_FAILED";
-        LocalDateTime now = LocalDateTime.now();
-        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
-                .eq("id", recordId)
-                .in("record_status", List.of("QUEUED", "RUNNING"))
-                .set("record_status", status)
-                .set("current_stage", status)
-                .setSql("start_time = COALESCE(start_time, CURRENT_TIMESTAMP)")
-                .set("finish_time", now)
-                .set("update_time", now)
-                .setSql("version = version + 1"));
-        if (updated != 1) {
-            throw new IllegalStateException("导入记录结束状态更新失败: " + record.getRecordNo());
-        }
-        record.setRecordStatus(status);
-        record.setCurrentStage(status);
-        record.setFinishTime(now);
-        return record;
-    }
-
-    private void incrementRecordCount(Long recordId, String countColumn, LocalDateTime now) {
-        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
-                .eq("id", recordId)
-                .in("record_status", List.of("QUEUED", "RUNNING"))
-                .apply("completed_count + failed_count < total_count")
-                .set("update_time", now)
-                .setSql(countColumn + " = " + countColumn + " + 1, version = version + 1"));
-        if (updated != 1) {
-            throw new IllegalStateException("导入记录文件计数更新失败: " + recordId);
-        }
     }
 
     private void validateQuery(
@@ -378,5 +271,9 @@ public class GisFileOptRecordService {
             return value;
         }
         return value.substring(0, maxLength);
+    }
+
+    public ResponseResult<PageResult<List<GisFileOptRecord>>> recordPages(Integer current, Integer size, String opt) {
+        return null;
     }
 }
