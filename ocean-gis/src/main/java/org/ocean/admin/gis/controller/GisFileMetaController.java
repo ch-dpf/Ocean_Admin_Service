@@ -96,7 +96,7 @@ public class GisFileMetaController {
     }
 
     @PostMapping("/import/task")
-    @Operation(summary = "创建GIS文件导入任务", description = "创建导入记录并返回进度任务ID")
+    @Operation(summary = "创建GIS文件导入任务", description = "创建Redis上传会话并返回进度任务ID")
     public ResponseResult<Map<String, Object>> createImportTask(
             @Parameter(description = "数据集ID", required = true)
             @RequestParam Long dataSetId,
@@ -106,7 +106,9 @@ public class GisFileMetaController {
     }
 
     @PostMapping(value = "/import/batch/{taskId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "导入gis文件数据", description = "Gis文件批量导入")
+    @Operation(summary = "导入gis文件数据", description = "消费上传会话并同步存储GIS文件及元数据")
+    @OperationLog(module = "GIS_FILE_UPLOAD", type = OperationType.SUBMIT,
+            description = "批量上传GIS文件", recordResponse = true)
     public ResponseResult<Map<String, Object>> importBatch(
             @Parameter(description = "导入任务ID", required = true)
             @PathVariable String taskId,

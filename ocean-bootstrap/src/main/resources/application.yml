@@ -86,6 +86,7 @@ knife4j:
 gis:
   upload:
     base-path: ${GIS_UPLOAD_BASE_PATH:uploads/gis}
+    session-ttl: ${GIS_UPLOAD_SESSION_TTL:2h}
   processing:
     base-path: ${GIS_PROCESSING_BASE_PATH:processed/gis}
   publication:

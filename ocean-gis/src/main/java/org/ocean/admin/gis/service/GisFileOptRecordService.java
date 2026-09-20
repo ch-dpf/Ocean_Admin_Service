@@ -19,11 +19,9 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * GIS 源数据文件操作记录
@@ -93,26 +91,30 @@ public class GisFileOptRecordService {
         return record;
     }
 
-    private static final DateTimeFormatter RECORD_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
-
     private final GisFileOptRecordMapper recordMapper;
     private final GisFileMetaMapper fileMetaMapper;
     private final GisDataSetMapper dataSetMapper;
 
-    /** 先独立提交导入记录，确保后续批量文件元数据能够引用它。 */
+    /** 上传会话校验通过后创建正式导入记录，确保文件元数据能够引用它。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileOptRecord createImportRecord(Long dataSetId, int totalCount) {
+    public GisFileOptRecord createImportRecord(
+            String recordNo,
+            Long dataSetId,
+            int totalCount,
+            Long operatorId) {
         LocalDateTime now = LocalDateTime.now();
         GisFileOptRecord record = new GisFileOptRecord();
-        record.setRecordNo(generateRecordNo(now));
+        record.setRecordNo(recordNo);
         record.setOperationType("IMPORT");
         record.setDataSetId(dataSetId);
         record.setTotalCount(totalCount);
         record.setCompletedCount(0);
         record.setFailedCount(0);
-        record.setRecordStatus("QUEUED");
-        record.setCurrentStage("VALIDATING");
+        record.setRecordStatus("RUNNING");
+        record.setCurrentStage("STORING");
+        record.setOperatorId(operatorId);
         record.setVersion(0L);
+        record.setStartTime(now);
         record.setCreateTime(now);
         record.setUpdateTime(now);
         record.setDeleted(0);
@@ -144,13 +146,12 @@ public class GisFileOptRecordService {
                 : completedCount == 0 ? "FAILED" : "PARTIAL_FAILED";
         int recordUpdated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
                 .eq("id", record.getId())
-                .eq("record_status", "QUEUED")
-                .eq("current_stage", "VALIDATING")
+                .eq("record_status", "RUNNING")
+                .eq("current_stage", "STORING")
                 .set("completed_count", completedCount)
                 .set("failed_count", failedCount)
                 .set("record_status", status)
                 .set("current_stage", status)
-                .set("start_time", now)
                 .set("finish_time", now)
                 .set("update_time", now)
                 .setSql("version = version + 1"));
@@ -179,7 +180,6 @@ public class GisFileOptRecordService {
         record.setCurrentStage(status);
         record.setRecordStatus(status);
         record.setVersion(record.getVersion() + 1);
-        record.setStartTime(now);
         record.setFinishTime(now);
         record.setUpdateTime(now);
     }
@@ -190,13 +190,12 @@ public class GisFileOptRecordService {
         LocalDateTime now = LocalDateTime.now();
         recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
                 .eq("id", record.getId())
-                .eq("record_status", "QUEUED")
-                .eq("current_stage", "VALIDATING")
+                .eq("record_status", "RUNNING")
+                .eq("current_stage", "STORING")
                 .set("failed_count", record.getTotalCount())
                 .set("record_status", "FAILED")
                 .set("current_stage", "FAILED")
                 .set("error_message", abbreviate(errorMessage, 1000))
-                .set("start_time", now)
                 .set("finish_time", now)
                 .set("update_time", now)
                 .setSql("version = version + 1"));
@@ -258,12 +257,6 @@ public class GisFileOptRecordService {
     private String normalizeLower(String value) {
         String normalized = trimToNull(value);
         return normalized == null ? null : normalized.toLowerCase(Locale.ROOT);
-    }
-
-    private String generateRecordNo(LocalDateTime now) {
-        return "GIS_IMPORT_" + now.format(RECORD_TIME) + "_"
-                + UUID.randomUUID().toString().replace("-", "")
-                .substring(0, 12).toUpperCase(Locale.ROOT);
     }
 
     private String abbreviate(String value, int maxLength) {
