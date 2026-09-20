@@ -9,6 +9,7 @@ import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileOptRecord;
+import org.ocean.admin.gis.entity.GisFileOptRecordItem;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.kernel.audit.CurrentOperator;
@@ -174,6 +175,7 @@ public class FileUploadService {
         consumeUploadSession(claimedSession);
 
         List<GisFileMeta> fileMetas = new ArrayList<>(files.size());
+        List<GisFileOptRecordItem> recordItems = new ArrayList<>(files.size());
         List<GisStoredFile> storedFiles = new ArrayList<>(files.size());
         int completedCount = 0;
         int failedCount = 0;
@@ -189,7 +191,6 @@ public class FileUploadService {
         for (int index = 0; index < files.size(); index++) {
             MultipartFile file = files.get(index);
             GisFileMeta meta = newBaseMeta(record.getDataSetId(), file, index + 1);
-            meta.setImportExportRecordId(record.getId());
             long completedBytesBeforeFile = processedBytes;
             GisStoredFile storedFile = null;
             try {
@@ -240,6 +241,18 @@ public class FileUploadService {
                         taskId, meta.getOriginalName(), ex.getMessage());
             }
             fileMetas.add(meta);
+            GisFileOptRecordItem recordItem = new GisFileOptRecordItem();
+            recordItem.setId(IdWorker.getId());
+            recordItem.setRecordId(record.getId());
+            recordItem.setFileMetaId(meta.getId());
+            recordItem.setSequenceNo(index + 1);
+            recordItem.setOriginalName(meta.getOriginalName());
+            recordItem.setOperationStatus(
+                    "READY".equals(meta.getUploadStatus()) ? "SUCCESS" : "FAILED");
+            recordItem.setErrorMessage(meta.getErrorMessage());
+            recordItem.setSizeBytes(meta.getSizeBytes());
+            recordItem.setCreateTime(LocalDateTime.now());
+            recordItems.add(recordItem);
             processedBytes += file == null ? 0L : Math.max(0L, file.getSize());
             reportStorageProgress(
                     taskId, processedBytes, totalBytes, meta.getOriginalName(), lastStorageProgress);
@@ -247,7 +260,7 @@ public class FileUploadService {
 
         try {
             gisFileOptRecordService.saveImportResult(
-                    record, fileMetas, completedCount, failedCount);
+                    record, fileMetas, recordItems, completedCount, failedCount);
         } catch (Exception ex) {
             for (GisStoredFile storedFile : storedFiles) {
                 try {

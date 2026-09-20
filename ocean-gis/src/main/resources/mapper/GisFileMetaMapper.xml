@@ -6,7 +6,7 @@
 
     <insert id="insertBatch">
         INSERT INTO ocean_gis.gis_file_meta (
-            id, data_set_id, import_export_record_id, original_name,
+            id, data_set_id, original_name,
             storage_name, storage_key, storage_type, extension,
             size_bytes, sha256, uploaded_by,
             upload_status, cleanup_status, error_message,
@@ -14,7 +14,7 @@
         ) VALUES
         <foreach collection="records" item="item" separator=",">
             (
-                #{item.id}, #{item.dataSetId}, #{item.importExportRecordId}, #{item.originalName},
+                #{item.id}, #{item.dataSetId}, #{item.originalName},
                 #{item.storageName}, #{item.storageKey}, #{item.storageType}, #{item.extension},
                 #{item.sizeBytes}, #{item.sha256}, #{item.uploadedBy},
                 #{item.uploadStatus}, #{item.cleanupStatus}, #{item.errorMessage},
@@ -27,7 +27,6 @@
         SELECT fm.id,
                fm.data_set_id,
                ds.category_id,
-               fm.import_export_record_id,
                fm.original_name,
                fm.storage_name,
                fm.storage_key,

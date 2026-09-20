@@ -1,19 +1,19 @@
 package org.ocean.admin.gis.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileOptRecord;
+import org.ocean.admin.gis.entity.GisFileOptRecordItem;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileOptRecordMapper;
+import org.ocean.admin.gis.mapper.GisFileOptRecordItemMapper;
 import org.ocean.admin.gis.vo.GisFileOptRecordVO;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.common.PageResult;
-import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -80,11 +80,7 @@ public class GisFileOptRecordService {
         if (record == null) {
             throw new IllegalArgumentException("导入记录不存在: " + normalizedRecordNo);
         }
-        List<GisFileMeta> fileMetas = fileMetaMapper.selectList(
-                new LambdaQueryWrapper<GisFileMeta>()
-                        .eq(GisFileMeta::getImportExportRecordId, record.getId())
-                        .orderByAsc(GisFileMeta::getCreateTime)
-                        .orderByAsc(GisFileMeta::getId));
+        List<GisFileMeta> fileMetas = recordItemMapper.selectFileMetasByRecordId(record.getId());
         record.setFiles(fileMetas.stream()
                 .map(meta -> toFileMetaVO(meta, record.getCategoryId()))
                 .toList());
@@ -93,6 +89,7 @@ public class GisFileOptRecordService {
 
     private final GisFileOptRecordMapper recordMapper;
     private final GisFileMetaMapper fileMetaMapper;
+    private final GisFileOptRecordItemMapper recordItemMapper;
     private final GisDataSetMapper dataSetMapper;
 
     /** 上传会话校验通过后创建正式导入记录，确保文件元数据能够引用它。 */
@@ -129,14 +126,17 @@ public class GisFileOptRecordService {
     public void saveImportResult(
             GisFileOptRecord record,
             List<GisFileMeta> fileMetas,
+            List<GisFileOptRecordItem> recordItems,
             int completedCount,
             int failedCount) {
         if (fileMetas == null || fileMetas.isEmpty()) {
             throw new IllegalArgumentException("待保存的文件元数据不能为空");
         }
-        if (completedCount < 0 || failedCount < 0
+        if (recordItems == null || recordItems.isEmpty()
+                || completedCount < 0 || failedCount < 0
                 || completedCount + failedCount != record.getTotalCount()
-                || fileMetas.size() != record.getTotalCount()) {
+                || fileMetas.size() != record.getTotalCount()
+                || recordItems.size() != record.getTotalCount()) {
             throw new IllegalArgumentException("导入结果计数不合法");
         }
 
@@ -163,6 +163,13 @@ public class GisFileOptRecordService {
         if (inserted != fileMetas.size()) {
             throw new IllegalStateException(
                     "文件元数据批量写入不完整: expected=" + fileMetas.size() + ", actual=" + inserted);
+        }
+
+        int itemInserted = recordItemMapper.insertBatch(recordItems);
+        if (itemInserted != recordItems.size()) {
+            throw new IllegalStateException(
+                    "文件操作明细批量写入不完整: expected=" + recordItems.size()
+                            + ", actual=" + itemInserted);
         }
 
         if (completedCount > 0) {
@@ -224,7 +231,6 @@ public class GisFileOptRecordService {
         vo.setId(meta.getId());
         vo.setDataSetId(meta.getDataSetId());
         vo.setCategoryId(categoryId);
-        vo.setImportExportRecordId(meta.getImportExportRecordId());
         vo.setOriginalName(meta.getOriginalName());
         vo.setStorageName(meta.getStorageName());
         vo.setStorageKey(meta.getStorageKey());
@@ -266,7 +272,4 @@ public class GisFileOptRecordService {
         return value.substring(0, maxLength);
     }
 
-    public ResponseResult<PageResult<List<GisFileOptRecord>>> recordPages(Integer current, Integer size, String opt) {
-        return null;
-    }
 }

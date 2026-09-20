@@ -24,9 +24,6 @@ public class GisFileMeta {
     /** 所属数据集 */
     private Long dataSetId;
 
-    /** 关联的文件导入导出记录 */
-    private Long importExportRecordId;
-
     /** 用户上传时的文件名 */
     private String originalName;
 

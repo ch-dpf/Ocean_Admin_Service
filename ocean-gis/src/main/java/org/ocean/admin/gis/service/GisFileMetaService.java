@@ -142,7 +142,6 @@ public class GisFileMetaService {
         GisFileMeta updatedMeta = new GisFileMeta();
         updatedMeta.setId(existing.getId());
         applyEditableFields(updatedMeta, reqVO, storageType, storageKey);
-        updatedMeta.setImportExportRecordId(existing.getImportExportRecordId());
         updatedMeta.setCleanupStatus(existing.getCleanupStatus());
         String requestedStatus = normalizeUpper(reqVO.getUploadStatus());
         updatedMeta.setUploadStatus(requestedStatus == null ? existing.getUploadStatus() : requestedStatus);
@@ -288,7 +287,6 @@ public class GisFileMetaService {
         GisFileMetaVO result = new GisFileMetaVO();
         result.setId(meta.getId());
         result.setDataSetId(meta.getDataSetId());
-        result.setImportExportRecordId(meta.getImportExportRecordId());
         result.setOriginalName(meta.getOriginalName());
         result.setStorageName(meta.getStorageName());
         result.setStorageKey(meta.getStorageKey());

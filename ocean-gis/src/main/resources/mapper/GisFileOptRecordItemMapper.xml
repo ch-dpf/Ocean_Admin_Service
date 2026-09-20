@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisFileOptRecordItemMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO ocean_gis.gis_file_opt_record_item (
+            id, record_id, file_meta_id, sequence_no, original_name,
+            operation_status, error_message, size_bytes, create_time
+        ) VALUES
+        <foreach collection="records" item="item" separator=",">
+            (
+                #{item.id}, #{item.recordId}, #{item.fileMetaId}, #{item.sequenceNo},
+                #{item.originalName}, #{item.operationStatus}, #{item.errorMessage},
+                #{item.sizeBytes}, #{item.createTime}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectFileMetasByRecordId"
+            resultType="org.ocean.admin.gis.entity.GisFileMeta">
+        SELECT fm.*
+        FROM ocean_gis.gis_file_opt_record_item item
+        JOIN ocean_gis.gis_file_meta fm ON fm.id = item.file_meta_id
+        WHERE item.record_id = #{recordId}
+          AND fm.deleted = 0
+        ORDER BY item.sequence_no, item.id
+    </select>
+
+</mapper>

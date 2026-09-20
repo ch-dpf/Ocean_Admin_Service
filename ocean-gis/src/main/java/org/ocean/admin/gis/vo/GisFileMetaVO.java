@@ -22,9 +22,6 @@ public class GisFileMetaVO {
             allowableValues = {"0", "1", "2"}, accessMode = Schema.AccessMode.READ_ONLY)
     private Long categoryId;
 
-    @Schema(description = "关联的文件导入导出记录 ID", accessMode = Schema.AccessMode.READ_ONLY)
-    private Long importExportRecordId;
-
     @Schema(description = "用户上传时的文件名", requiredMode = Schema.RequiredMode.REQUIRED)
     @Size(max = 255, message = "原始文件名长度不能超过255个字符")
     private String originalName;
