@@ -254,8 +254,14 @@ public class FileUploadService {
             recordItem.setCreateTime(LocalDateTime.now());
             recordItems.add(recordItem);
             processedBytes += file == null ? 0L : Math.max(0L, file.getSize());
-            reportStorageProgress(
-                    taskId, processedBytes, totalBytes, meta.getOriginalName(), lastStorageProgress);
+            asyncTaskService.updateProgressCounts(
+                    taskId,
+                    completedCount,
+                    failedCount,
+                    storageProgressForBytes(processedBytes, totalBytes),
+                    "storing",
+                    "文件处理完成：" + (completedCount + failedCount) + "/" + files.size()
+                            + "，当前文件：" + meta.getOriginalName());
         }
 
         try {
@@ -448,11 +454,7 @@ public class FileUploadService {
             long totalBytes,
             String fileName,
             int[] lastProgress) {
-        int progress = totalBytes <= 0
-                ? STORAGE_PROGRESS_END
-                : (int) Math.min(
-                        STORAGE_PROGRESS_END,
-                        stagedBytes * STORAGE_PROGRESS_END / totalBytes);
+        int progress = storageProgressForBytes(stagedBytes, totalBytes);
         if (progress <= lastProgress[0]) {
             return;
         }
@@ -464,6 +466,15 @@ public class FileUploadService {
                 "正在存储文件：" + fileName + "（"
                         + formatBytes(Math.min(stagedBytes, totalBytes)) + "/"
                         + formatBytes(totalBytes) + "）");
+    }
+
+    private int storageProgressForBytes(long stagedBytes, long totalBytes) {
+        if (totalBytes <= 0) {
+            return STORAGE_PROGRESS_END;
+        }
+        return (int) Math.min(
+                STORAGE_PROGRESS_END,
+                stagedBytes * STORAGE_PROGRESS_END / totalBytes);
     }
 
     private String formatBytes(long bytes) {
