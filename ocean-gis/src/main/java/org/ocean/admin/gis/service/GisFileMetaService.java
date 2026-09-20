@@ -3,16 +3,21 @@ package org.ocean.admin.gis.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import org.ocean.admin.gis.util.FileDownloadUtil;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
+import org.ocean.admin.kernel.audit.CurrentOperator;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,6 +39,8 @@ public class GisFileMetaService {
     private final GisFileMetaMapper gisFileMetaMapper;
     private final GisDataSetMapper gisDataSetMapper;
     private final GisDataSetService gisDataSetService;
+    private final GisFileOptRecordService gisFileOptRecordService;
+    private final FileDownloadUtil fileDownloadUtil;
 
     public PageResult<List<GisFileMetaVO>> getFileMetaPage(
             Integer current,
@@ -187,6 +194,26 @@ public class GisFileMetaService {
         return toVOWithCategory(getRequired(id));
     }
 
+    /**
+     * 下载已入库文件的原始内容。
+     *
+     * <p>文件内容直接写入响应流，下载记录在写出成功后单独登记：响应提交后无法回滚，
+     * 登记失败只记错误日志，不把已经完成的下载改判为失败。</p>
+     */
+    public void downloadFile(Long id, HttpServletResponse response) {
+        GisFileMeta meta = getRequired(id);
+        ensureDownloadable(meta);
+        long sizeBytes = fileDownloadUtil.writeToResponse(
+                meta.getStorageKey(), meta.getOriginalName(), response);
+        try {
+            gisFileOptRecordService.createDownloadRecord(meta, currentOperatorId());
+        } catch (RuntimeException recordFailure) {
+            log.error("下载记录登记失败: fileMetaId={}", id, recordFailure);
+        }
+        log.info("下载 GIS 文件成功: id={}, originalName={}, sizeBytes={}",
+                id, meta.getOriginalName(), sizeBytes);
+    }
+
     /** 供文件处理编排读取完整的已入库元数据。 */
     public GisFileMeta getRequiredEntity(Long id) {
         return getRequired(id);
@@ -201,6 +228,27 @@ public class GisFileMetaService {
             throw new IllegalArgumentException("文件元数据不存在或已删除: " + id);
         }
         return meta;
+    }
+
+    /** 只有已入库且落在本地存储的文件才能直接下载。 */
+    private void ensureDownloadable(GisFileMeta meta) {
+        if (!"READY".equals(normalizeUpper(meta.getUploadStatus()))) {
+            throw new IllegalArgumentException("文件尚未入库，不能下载: " + meta.getId());
+        }
+        if (!"LOCAL".equals(normalizeUpper(meta.getStorageType()))) {
+            throw new IllegalArgumentException(
+                    "暂不支持下载 " + meta.getStorageType() + " 存储的文件: " + meta.getId());
+        }
+    }
+
+    /** 认证入口写入的操作者用于下载记录留痕，未认证场景允许为空。 */
+    private Long currentOperatorId() {
+        if (!(RequestContextHolder.getRequestAttributes()
+                instanceof ServletRequestAttributes attributes)) {
+            return null;
+        }
+        Object value = attributes.getRequest().getAttribute(CurrentOperator.REQUEST_ATTRIBUTE);
+        return value instanceof CurrentOperator operator ? operator.userId() : null;
     }
 
     private void validateRequest(GisFileMetaVO reqVO, boolean requireId) {

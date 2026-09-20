@@ -3,6 +3,7 @@ package org.ocean.admin.gis.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisFileProcessRequest;
@@ -93,6 +94,16 @@ public class GisFileMetaController {
     @Operation(summary = "获取文件元数据详情")
     public ResponseResult<GisFileMetaVO> getFileMeta(@PathVariable Long id) {
         return ResponseResult.success(gisFileMetaService.getFileMetaDetail(id));
+    }
+
+    @GetMapping("/{id}/download")
+    @Operation(summary = "下载文件数据", description = "下载已入库文件的原始内容")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.EXPORT, description = "下载GIS文件数据")
+    public void downloadFile(
+            @Parameter(description = "文件元数据ID", required = true)
+            @PathVariable Long id,
+            HttpServletResponse response) {
+        gisFileMetaService.downloadFile(id, response);
     }
 
     @PostMapping("/import/task")

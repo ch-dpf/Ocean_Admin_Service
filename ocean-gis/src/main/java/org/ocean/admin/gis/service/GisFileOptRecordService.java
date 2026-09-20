@@ -1,6 +1,7 @@
 package org.ocean.admin.gis.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisFileMeta;
@@ -117,6 +118,49 @@ public class GisFileOptRecordService {
         record.setDeleted(0);
         if (recordMapper.insert(record) != 1) {
             throw new IllegalStateException("导入记录创建失败");
+        }
+        return record;
+    }
+
+    /**
+     * 登记单文件下载记录。
+     *
+     * <p>下载与导出共用导入导出记录表，该表的 operation_type 只区分 IMPORT 与 EXPORT，
+     * 因此单次下载按“一个批次 + 一条成功明细”收口，便于与导入记录一起检索。</p>
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public GisFileOptRecord createDownloadRecord(GisFileMeta fileMeta, Long operatorId) {
+        LocalDateTime now = LocalDateTime.now();
+        GisFileOptRecord record = new GisFileOptRecord();
+        record.setRecordNo("GIS_EXPORT_" + IdWorker.getIdStr());
+        record.setOperationType("EXPORT");
+        record.setDataSetId(fileMeta.getDataSetId());
+        record.setTotalCount(1);
+        record.setCompletedCount(1);
+        record.setFailedCount(0);
+        record.setRecordStatus("COMPLETED");
+        record.setCurrentStage("COMPLETED");
+        record.setOperatorId(operatorId);
+        record.setVersion(0L);
+        record.setStartTime(now);
+        record.setFinishTime(now);
+        record.setCreateTime(now);
+        record.setUpdateTime(now);
+        record.setDeleted(0);
+        if (recordMapper.insert(record) != 1) {
+            throw new IllegalStateException("下载记录创建失败: " + fileMeta.getId());
+        }
+
+        GisFileOptRecordItem item = new GisFileOptRecordItem();
+        item.setRecordId(record.getId());
+        item.setFileMetaId(fileMeta.getId());
+        item.setSequenceNo(1);
+        item.setOriginalName(abbreviate(fileMeta.getOriginalName(), 255));
+        item.setOperationStatus("SUCCESS");
+        item.setSizeBytes(fileMeta.getSizeBytes() == null ? 0L : fileMeta.getSizeBytes());
+        item.setCreateTime(now);
+        if (recordItemMapper.insert(item) != 1) {
+            throw new IllegalStateException("下载记录明细创建失败: " + fileMeta.getId());
         }
         return record;
     }
