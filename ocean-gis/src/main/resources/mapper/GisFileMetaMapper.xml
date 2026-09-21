@@ -62,4 +62,25 @@
         ORDER BY fm.create_time DESC
     </select>
 
+    <select id="selectDeletedById" resultType="org.ocean.admin.gis.entity.GisFileMeta">
+        SELECT *
+        FROM ocean_gis.gis_file_meta
+        WHERE id = #{id}
+          AND deleted = 1
+    </select>
+
+    <update id="restoreDeletedById">
+        UPDATE ocean_gis.gis_file_meta
+        SET deleted = 0,
+            update_time = #{updateTime}
+        WHERE id = #{id}
+          AND deleted = 1
+    </update>
+
+    <delete id="permanentlyDeleteById">
+        DELETE FROM ocean_gis.gis_file_meta
+        WHERE id = #{id}
+          AND deleted = 1
+    </delete>
+
 </mapper>

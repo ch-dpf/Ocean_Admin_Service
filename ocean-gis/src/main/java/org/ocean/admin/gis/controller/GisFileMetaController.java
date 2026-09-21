@@ -67,6 +67,25 @@ public class GisFileMetaController {
                 current, size, dataSetId, categoryId, originalName, extension, uploadStatus));
     }
 
+    @PutMapping("/deleted/{id}/restore")
+    @Operation(summary = "恢复回收站文件", description = "撤销文件元数据的逻辑删除状态")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.UPDATE,
+            description = "恢复回收站GIS文件元数据")
+    public ResponseResult<String> restoreDeletedFileMeta(@PathVariable Long id) {
+        gisFileMetaService.restoreDeletedFileMeta(id);
+        return ResponseResult.success("恢复成功");
+    }
+
+    @DeleteMapping("/deleted/{id}")
+    @Operation(summary = "彻底删除回收站文件",
+            description = "永久删除文件元数据及其对应的存储文件，此操作不可恢复")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.DELETE,
+            description = "彻底删除回收站GIS文件")
+    public ResponseResult<String> permanentlyDeleteFileMeta(@PathVariable Long id) {
+        gisFileMetaService.permanentlyDeleteFileMeta(id);
+        return ResponseResult.success("彻底删除成功");
+    }
+
     @PostMapping("/create")
     @Operation(summary = "创建文件元数据")
     @OperationLog(module = "GIS_FILE_META", type = OperationType.INSERT, description = "创建GIS文件元数据",

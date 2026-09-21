@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Param;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 
+import java.time.LocalDateTime;
+
 import java.util.List;
 
 /**
@@ -29,4 +31,15 @@ public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
             @Param("originalName") String originalName,
             @Param("extension") String extension,
             @Param("uploadStatus") String uploadStatus);
+
+    /** 绕过逻辑删除拦截读取回收站中的单条记录。 */
+    GisFileMeta selectDeletedById(@Param("id") Long id);
+
+    /** 将回收站记录恢复为正常记录。 */
+    int restoreDeletedById(
+            @Param("id") Long id,
+            @Param("updateTime") LocalDateTime updateTime);
+
+    /** 物理删除回收站中的元数据。 */
+    int permanentlyDeleteById(@Param("id") Long id);
 }

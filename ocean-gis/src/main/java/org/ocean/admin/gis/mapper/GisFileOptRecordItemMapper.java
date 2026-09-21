@@ -13,4 +13,7 @@ public interface GisFileOptRecordItemMapper extends BaseMapper<GisFileOptRecordI
     int insertBatch(@Param("records") List<GisFileOptRecordItem> records);
 
     List<GisFileOptRecordItem> selectByRecordId(@Param("recordId") Long recordId);
+
+    /** 彻底删除文件元数据前解除引用，历史快照字段保持不变。 */
+    int clearFileMetaReference(@Param("fileMetaId") Long fileMetaId);
 }

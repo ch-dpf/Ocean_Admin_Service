@@ -119,7 +119,6 @@ CREATE INDEX idx_gis_file_opt_record_status
 CREATE TABLE ocean_gis.gis_file_meta (
     id                       BIGINT        PRIMARY KEY,
     data_set_id              BIGINT        NOT NULL,
-    import_export_record_id  BIGINT,
     original_name            VARCHAR(255)  NOT NULL,
     storage_name             VARCHAR(255),
     storage_key              VARCHAR(1000),
@@ -128,15 +127,12 @@ CREATE TABLE ocean_gis.gis_file_meta (
     size_bytes               BIGINT        NOT NULL DEFAULT 0,
     sha256                   VARCHAR(64),
     uploaded_by              BIGINT,
-    task_id                  BIGINT,
     upload_status            VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
     cleanup_status           VARCHAR(20)   NOT NULL DEFAULT 'NOT_REQUIRED',
     error_message            VARCHAR(1000),
     create_time              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted                  INTEGER       NOT NULL DEFAULT 0,
-    CONSTRAINT fk_gis_file_meta_import_export_record
-        FOREIGN KEY (import_export_record_id) REFERENCES ocean_gis.gis_file_opt_record (id),
     CONSTRAINT ck_gis_file_meta_storage_type
         CHECK (storage_type IN ('LOCAL', 'MINIO', 'S3')),
     CONSTRAINT ck_gis_file_meta_size
@@ -166,7 +162,6 @@ CREATE TABLE ocean_gis.gis_file_meta (
 COMMENT ON TABLE ocean_gis.gis_file_meta IS 'GIS 文件元数据';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_key IS '相对存储路径或对象存储 Key';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_type IS '存储类型：LOCAL、MINIO 或 S3';
-COMMENT ON COLUMN ocean_gis.gis_file_meta.import_export_record_id IS '关联的文件导入导出记录 ID';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.cleanup_status IS '失败文件资源清理状态：NOT_REQUIRED、PENDING、COMPLETED、FAILED';
 
 CREATE UNIQUE INDEX uk_gis_file_meta_active_storage
@@ -181,13 +176,64 @@ CREATE INDEX idx_gis_file_meta_sha256
     ON ocean_gis.gis_file_meta (sha256)
     WHERE deleted = 0 AND sha256 IS NOT NULL;
 
-CREATE INDEX idx_gis_file_meta_task
-    ON ocean_gis.gis_file_meta (task_id, create_time)
-    WHERE deleted = 0 AND task_id IS NOT NULL;
+-- =========================================================
+-- GIS 文件操作逐文件明细
+-- =========================================================
 
-CREATE INDEX idx_gis_file_meta_import_export_record
-    ON ocean_gis.gis_file_meta (import_export_record_id, create_time)
-    WHERE deleted = 0 AND import_export_record_id IS NOT NULL;
+CREATE TABLE ocean_gis.gis_file_opt_record_item (
+    id                  BIGINT        PRIMARY KEY,
+    record_id           BIGINT        NOT NULL,
+    file_meta_id        BIGINT,
+    sequence_no         INTEGER       NOT NULL,
+    original_name       VARCHAR(255)  NOT NULL,
+    operation_status    VARCHAR(20)   NOT NULL,
+    error_message       VARCHAR(1000),
+    size_bytes          BIGINT        NOT NULL DEFAULT 0,
+    storage_name        VARCHAR(255),
+    storage_key         VARCHAR(1000),
+    storage_type        VARCHAR(20),
+    extension           VARCHAR(32),
+    sha256              VARCHAR(64),
+    uploaded_by         BIGINT,
+    upload_status       VARCHAR(20),
+    cleanup_status      VARCHAR(20),
+    create_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP,
+    CONSTRAINT fk_gis_file_opt_record_item_record
+        FOREIGN KEY (record_id) REFERENCES ocean_gis.gis_file_opt_record (id),
+    CONSTRAINT fk_gis_file_opt_record_item_file
+        FOREIGN KEY (file_meta_id) REFERENCES ocean_gis.gis_file_meta (id),
+    CONSTRAINT uk_gis_file_opt_record_item_sequence
+        UNIQUE (record_id, sequence_no),
+    CONSTRAINT ck_gis_file_opt_record_item_status
+        CHECK (operation_status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED')),
+    CONSTRAINT ck_gis_file_opt_record_item_size
+        CHECK (size_bytes >= 0)
+);
+
+COMMENT ON TABLE ocean_gis.gis_file_opt_record_item IS 'GIS 文件上传下载批次的逐文件处理明细';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.file_meta_id IS '对应文件元数据；文件形成前失败时允许为空';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.operation_status IS '本次操作状态：PENDING、RUNNING、SUCCESS、FAILED';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.storage_name IS '操作发生时的系统存储文件名快照';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.storage_key IS '操作发生时的存储路径或对象存储 Key 快照';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.storage_type IS '操作发生时的存储类型快照';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.extension IS '操作发生时的扩展名快照';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.sha256 IS '操作发生时的 SHA-256 快照';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.uploaded_by IS '操作发生时的上传人快照';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.upload_status IS '操作发生时的上传状态快照';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.cleanup_status IS '操作发生时的资源清理状态快照';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record_item.update_time IS '操作完成时的文件更新时间快照';
+
+CREATE INDEX idx_gis_file_opt_record_item_record
+    ON ocean_gis.gis_file_opt_record_item (record_id, sequence_no);
+
+CREATE INDEX idx_gis_file_opt_record_item_file
+    ON ocean_gis.gis_file_opt_record_item (file_meta_id, create_time)
+    WHERE file_meta_id IS NOT NULL;
+
+CREATE UNIQUE INDEX uk_gis_file_opt_record_item_file
+    ON ocean_gis.gis_file_opt_record_item (record_id, file_meta_id)
+    WHERE file_meta_id IS NOT NULL;
 
 
 -- =========================================================

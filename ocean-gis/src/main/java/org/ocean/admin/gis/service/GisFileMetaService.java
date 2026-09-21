@@ -10,7 +10,9 @@ import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import org.ocean.admin.gis.mapper.GisFileOptRecordItemMapper;
 import org.ocean.admin.gis.util.FileDownloadUtil;
+import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.audit.CurrentOperator;
 import org.ocean.admin.kernel.common.PageResult;
@@ -37,10 +39,12 @@ public class GisFileMetaService {
     private static final Set<String> UPLOAD_STATUSES = Set.of("PENDING", "READY", "FAILED");
 
     private final GisFileMetaMapper gisFileMetaMapper;
+    private final GisFileOptRecordItemMapper gisFileOptRecordItemMapper;
     private final GisDataSetMapper gisDataSetMapper;
     private final GisDataSetService gisDataSetService;
     private final GisFileOptRecordService gisFileOptRecordService;
     private final FileDownloadUtil fileDownloadUtil;
+    private final FileUploadUtil fileUploadUtil;
 
     public PageResult<List<GisFileMetaVO>> getFileMetaPage(
             Integer current,
@@ -100,6 +104,39 @@ public class GisFileMetaService {
                 normalizedExtension,
                 normalizedStatus);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void restoreDeletedFileMeta(Long id) {
+        GisFileMeta deletedMeta = getRequiredDeleted(id);
+        ensureDataSetExists(deletedMeta.getDataSetId());
+        String storageKey = trimToNull(deletedMeta.getStorageKey());
+        if (storageKey != null) {
+            ensureStorageKeyAvailable(deletedMeta.getStorageType(), storageKey, deletedMeta.getId());
+        }
+        if (gisFileMetaMapper.restoreDeletedById(id, LocalDateTime.now()) != 1) {
+            throw new IllegalStateException("回收站文件恢复失败: " + id);
+        }
+        if ("READY".equals(deletedMeta.getUploadStatus())) {
+            gisDataSetService.incrementFileCount(deletedMeta.getDataSetId(), 1);
+        }
+        log.info("恢复回收站 GIS 文件成功: id={}, dataSetId={}", id, deletedMeta.getDataSetId());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void permanentlyDeleteFileMeta(Long id) {
+        GisFileMeta deletedMeta = getRequiredDeleted(id);
+        validatePermanentDeleteStorage(deletedMeta);
+
+        gisFileOptRecordItemMapper.clearFileMetaReference(id);
+        if (gisFileMetaMapper.permanentlyDeleteById(id) != 1) {
+            throw new IllegalStateException("回收站文件彻底删除失败: " + id);
+        }
+        String storageKey = trimToNull(deletedMeta.getStorageKey());
+        if (storageKey != null) {
+            fileUploadUtil.deleteStored(storageKey);
+        }
+        log.info("彻底删除回收站 GIS 文件成功: id={}, storageKey={}", id, storageKey);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -228,6 +265,28 @@ public class GisFileMetaService {
             throw new IllegalArgumentException("文件元数据不存在或已删除: " + id);
         }
         return meta;
+    }
+
+    private GisFileMeta getRequiredDeleted(Long id) {
+        if (id == null) {
+            throw new IllegalArgumentException("文件元数据ID不能为空");
+        }
+        GisFileMeta meta = gisFileMetaMapper.selectDeletedById(id);
+        if (meta == null) {
+            throw new IllegalArgumentException("回收站文件元数据不存在: " + id);
+        }
+        return meta;
+    }
+
+    private void validatePermanentDeleteStorage(GisFileMeta meta) {
+        if (trimToNull(meta.getStorageKey()) == null) {
+            return;
+        }
+        String storageType = normalizeUpper(meta.getStorageType());
+        if (!"LOCAL".equals(storageType)) {
+            throw new IllegalStateException(
+                    "暂不支持彻底删除 " + storageType + " 存储文件: " + meta.getId());
+        }
     }
 
     /** 只有已入库且落在本地存储的文件才能直接下载。 */

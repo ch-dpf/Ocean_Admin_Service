@@ -31,4 +31,10 @@
         ORDER BY item.sequence_no, item.id
     </select>
 
+    <update id="clearFileMetaReference">
+        UPDATE ocean_gis.gis_file_opt_record_item
+        SET file_meta_id = NULL
+        WHERE file_meta_id = #{fileMetaId}
+    </update>
+
 </mapper>
