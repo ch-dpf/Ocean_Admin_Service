@@ -58,18 +58,15 @@
             AND EXISTS (
                 SELECT 1
                 FROM ocean_gis.gis_file_opt_record_item item
-                LEFT JOIN ocean_gis.gis_file_meta fm ON fm.id = item.file_meta_id
                 WHERE item.record_id = r.id
-                  AND (fm.id IS NULL OR fm.deleted = 0)
                 <if test="originalName != null">
-                    AND COALESCE(item.original_name, fm.original_name)
-                        LIKE CONCAT('%', #{originalName}, '%')
+                    AND item.original_name LIKE CONCAT('%', #{originalName}, '%')
                 </if>
                 <if test="extension != null">
-                    AND fm.extension = #{extension}
+                    AND item.extension = #{extension}
                 </if>
                 <if test="uploadStatus != null">
-                    AND fm.upload_status = #{uploadStatus}
+                    AND item.upload_status = #{uploadStatus}
                 </if>
             )
         </if>

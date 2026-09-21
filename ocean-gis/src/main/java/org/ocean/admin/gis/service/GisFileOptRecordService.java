@@ -81,9 +81,9 @@ public class GisFileOptRecordService {
         if (record == null) {
             throw new IllegalArgumentException("导入记录不存在: " + normalizedRecordNo);
         }
-        List<GisFileMeta> fileMetas = recordItemMapper.selectFileMetasByRecordId(record.getId());
-        record.setFiles(fileMetas.stream()
-                .map(meta -> toFileMetaVO(meta, record.getCategoryId()))
+        List<GisFileOptRecordItem> recordItems = recordItemMapper.selectByRecordId(record.getId());
+        record.setFiles(recordItems.stream()
+                .map(item -> toFileSnapshotVO(item, record.getDataSetId(), record.getCategoryId()))
                 .toList());
         return record;
     }
@@ -155,10 +155,11 @@ public class GisFileOptRecordService {
         item.setRecordId(record.getId());
         item.setFileMetaId(fileMeta.getId());
         item.setSequenceNo(1);
+        item.captureFileMetaSnapshot(fileMeta);
         item.setOriginalName(abbreviate(fileMeta.getOriginalName(), 255));
         item.setOperationStatus("SUCCESS");
-        item.setSizeBytes(fileMeta.getSizeBytes() == null ? 0L : fileMeta.getSizeBytes());
         item.setCreateTime(now);
+        item.setUpdateTime(now);
         if (recordItemMapper.insert(item) != 1) {
             throw new IllegalStateException("下载记录明细创建失败: " + fileMeta.getId());
         }
@@ -270,24 +271,27 @@ public class GisFileOptRecordService {
         }
     }
 
-    private GisFileMetaVO toFileMetaVO(GisFileMeta meta, Long categoryId) {
+    private GisFileMetaVO toFileSnapshotVO(
+            GisFileOptRecordItem item,
+            Long dataSetId,
+            Long categoryId) {
         GisFileMetaVO vo = new GisFileMetaVO();
-        vo.setId(meta.getId());
-        vo.setDataSetId(meta.getDataSetId());
+        vo.setId(item.getFileMetaId());
+        vo.setDataSetId(dataSetId);
         vo.setCategoryId(categoryId);
-        vo.setOriginalName(meta.getOriginalName());
-        vo.setStorageName(meta.getStorageName());
-        vo.setStorageKey(meta.getStorageKey());
-        vo.setStorageType(meta.getStorageType());
-        vo.setExtension(meta.getExtension());
-        vo.setSizeBytes(meta.getSizeBytes());
-        vo.setSha256(meta.getSha256());
-        vo.setUploadedBy(meta.getUploadedBy());
-        vo.setUploadStatus(meta.getUploadStatus());
-        vo.setCleanupStatus(meta.getCleanupStatus());
-        vo.setErrorMessage(meta.getErrorMessage());
-        vo.setCreateTime(meta.getCreateTime());
-        vo.setUpdateTime(meta.getUpdateTime());
+        vo.setOriginalName(item.getOriginalName());
+        vo.setStorageName(item.getStorageName());
+        vo.setStorageKey(item.getStorageKey());
+        vo.setStorageType(item.getStorageType());
+        vo.setExtension(item.getExtension());
+        vo.setSizeBytes(item.getSizeBytes());
+        vo.setSha256(item.getSha256());
+        vo.setUploadedBy(item.getUploadedBy());
+        vo.setUploadStatus(item.getUploadStatus());
+        vo.setCleanupStatus(item.getCleanupStatus());
+        vo.setErrorMessage(item.getErrorMessage());
+        vo.setCreateTime(item.getCreateTime());
+        vo.setUpdateTime(item.getUpdateTime());
         return vo;
     }
 

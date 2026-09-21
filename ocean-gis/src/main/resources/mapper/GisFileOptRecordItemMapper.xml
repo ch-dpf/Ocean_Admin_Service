@@ -7,24 +7,27 @@
     <insert id="insertBatch">
         INSERT INTO ocean_gis.gis_file_opt_record_item (
             id, record_id, file_meta_id, sequence_no, original_name,
-            operation_status, error_message, size_bytes, create_time
+            storage_name, storage_key, storage_type, extension,
+            operation_status, error_message, size_bytes, sha256,
+            uploaded_by, upload_status, cleanup_status, create_time, update_time
         ) VALUES
         <foreach collection="records" item="item" separator=",">
             (
                 #{item.id}, #{item.recordId}, #{item.fileMetaId}, #{item.sequenceNo},
-                #{item.originalName}, #{item.operationStatus}, #{item.errorMessage},
-                #{item.sizeBytes}, #{item.createTime}
+                #{item.originalName}, #{item.storageName}, #{item.storageKey},
+                #{item.storageType}, #{item.extension}, #{item.operationStatus},
+                #{item.errorMessage}, #{item.sizeBytes}, #{item.sha256},
+                #{item.uploadedBy}, #{item.uploadStatus}, #{item.cleanupStatus},
+                #{item.createTime}, #{item.updateTime}
             )
         </foreach>
     </insert>
 
-    <select id="selectFileMetasByRecordId"
-            resultType="org.ocean.admin.gis.entity.GisFileMeta">
-        SELECT fm.*
+    <select id="selectByRecordId"
+            resultType="org.ocean.admin.gis.entity.GisFileOptRecordItem">
+        SELECT item.*
         FROM ocean_gis.gis_file_opt_record_item item
-        JOIN ocean_gis.gis_file_meta fm ON fm.id = item.file_meta_id
         WHERE item.record_id = #{recordId}
-          AND fm.deleted = 0
         ORDER BY item.sequence_no, item.id
     </select>
 

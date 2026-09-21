@@ -34,6 +34,6 @@ public class GisFileOptRecordVO {
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 
-    @Schema(description = "记录详情中的逐文件结果；分页列表不返回")
+    @Schema(description = "记录详情中的逐文件历史快照；分页列表不返回")
     private List<GisFileMetaVO> files;
 }

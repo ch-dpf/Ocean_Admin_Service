@@ -3,7 +3,6 @@ package org.ocean.admin.gis.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileOptRecordItem;
 
 import java.util.List;
@@ -13,5 +12,5 @@ public interface GisFileOptRecordItemMapper extends BaseMapper<GisFileOptRecordI
 
     int insertBatch(@Param("records") List<GisFileOptRecordItem> records);
 
-    List<GisFileMeta> selectFileMetasByRecordId(@Param("recordId") Long recordId);
+    List<GisFileOptRecordItem> selectByRecordId(@Param("recordId") Long recordId);
 }

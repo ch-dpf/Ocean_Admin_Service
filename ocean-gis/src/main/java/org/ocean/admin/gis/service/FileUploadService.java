@@ -246,12 +246,9 @@ public class FileUploadService {
             recordItem.setRecordId(record.getId());
             recordItem.setFileMetaId(meta.getId());
             recordItem.setSequenceNo(index + 1);
-            recordItem.setOriginalName(meta.getOriginalName());
+            recordItem.captureFileMetaSnapshot(meta);
             recordItem.setOperationStatus(
                     "READY".equals(meta.getUploadStatus()) ? "SUCCESS" : "FAILED");
-            recordItem.setErrorMessage(meta.getErrorMessage());
-            recordItem.setSizeBytes(meta.getSizeBytes());
-            recordItem.setCreateTime(LocalDateTime.now());
             recordItems.add(recordItem);
             processedBytes += file == null ? 0L : Math.max(0L, file.getSize());
             asyncTaskService.updateProgressCounts(
