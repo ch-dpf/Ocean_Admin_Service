@@ -6,6 +6,7 @@ import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisProcessingType;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.function.Consumer;
 
 /** 单文件切片引擎适配器。 */
@@ -16,6 +17,16 @@ public interface GisFileProcessingEngine {
     void validate(GisFileMeta fileMeta, Path inputPath);
 
     void process(GisProcessingExecution execution, Consumer<String> outputListener);
+
+    /** 处理多个输入文件并生成一个统一瓦片集；单文件引擎默认复用单文件实现。 */
+    default void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
+            Consumer<String> outputListener) {
+        if (inputPaths == null || inputPaths.size() != 1) {
+            throw new UnsupportedOperationException(type().displayName() + "引擎不支持多文件合并处理");
+        }
+        process(new GisProcessingExecution(null, null, null, type(), inputPaths.get(0), workspace),
+                outputListener);
+    }
 
     /** 处理无需文件元数据、直接来自服务器目录的输入。 */
     default void processFolder(

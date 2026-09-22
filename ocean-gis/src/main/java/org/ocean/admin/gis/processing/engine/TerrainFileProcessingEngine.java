@@ -10,6 +10,7 @@ import org.ocean.admin.gis.terrain.engine.TerrainOptions;
 
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -48,6 +49,15 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
                         execution.workspace().tempPath(),
                         execution.workspace().logPath(),
                         TerrainOptions.defaults()),
+                outputListener::accept);
+    }
+
+    @Override
+    public void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
+            Consumer<String> outputListener) {
+        terrainEngine.generate(
+                new TerrainGenerationRequest(inputPaths, workspace.outputPath(),
+                        workspace.tempPath(), workspace.logPath(), TerrainOptions.defaults()),
                 outputListener::accept);
     }
 

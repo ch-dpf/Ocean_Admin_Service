@@ -67,42 +67,26 @@ public class ProcessingWorker {
         try {
             taskLifecycle.start(execution.taskId(), execution.taskNo(), 0, "开始执行多文件切片");
             GisFileProcessingEngine engine = engineRegistry.require(execution.processingType());
+            execution.files().forEach(file -> updateFile(file.getId(), "RUNNING", null));
+            java.util.List<Path> inputs = execution.files().stream()
+                    .map(file -> fileUploadUtil.resolveStoredPath(file.getStorageKey()))
+                    .toList();
+            engine.process(inputs, execution.workspace(),
+                    line -> log.debug("GIS多文件切片引擎输出: taskNo={}, {}", execution.taskNo(), line));
             for (GisProcessingTaskFile file : execution.files()) {
-                boolean success = processFile(execution, file, engine);
-                taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), success);
+                updateFile(file.getId(), "COMPLETED", null);
+                taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), true);
             }
             taskLifecycle.finish(execution.taskId(), execution.taskNo(),
                     finished -> "处理结束，成功" + finished.getCompletedCount()
                             + "个，失败" + finished.getFailedCount() + "个");
         } catch (Exception ex) {
+            execution.files().forEach(file -> updateFile(file.getId(), "FAILED", abbreviate(ex.getMessage())));
+            for (int i = 0; i < execution.files().size(); i++) {
+                taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), false);
+            }
             taskLifecycle.fail(execution.taskId(), execution.taskNo(), "多文件处理失败: ", ex);
             log.error("GIS多文件切片任务失败: taskNo={}", execution.taskNo(), ex);
-        }
-    }
-
-    private boolean processFile(GisBatchProcessingExecution execution,
-            GisProcessingTaskFile file, GisFileProcessingEngine engine) {
-        try {
-            updateFile(file.getId(), "RUNNING", null);
-            Path input = fileUploadUtil.resolveStoredPath(file.getStorageKey());
-            String segment = String.format("%04d", file.getFileIndex());
-            GisProcessingWorkspace taskWorkspace = execution.workspace();
-            GisProcessingWorkspace fileWorkspace = new GisProcessingWorkspace(
-                    file.getOutputKey(),
-                    taskWorkspace.outputPath().resolve(segment),
-                    taskWorkspace.tempPath().resolve(segment),
-                    taskWorkspace.logPath().getParent().resolve(segment + ".log"));
-            engine.process(new GisProcessingExecution(execution.taskId(), execution.taskNo(),
-                    null, execution.processingType(), input, fileWorkspace),
-                    line -> log.debug("GIS多文件切片引擎输出: taskNo={}, file={}, {}",
-                            execution.taskNo(), file.getOriginalName(), line));
-            updateFile(file.getId(), "COMPLETED", null);
-            return true;
-        } catch (Exception ex) {
-            updateFile(file.getId(), "FAILED", abbreviate(ex.getMessage()));
-            log.error("GIS多文件切片失败: taskNo={}, file={}",
-                    execution.taskNo(), file.getOriginalName(), ex);
-            return false;
         }
     }
 

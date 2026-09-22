@@ -2,6 +2,8 @@ package org.ocean.admin.gis.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,7 +52,7 @@ public class GisTaskController {
             @RequestParam(defaultValue = "10") Integer size,
             @RequestParam(required = false) String taskNo,
             @RequestParam(required = false) String taskName,
-            @Parameter(description = "任务类型：1-上传、2-切片、3-发布、4-导出或下载")
+            @Parameter(description = "任务类型")
             @RequestParam(required = false) Long taskType,
             @Parameter(description = "任务状态：QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED")
             @RequestParam(required = false) String taskStatus,
@@ -75,7 +77,7 @@ public class GisTaskController {
 
     @PostMapping(value = "/process", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "新建多文件处理任务",
-            description = "request 为 JSON，files 为本次上传的文件；按处理类型选择切片引擎并异步逐文件执行")
+            description = "request 为 JSON，files 为本次上传的文件；多个输入文件合并生成一个瓦片集")
     @OperationLog(module = "GIS_TASK", type = OperationType.SUBMIT,
             description = "新建GIS多文件处理任务", recordResponse = true)
     public ResponseResult<GisBatchProcessingTaskVO> createProcessingTask(

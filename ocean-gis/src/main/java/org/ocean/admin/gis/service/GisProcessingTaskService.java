@@ -88,7 +88,7 @@ public class GisProcessingTaskService {
             item.setFileIndex(i + 1);
             item.setOriginalName(stagedFiles.get(i).getOriginalName());
             item.setStorageKey(storedFiles.get(i).getStorageKey());
-            item.setOutputKey(workspace.outputKey() + "/tiles/" + String.format("%04d", i + 1));
+            item.setOutputKey(workspace.outputKey());
             item.setStatus("QUEUED");
             if (fileMapper.insert(item) != 1) {
                 throw new IllegalStateException("处理文件工作项创建失败");
