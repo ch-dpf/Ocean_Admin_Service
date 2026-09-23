@@ -1,6 +1,5 @@
 package org.ocean.admin.gis.imagery;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.imagen.Interpolation;
 import org.eclipse.imagen.RenderedOp;
 import org.eclipse.imagen.media.scale.ScaleDescriptor;
@@ -31,6 +30,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
+import tools.jackson.databind.ObjectMapper;
 
 /** 使用 GeoTools、Eclipse ImageN 与 ImageIO 将普通 GeoTIFF 生成为 XYZ 静态瓦片集。 */
 public class GeoTiffTileGenerator {
