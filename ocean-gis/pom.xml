@@ -45,6 +45,28 @@
             <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.geotools</groupId>
+            <artifactId>gt-geotiff</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.geotools</groupId>
+            <artifactId>gt-epsg-hsql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.geotools</groupId>
+            <artifactId>gt-render</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.imagen</groupId>
+            <artifactId>imagen-core</artifactId>
+            <version>${imagen.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.imagen</groupId>
+            <artifactId>scale</artifactId>
+            <version>${imagen.version}</version>
+        </dependency>
+        <dependency>
             <groupId>com.baizhukui</groupId>
             <artifactId>knife4j-openapi3-boot4-spring-boot-starter</artifactId>
         </dependency>

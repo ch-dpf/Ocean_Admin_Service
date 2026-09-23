@@ -56,6 +56,9 @@ public class ProcessingService {
             throw new IllegalArgumentException("处理类型不能为空");
         }
         GisProcessingType processingType = request.getProcessingType();
+        if (request.getParameters() != null) {
+            validateParameters(processingType, request.getParameters());
+        }
         GisFileMeta fileMeta = validateFile(fileMetaId, processingType);
         Path inputPath = fileUploadUtil.resolveStoredPath(fileMeta.getStorageKey());
         GisFileProcessingEngine engine = engineRegistry.require(processingType);
@@ -65,7 +68,8 @@ public class ProcessingService {
         GisProcessingWorkspace workspace = processingStorageService.workspace(
                 processingType, fileMeta.getId(), taskNo);
         GisProcessingExecution execution = transactionService.createSingle(
-                taskNo, fileMeta, processingType, inputPath, workspace);
+                taskNo, fileMeta, processingType, inputPath, workspace,
+                request.getParameters());
         taskLifecycle.dispatch(execution.taskId(), taskNo,
                 processingType.displayName() + "：" + fileMeta.getOriginalName(),
                 1, "GIS_" + processingType.name(),
@@ -215,6 +219,9 @@ public class ProcessingService {
         FileUploadUtil.validateBatch(files, MAX_FILES, MAX_TOTAL_SIZE,
                 "文件数量必须在1到100之间", "处理文件不能为空",
                 "单次处理文件总大小不能超过5GB");
+        if (request.processingType() == GisProcessingType.IMAGERY && files.size() != 1) {
+            throw new IllegalArgumentException("首期影像切片每个任务仅支持一个 GeoTIFF");
+        }
     }
 
     private void validateParameters(GisProcessingType type, GisProcessingParameters parameters) {
@@ -228,6 +235,25 @@ public class ProcessingService {
                 || !"QUANTIZED_MESH".equalsIgnoreCase(parameters.outputFormat()))) {
             throw new IllegalArgumentException(
                     "当前地形引擎仅支持 EPSG:4326、GEODETIC、QUANTIZED_MESH");
+        }
+        if (type == GisProcessingType.IMAGERY) {
+            if (!"EPSG:3857".equalsIgnoreCase(parameters.targetCrs())
+                    || !"XYZ".equalsIgnoreCase(parameters.tileProfile())
+                    || !("PNG".equalsIgnoreCase(parameters.outputFormat())
+                    || "JPEG".equalsIgnoreCase(parameters.outputFormat())
+                    || "JPG".equalsIgnoreCase(parameters.outputFormat()))) {
+                throw new IllegalArgumentException(
+                        "当前影像引擎仅支持 EPSG:3857、XYZ、PNG/JPEG");
+            }
+            if (parameters.minZoom() != null && parameters.maxZoom() != null
+                    && parameters.minZoom() > parameters.maxZoom()) {
+                throw new IllegalArgumentException("影像最小层级不能大于最大层级");
+            }
+            if (parameters.resampling() != null
+                    && !"NEAREST".equalsIgnoreCase(parameters.resampling())
+                    && !"BILINEAR".equalsIgnoreCase(parameters.resampling())) {
+                throw new IllegalArgumentException("影像重采样仅支持 NEAREST 或 BILINEAR");
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 package org.ocean.admin.gis.processing;
 
 import org.ocean.admin.gis.entity.GisProcessingTaskFile;
+import org.ocean.admin.gis.dto.GisProcessingParameters;
 
 import java.util.List;
 
@@ -10,5 +11,6 @@ public record GisBatchProcessingExecution(
         String taskNo,
         GisProcessingType processingType,
         GisProcessingWorkspace workspace,
-        List<GisProcessingTaskFile> files) {
+        List<GisProcessingTaskFile> files,
+        GisProcessingParameters parameters) {
 }

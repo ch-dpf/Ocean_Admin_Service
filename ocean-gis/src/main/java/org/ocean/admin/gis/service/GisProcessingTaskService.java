@@ -33,7 +33,8 @@ public class GisProcessingTaskService {
 
     @Transactional(rollbackFor = Exception.class)
     public GisProcessingExecution createSingle(String taskNo, GisFileMeta fileMeta,
-            GisProcessingType processingType, Path inputPath, GisProcessingWorkspace workspace) {
+            GisProcessingType processingType, Path inputPath, GisProcessingWorkspace workspace,
+            GisProcessingParameters parameters) {
         boolean active = gisTaskMapper.exists(new LambdaQueryWrapper<GisTask>()
                 .eq(GisTask::getSourceFileMetaId, fileMeta.getId())
                 .eq(GisTask::getProcessingType, processingType.name())
@@ -49,10 +50,16 @@ public class GisProcessingTaskService {
         task.setProcessingType(processingType.name());
         task.setSourceFileMetaId(fileMeta.getId());
         task.setOutputKey(workspace.outputKey());
+        if (parameters != null) {
+            task.setTargetCrs(parameters.targetCrs());
+            task.setTileProfile(parameters.tileProfile());
+            task.setOutputFormat(parameters.outputFormat());
+        }
         gisTaskService.insert(task);
 
         return new GisProcessingExecution(
-                task.getId(), taskNo, fileMeta.getId(), processingType, inputPath, workspace);
+                task.getId(), taskNo, fileMeta.getId(), processingType, inputPath, workspace,
+                parameters);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -96,6 +103,6 @@ public class GisProcessingTaskService {
             items.add(item);
         }
         return new GisBatchProcessingExecution(task.getId(), taskNo,
-                request.processingType(), workspace, List.copyOf(items));
+                request.processingType(), workspace, List.copyOf(items), request.parameters());
     }
 }

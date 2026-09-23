@@ -71,7 +71,7 @@ public class ProcessingWorker {
             java.util.List<Path> inputs = execution.files().stream()
                     .map(file -> fileUploadUtil.resolveStoredPath(file.getStorageKey()))
                     .toList();
-            engine.process(inputs, execution.workspace(),
+            engine.process(inputs, execution.workspace(), execution.parameters(),
                     line -> log.debug("GIS多文件切片引擎输出: taskNo={}, {}", execution.taskNo(), line));
             for (GisProcessingTaskFile file : execution.files()) {
                 updateFile(file.getId(), "COMPLETED", null);

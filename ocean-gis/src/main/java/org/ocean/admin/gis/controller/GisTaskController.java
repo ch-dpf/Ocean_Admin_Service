@@ -77,7 +77,7 @@ public class GisTaskController {
 
     @PostMapping(value = "/process", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "新建多文件处理任务",
-            description = "request 为 JSON，files 为本次上传的文件；多个输入文件合并生成一个瓦片集")
+            description = "request 为 JSON，files 为本次上传的文件；地形支持多文件合并，首期影像任务仅允许一个 GeoTIFF")
     @OperationLog(module = "GIS_TASK", type = OperationType.SUBMIT,
             description = "新建GIS多文件处理任务", recordResponse = true)
     public ResponseResult<GisBatchProcessingTaskVO> createProcessingTask(
