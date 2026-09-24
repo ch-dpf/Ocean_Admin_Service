@@ -2,6 +2,7 @@ package org.ocean.admin.platform.workbench.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.sun.management.OperatingSystemMXBean;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.platform.audit.entity.SysLoginLog;
@@ -15,8 +16,6 @@ import org.ocean.admin.platform.workbench.dto.TrendFrequencyDTO;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
 import java.nio.file.FileStore;
@@ -30,6 +29,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -42,16 +44,29 @@ public class MonitorService {
 
     private final SysOperationLogMapper sysOperationLogMapper;
     private final SysLoginLogMapper sysLoginLogMapper;
-
-
     private static final DateTimeFormatter MONTH_LABEL_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM");
+    private final ExecutorService metricsCollector = Executors.newFixedThreadPool(4, runnable -> {
+        Thread thread = new Thread(runnable, "system-metrics-collector");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public SystemMetricsDTO getRealtimeMetrics() {
-        MemorySnapshot memorySnapshot = resolveMemoryUsage();
+        CompletableFuture<Double> cpuUsage = CompletableFuture.supplyAsync(this::resolveCpuUsage, metricsCollector);
+        CompletableFuture<Double> gpuUsage = CompletableFuture.supplyAsync(this::resolveGpuUsage, metricsCollector);
+        CompletableFuture<MemorySnapshot> memoryUsage = CompletableFuture.supplyAsync(
+                this::resolveMemoryUsage,
+                metricsCollector
+        );
+        CompletableFuture<DiskUsageDTO> diskUsage = CompletableFuture.supplyAsync(this::getDiskUsage, metricsCollector);
+
+        MemorySnapshot memorySnapshot = memoryUsage.join();
+        DiskUsageDTO diskSnapshot = diskUsage.join();
         return new SystemMetricsDTO(
-                roundTwoDecimals(resolveCpuUsage()),
-                roundTwoDecimals(resolveGpuUsage()),
+                roundTwoDecimals(cpuUsage.join()),
+                roundTwoDecimals(gpuUsage.join()),
                 roundTwoDecimals(memorySnapshot.usagePercent()),
+                roundTwoDecimals(calculateUsagePercent(diskSnapshot.getTotalGb(), diskSnapshot.getUsedGb())),
                 roundTwoDecimals(bytesToGb(memorySnapshot.totalBytes())),
                 roundTwoDecimals(bytesToGb(memorySnapshot.usedBytes())),
                 roundTwoDecimals(bytesToGb(memorySnapshot.freeBytes())),
@@ -59,19 +74,27 @@ public class MonitorService {
         );
     }
 
+    @PreDestroy
+    public void destroyMetricsCollector() {
+        metricsCollector.shutdownNow();
+    }
+
     public DiskUsageDTO getDiskUsage() {
         try {
-//            File uploadsRoot = resolveUploadsRoot();
-//            Path path = uploadsRoot.toPath();
-//            FileStore store = Files.getFileStore(path);
-//            double totalGb = bytesToGb(store.getTotalSpace());
-//            double freeGb = bytesToGb(store.getUsableSpace());
-//            double usedGb = Math.max(0D, totalGb - freeGb);
-//            String diskName = (store.name() == null || store.name().isBlank())
-//                    ? String.valueOf(path.getRoot())
-//                    : store.name();
-//            return new DiskUsageDTO(diskName, roundOneDecimal(totalGb), roundOneDecimal(usedGb), roundOneDecimal(freeGb));
-            return new DiskUsageDTO();
+            Path servicePath = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+            FileStore store = Files.getFileStore(servicePath);
+            long totalBytes = Math.max(0L, store.getTotalSpace());
+            long freeBytes = Math.max(0L, Math.min(store.getUsableSpace(), totalBytes));
+            long usedBytes = Math.max(0L, totalBytes - freeBytes);
+            String diskName = (store.name() == null || store.name().isBlank())
+                    ? String.valueOf(servicePath.getRoot())
+                    : store.name();
+            return new DiskUsageDTO(
+                    diskName,
+                    roundTwoDecimals(bytesToGb(totalBytes)),
+                    roundTwoDecimals(bytesToGb(usedBytes)),
+                    roundTwoDecimals(bytesToGb(freeBytes))
+            );
         } catch (Exception e) {
             log.warn("获取磁盘使用情况失败: {}", e.getMessage());
             return new DiskUsageDTO("服务磁盘", 0D, 0D, 0D);
@@ -337,45 +360,15 @@ public class MonitorService {
         }
     }
 
-    private long calculateDirectorySize(Path path) {
-        if (path == null || !Files.exists(path)) {
-            return 0L;
-        }
-        try (var stream = Files.walk(path)) {
-            return stream
-                    .filter(Files::isRegularFile)
-                    .mapToLong(p -> {
-                        try {
-                            return Files.size(p);
-                        } catch (IOException e) {
-                            return 0L;
-                        }
-                    })
-                    .sum();
-        } catch (IOException e) {
-            log.debug("统计目录大小失败, path={}: {}", path, e.getMessage());
-            return 0L;
-        }
-    }
-
-    private String resolveLeafDirectoryName(String rawPath, String fallback) {
-        if (rawPath == null || rawPath.isBlank()) {
-            return fallback;
-        }
-        String normalized = rawPath.replace('\\', '/');
-        int idx = normalized.lastIndexOf('/');
-        if (idx >= 0 && idx < normalized.length() - 1) {
-            return normalized.substring(idx + 1);
-        }
-        return normalized.isBlank() ? fallback : normalized;
-    }
-
     private double bytesToGb(long bytes) {
         return bytes / 1024D / 1024D / 1024D;
     }
 
-    private double roundOneDecimal(double value) {
-        return Math.round(value * 10D) / 10D;
+    private double calculateUsagePercent(double total, double used) {
+        if (total <= 0D) {
+            return 0D;
+        }
+        return Math.clamp(used * 100D / total, 0D, 100D);
     }
 
     private double roundTwoDecimals(double value) {

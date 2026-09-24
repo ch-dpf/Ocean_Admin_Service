@@ -14,6 +14,7 @@ public class SystemMetricsDTO {
     private double cpuUsage;
     private double gpuUsage;
     private double memoryUsage;
+    private double diskUsage;
     private double totalMemoryGb;
     private double usedMemoryGb;
     private double freeMemoryGb;
