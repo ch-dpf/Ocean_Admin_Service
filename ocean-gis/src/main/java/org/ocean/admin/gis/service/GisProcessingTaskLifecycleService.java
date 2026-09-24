@@ -1,0 +1,57 @@
+package org.ocean.admin.gis.service;
+
+import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.entity.GisProcessingTask;
+import org.ocean.admin.gis.processing.GisProcessingProgress;
+import org.springframework.stereotype.Service;
+
+import java.util.function.Function;
+
+/** 协调持久化处理任务与实时进度的状态流转。 */
+@Service
+@RequiredArgsConstructor
+public class GisProcessingTaskLifecycleService {
+    private final GisProcessingTaskRecordService taskService;
+    private final AsyncTaskService progressService;
+
+    public void dispatch(Long taskId, String taskNo, String taskName, int totalCount,
+            String progressType, Runnable workerDispatch, String failureMessage) {
+        try {
+            progressService.registerTask(taskNo, taskName, totalCount, progressType);
+            workerDispatch.run();
+        } catch (Exception ex) {
+            fail(taskId, taskNo, failureMessage, ex);
+            throw ex;
+        }
+    }
+
+    public void start(Long taskId, String taskNo, int percent, String message) {
+        taskService.markRunning(taskId);
+        progressService.updateProgress(taskNo, percent, "processing", message);
+    }
+
+    public void reportProgress(String taskNo, GisProcessingProgress progress) {
+        progressService.updateProcessingProgress(taskNo, progress);
+    }
+
+    public void recordResult(Long taskId, String taskNo, boolean success) {
+        if (success) {
+            taskService.incrementCompleted(taskId);
+        } else {
+            taskService.incrementFailed(taskId);
+        }
+        progressService.updateProgress(taskNo, success);
+    }
+
+    public GisProcessingTask finish(Long taskId, String taskNo,
+            Function<GisProcessingTask, String> resultMessage) {
+        GisProcessingTask finished = taskService.finish(taskId);
+        progressService.finalizeTaskResult(taskNo, resultMessage.apply(finished));
+        return finished;
+    }
+
+    public void fail(Long taskId, String taskNo, String message, Exception ex) {
+        taskService.markFailed(taskId, ex.getMessage());
+        progressService.finalizeTaskFailure(taskNo, message + ex.getMessage());
+    }
+}
