@@ -3,225 +3,187 @@ package org.ocean.admin.gis.service;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
 import org.ocean.admin.gis.dto.GisFileProcessRequest;
+import org.ocean.admin.gis.dto.GisManagedProcessingRequest;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
-import org.ocean.admin.gis.dto.TempFile;
-import org.ocean.admin.gis.dto.GisStoredFile;
-import org.ocean.admin.gis.entity.GisDataSet;
-import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.mapper.GisDataSetMapper;
-import org.ocean.admin.gis.mapper.GisProcessingTaskFileMapper;
-import org.ocean.admin.gis.processing.GisBatchProcessingExecution;
-import org.ocean.admin.gis.processing.GisFolderProcessingExecution;
-import org.ocean.admin.gis.processing.GisProcessingExecution;
+import org.ocean.admin.gis.dto.GisWorkspaceProcessingRequest;
+import org.ocean.admin.gis.entity.GisProcessingInput;
+import org.ocean.admin.gis.processing.GisInputSourceType;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
+import org.ocean.admin.gis.processing.GisSubmitProcessingCommand;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngineRegistry;
+import org.ocean.admin.gis.processing.input.GisProcessingInputResolver;
+import org.ocean.admin.gis.processing.input.GisProcessingInputResolverRegistry;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.gis.vo.GisBatchProcessingTaskVO;
-import org.ocean.admin.gis.vo.GisProcessingTaskFileVO;
 import org.ocean.admin.gis.vo.GisProcessingTaskVO;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Stream;
 
-/** 单文件、服务器目录和多文件 GIS 切片任务编排。 */
+/** 三种输入来源共用的 GIS 切片任务编排。 */
 @Service
 @RequiredArgsConstructor
 public class ProcessingService {
     private static final int MAX_FILES = 100;
     private static final long MAX_TOTAL_SIZE = 5L * 1024 * 1024 * 1024;
 
-    private final GisFileMetaService gisFileMetaService;
-    private final GisDataSetMapper gisDataSetMapper;
-    private final FileUploadUtil fileUploadUtil;
-    private final GisProcessingStorageService processingStorageService;
+    private final GisProcessingStorageService storageService;
     private final GisFileProcessingEngineRegistry engineRegistry;
+    private final GisProcessingInputResolverRegistry inputResolverRegistry;
     private final GisProcessingTaskService transactionService;
     private final ProcessingWorker worker;
-    private final GisTaskLifecycleService taskLifecycle;
-    private final GisTaskService gisTaskService;
-    private final GisProcessingTaskFileMapper fileMapper;
+    private final GisProcessingTaskLifecycleService taskLifecycle;
 
     public GisProcessingTaskVO submitSingle(Long fileMetaId, GisFileProcessRequest request) {
         if (request == null || request.getProcessingType() == null) {
             throw new IllegalArgumentException("处理类型不能为空");
         }
-        GisProcessingType processingType = request.getProcessingType();
-        if (request.getParameters() != null) {
-            validateParameters(processingType, request.getParameters());
-        }
-        GisFileMeta fileMeta = validateFile(fileMetaId, processingType);
-        Path inputPath = fileUploadUtil.resolveStoredPath(fileMeta.getStorageKey());
-        GisFileProcessingEngine engine = engineRegistry.require(processingType);
-        engine.validate(fileMeta, inputPath);
-
-        String taskNo = GisTaskFactory.generateTaskNo("GIS_" + processingType.name());
-        GisProcessingWorkspace workspace = processingStorageService.workspace(
-                processingType, fileMeta.getId(), taskNo);
-        GisProcessingExecution execution = transactionService.createSingle(
-                taskNo, fileMeta, processingType, inputPath, workspace,
-                request.getParameters());
-        taskLifecycle.dispatch(execution.taskId(), taskNo,
-                processingType.displayName() + "：" + fileMeta.getOriginalName(),
-                1, "GIS_" + processingType.name(),
-                () -> worker.process(execution), "切片任务启动失败: ");
-
-        return GisProcessingTaskVO.builder()
-                .taskId(execution.taskId())
-                .taskNo(taskNo)
-                .fileMetaId(fileMeta.getId())
-                .dataSetId(fileMeta.getDataSetId())
-                .processingType(processingType.name())
-                .outputKey(workspace.outputKey())
-                .status("QUEUED")
-                .build();
+        return submitSingle(fileMetaId, request.getProcessingType(), request.getParameters());
     }
 
-    public GisProcessingTaskVO submitFolder(String folderPath) {
-        Path inputFolder = validateFolder(folderPath);
-        engineRegistry.require(GisProcessingType.TERRAIN);
-        String taskNo = GisTaskFactory.generateTaskNo("GIS_TERRAIN_FOLDER");
-        GisProcessingWorkspace workspace = processingStorageService.folderWorkspace(
-                GisProcessingType.TERRAIN, taskNo);
-        GisFolderProcessingExecution execution = transactionService.createFolder(
-                taskNo, inputFolder, workspace);
-        taskLifecycle.dispatch(execution.taskId(), taskNo,
-                "地形目录处理：" + displayName(inputFolder), 1, "GIS_TERRAIN",
-                () -> worker.process(execution), "文件夹切片任务启动失败: ");
-
-        return GisProcessingTaskVO.builder()
-                .taskId(execution.taskId())
-                .taskNo(taskNo)
-                .processingType(GisProcessingType.TERRAIN.name())
-                .outputKey(workspace.outputKey())
-                .status("QUEUED")
-                .build();
+    public GisProcessingTaskVO submitSingleImagery(
+            Long fileMetaId, GisProcessingParameters parameters) {
+        return submitSingle(fileMetaId, GisProcessingType.IMAGERY, parameters);
     }
 
-    public List<GisProcessingTaskFileVO> getBatchFiles(Long taskId) {
-        gisTaskService.getRequired(taskId);
-        return fileMapper.selectByTaskId(taskId).stream()
-                .map(file -> new GisProcessingTaskFileVO(file.getId(), file.getFileIndex(),
-                        file.getOriginalName(), file.getOutputKey(), file.getStatus(),
-                        file.getErrorMessage()))
-                .toList();
+    private GisProcessingTaskVO submitSingle(Long fileMetaId, GisProcessingType processingType,
+            GisProcessingParameters requestedParameters) {
+        GisProcessingParameters parameters = parametersOrDefault(
+                processingType, requestedParameters);
+        GisSubmitProcessingCommand command = new GisSubmitProcessingCommand(
+                GisInputSourceType.MANAGED_FILE, processingType,
+                processingType.displayName() + "：" + fileMetaId,
+                parameters, null, null, null, List.of(fileMetaId));
+        GisBatchProcessingTaskVO submitted = submit(command);
+        return GisProcessingTaskVO.builder()
+                .taskId(submitted.getTaskId())
+                .tileSetId(submitted.getTileSetId())
+                .taskNo(submitted.getTaskNo())
+                .fileMetaId(fileMetaId)
+                .processingType(submitted.getProcessingType())
+                .outputKey(submitted.getOutputKey())
+                .status(submitted.getStatus())
+                .build();
     }
 
     public GisBatchProcessingTaskVO submitBatch(GisCreateProcessingTaskRequest request,
             List<MultipartFile> files) {
-        validateBatchRequest(request, files);
-        GisFileProcessingEngine engine = engineRegistry.require(request.processingType());
-        validateParameters(request.processingType(), request.parameters());
-        String taskNo = GisTaskFactory.generateTaskNo(
-                "GIS_" + request.processingType().name() + "_BATCH");
-        GisProcessingWorkspace workspace = processingStorageService.batchWorkspace(
-                request.processingType(), taskNo);
-        List<TempFile> staged = new ArrayList<>(files.size());
-        List<GisStoredFile> stored = new ArrayList<>(files.size());
+        validateUploadRequest(request, files);
+        return submit(new GisSubmitProcessingCommand(GisInputSourceType.UPLOAD,
+                request.processingType(), request.taskName(), request.parameters(), files,
+                null, null, null));
+    }
+
+    public GisBatchProcessingTaskVO submitWorkspace(GisWorkspaceProcessingRequest request) {
+        return submit(new GisSubmitProcessingCommand(GisInputSourceType.WORKSPACE,
+                request.processingType(), request.taskName(), request.parameters(), null,
+                request.workspaceCode(), request.relativePath(), null));
+    }
+
+    public GisBatchProcessingTaskVO submitManaged(GisManagedProcessingRequest request) {
+        return submit(new GisSubmitProcessingCommand(GisInputSourceType.MANAGED_FILE,
+                request.processingType(), request.taskName(), request.parameters(), null,
+                null, null, request.fileMetaIds()));
+    }
+
+    private GisBatchProcessingTaskVO submit(GisSubmitProcessingCommand command) {
+        validateCommand(command);
+        GisFileProcessingEngine engine = engineRegistry.require(command.processingType());
+        String taskNo = GisProcessingTaskFactory.generateTaskNo(
+                "GIS_" + command.processingType().name() + "_PROCESS");
+        GisProcessingWorkspace workspace = storageService.taskWorkspace(
+                command.processingType(), taskNo);
+        GisProcessingInputResolver resolver = inputResolverRegistry.require(command.sourceType());
+        GisProcessingInputResolver.PreparedInputs prepared = resolver.prepare(command, taskNo);
         try {
-            for (MultipartFile file : files) {
-                TempFile stagedFile = fileUploadUtil.stage(taskNo, file);
-                staged.add(stagedFile);
-                GisFileMeta meta = new GisFileMeta();
-                meta.setExtension(stagedFile.getExtension());
-                meta.setOriginalName(stagedFile.getOriginalName());
-                engine.validate(meta, fileUploadUtil.resolveStoredPath(stagedFile.getStagingKey()));
-            }
-            for (TempFile stagedFile : staged) {
-                stored.add(fileUploadUtil.commitForProcessing(taskNo, stagedFile));
-            }
-            GisBatchProcessingExecution execution = transactionService.createBatch(
-                    taskNo, request, workspace, staged, stored);
-            taskLifecycle.dispatch(execution.taskId(), taskNo, request.taskName().trim(),
-                    stored.size(), "GIS_" + request.processingType().name(),
-                    () -> worker.process(execution), "处理任务启动失败: ");
+            validateResolvedInputs(command, engine, prepared.inputs(),
+                    resolver.resolveRuntime(prepared.inputs()));
+            GisProcessingTaskService.CreatedProcessingTask created = transactionService.create(
+                    taskNo, command, workspace, prepared.inputs());
+            taskLifecycle.dispatch(created.taskId(), taskNo, command.taskName().trim(),
+                    prepared.inputs().size(), "GIS_" + command.processingType().name(),
+                    () -> worker.process(created.taskId()), "处理任务启动失败: ");
             return GisBatchProcessingTaskVO.builder()
-                    .taskId(execution.taskId())
+                    .taskId(created.taskId())
+                    .tileSetId(created.tileSetId())
                     .taskNo(taskNo)
-                    .processingType(request.processingType().name())
+                    .sourceType(command.sourceType().name())
+                    .processingType(command.processingType().name())
                     .outputKey(workspace.outputKey())
-                    .totalCount(stored.size())
+                    .totalCount(prepared.inputs().size())
                     .status("QUEUED")
                     .build();
-        } catch (Exception ex) {
-            stored.forEach(file -> deleteStoredQuietly(file.getStorageKey()));
-            staged.forEach(file -> deleteStagedQuietly(file.getStagingKey()));
+        } catch (RuntimeException ex) {
+            prepared.rollback().run();
             throw ex;
         }
     }
 
-    private GisFileMeta validateFile(Long fileMetaId, GisProcessingType processingType) {
-        GisFileMeta fileMeta = gisFileMetaService.getRequiredEntity(fileMetaId);
-        if (!"READY".equals(fileMeta.getUploadStatus())) {
-            throw new IllegalStateException("只有 READY 状态的已入库文件可以处理");
+    private void validateResolvedInputs(GisSubmitProcessingCommand command,
+            GisFileProcessingEngine engine, List<GisProcessingInput> inputs, List<Path> paths) {
+        if (inputs.size() != paths.size()) {
+            throw new IllegalStateException("处理输入快照与运行时资源数量不一致");
         }
-        if (!"LOCAL".equals(fileMeta.getStorageType())) {
-            throw new IllegalStateException("当前仅支持处理 LOCAL 存储中的文件");
+        if (command.processingType() == GisProcessingType.IMAGERY && inputs.size() != 1) {
+            throw new IllegalArgumentException("影像切片每个任务仅支持一个 GeoTIFF");
         }
-        GisDataSet dataSet = gisDataSetMapper.selectById(fileMeta.getDataSetId());
-        if (dataSet == null) {
-            throw new IllegalArgumentException("文件所属数据集不存在或已删除: " + fileMeta.getDataSetId());
-        }
-        if (!processingType.categoryId().equals(dataSet.getCategoryId())) {
-            throw new IllegalArgumentException("处理类型与数据集类别不匹配: "
-                    + processingType.name() + ", categoryId=" + dataSet.getCategoryId());
-        }
-        return fileMeta;
-    }
-
-    private Path validateFolder(String folderPath) {
-        if (folderPath == null || folderPath.isBlank()) {
-            throw new IllegalArgumentException("文件夹路径不能为空");
-        }
-        final Path folder;
-        try {
-            folder = Path.of(folderPath.trim()).toAbsolutePath().normalize();
-        } catch (RuntimeException ex) {
-            throw new IllegalArgumentException("非法文件夹路径: " + folderPath, ex);
-        }
-        if (!Files.isDirectory(folder)) {
-            throw new IllegalArgumentException("文件夹不存在或不是目录: " + folderPath);
-        }
-        if (!Files.isReadable(folder)) {
-            throw new IllegalArgumentException("文件夹不可读: " + folderPath);
-        }
-        try (Stream<Path> paths = Files.walk(folder)) {
-            if (paths.noneMatch(Files::isRegularFile)) {
-                throw new IllegalArgumentException("文件夹下没有可处理的文件: " + folderPath);
+        for (int i = 0; i < inputs.size(); i++) {
+            GisProcessingInput input = inputs.get(i);
+            Path path = paths.get(i);
+            if (Files.isDirectory(path)) {
+                if (command.processingType() != GisProcessingType.TERRAIN || inputs.size() != 1) {
+                    throw new IllegalArgumentException("当前仅地形处理支持单个目录输入");
+                }
+                continue;
             }
-        } catch (IOException | UncheckedIOException ex) {
-            throw new IllegalArgumentException("无法读取文件夹: " + folderPath, ex);
+            engine.validate(input.getOriginalName(), input.getExtension(), path);
         }
-        return folder;
     }
 
-    private void validateBatchRequest(GisCreateProcessingTaskRequest request,
+    private void validateCommand(GisSubmitProcessingCommand command) {
+        if (command == null || command.sourceType() == null || command.processingType() == null) {
+            throw new IllegalArgumentException("输入来源和处理类型不能为空");
+        }
+        if (command.taskName() == null || command.taskName().isBlank()
+                || command.taskName().length() > 200) {
+            throw new IllegalArgumentException("任务名称不能为空且不能超过200字");
+        }
+        if (command.parameters() == null) {
+            throw new IllegalArgumentException("处理参数不能为空");
+        }
+        validateParameters(command.processingType(), command.parameters());
+    }
+
+    private void validateUploadRequest(GisCreateProcessingTaskRequest request,
             List<MultipartFile> files) {
         if (request == null || request.processingType() == null) {
             throw new IllegalArgumentException("处理类型不能为空");
         }
-        if (request.taskName() == null || request.taskName().isBlank()
-                || request.taskName().length() > 200) {
-            throw new IllegalArgumentException("任务名称不能为空且不能超过200字");
-        }
-        if (request.parameters() == null) {
-            throw new IllegalArgumentException("处理参数不能为空");
-        }
         FileUploadUtil.validateBatch(files, MAX_FILES, MAX_TOTAL_SIZE,
                 "文件数量必须在1到100之间", "处理文件不能为空",
                 "单次处理文件总大小不能超过5GB");
-        if (request.processingType() == GisProcessingType.IMAGERY && files.size() != 1) {
-            throw new IllegalArgumentException("首期影像切片每个任务仅支持一个 GeoTIFF");
+    }
+
+    private GisProcessingParameters parametersOrDefault(
+            GisProcessingType type, GisProcessingParameters parameters) {
+        if (parameters != null) {
+            return parameters;
         }
+        return switch (type) {
+            case TERRAIN -> new GisProcessingParameters(
+                    "EPSG:4326", "GEODETIC", "QUANTIZED_MESH",
+                    null, null, null, null);
+            case IMAGERY -> new GisProcessingParameters(
+                    "EPSG:3857", "XYZ", "PNG", null, null, "BILINEAR", true);
+            case VECTOR -> new GisProcessingParameters(
+                    "EPSG:3857", "MVT", "PBF", null, null, null, null);
+        };
     }
 
     private void validateParameters(GisProcessingType type, GisProcessingParameters parameters) {
@@ -229,8 +191,8 @@ public class ProcessingService {
                 || parameters.outputFormat() == null) {
             throw new IllegalArgumentException("目标坐标系、瓦片剖面和输出格式不能为空");
         }
-        if (type == GisProcessingType.TERRAIN &&
-                (!"EPSG:4326".equalsIgnoreCase(parameters.targetCrs())
+        if (type == GisProcessingType.TERRAIN
+                && (!"EPSG:4326".equalsIgnoreCase(parameters.targetCrs())
                 || !"GEODETIC".equalsIgnoreCase(parameters.tileProfile())
                 || !"QUANTIZED_MESH".equalsIgnoreCase(parameters.outputFormat()))) {
             throw new IllegalArgumentException(
@@ -255,18 +217,5 @@ public class ProcessingService {
                 throw new IllegalArgumentException("影像重采样仅支持 NEAREST 或 BILINEAR");
             }
         }
-    }
-
-    static String displayName(Path folder) {
-        Path fileName = folder.getFileName();
-        return fileName == null ? folder.toString() : fileName.toString();
-    }
-
-    private void deleteStoredQuietly(String key) {
-        try { fileUploadUtil.deleteStored(key); } catch (Exception ignored) { }
-    }
-
-    private void deleteStagedQuietly(String key) {
-        try { fileUploadUtil.deleteStaged(key); } catch (Exception ignored) { }
     }
 }

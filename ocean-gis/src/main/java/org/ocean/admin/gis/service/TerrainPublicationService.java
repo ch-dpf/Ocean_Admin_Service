@@ -1,8 +1,9 @@
 package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisPublication;
-import org.ocean.admin.gis.entity.GisTask;
+import org.ocean.admin.gis.entity.GisTileSet;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.vo.GisTerrainPublicationVO;
 import org.ocean.admin.kernel.common.PageResult;
@@ -28,7 +29,7 @@ public class TerrainPublicationService {
     private static final String TERRAIN_PREFIX = "terrain/";
 
     private final GisPublicationService publicationService;
-    private final GisTaskService gisTaskService;
+    private final GisProcessingTaskRecordService taskService;
     private final GisProcessingStorageService processingStorageService;
     private final Map<String, Path> publishedRoots = new ConcurrentHashMap<>();
 
@@ -48,14 +49,15 @@ public class TerrainPublicationService {
     }
 
     public GisTerrainPublicationVO publish(Long sourceTaskId) {
-        GisTask sourceTask = gisTaskService.getRequired(sourceTaskId);
-        validateSourceTask(sourceTask);
-        Path tilesRoot = validateTiles(sourceTask.getOutputKey());
+        GisProcessingTask sourceTask = taskService.getRequired(sourceTaskId);
+        GisTileSet tileSet = publicationService.getRequiredTileSet(sourceTaskId, PROCESSING_TYPE);
+        validateSourceTask(sourceTask, tileSet);
+        Path tilesRoot = validateTiles(tileSet.getOutputKey());
         GisPublication existing = publicationService.findBySourceTaskId(
                 PROCESSING_TYPE, sourceTaskId);
         String serviceCode = existing == null ? generateServiceCode() : existing.getServiceCode();
         GisPublication publication = publicationService.publish(
-                sourceTask, serviceCode, null, null, "地形服务");
+                tileSet, serviceCode, "地形服务");
         publishedRoots.put(publication.getServiceCode(), tilesRoot);
         return toVO(publication);
     }
@@ -94,18 +96,20 @@ public class TerrainPublicationService {
         if (!GisPublicationService.PUBLISHED.equals(publication.getStatus())) {
             throw new IllegalStateException("地形服务已停用");
         }
-        return validateTiles(publication.getOutputKey());
+        return validateTiles(publicationService.getPublicationTileSet(publication).getOutputKey());
     }
 
-    private void validateSourceTask(GisTask task) {
-        if (!Long.valueOf(2L).equals(task.getTaskType())
-                || !PROCESSING_TYPE.equals(task.getProcessingType())) {
+    private void validateSourceTask(GisProcessingTask task, GisTileSet tileSet) {
+        if (!PROCESSING_TYPE.equals(task.getProcessingType())
+                || !PROCESSING_TYPE.equals(tileSet.getTileType())) {
             throw new IllegalArgumentException("只能发布地形切片任务: " + task.getId());
         }
         if (!"COMPLETED".equals(task.getTaskStatus())) {
             throw new IllegalStateException("只有 COMPLETED 状态的地形切片任务可以发布");
         }
-        if (task.getOutputKey() == null || !task.getOutputKey().startsWith(TERRAIN_PREFIX)) {
+        if (!"READY".equals(tileSet.getTileSetStatus())
+                || tileSet.getOutputKey() == null
+                || !tileSet.getOutputKey().startsWith(TERRAIN_PREFIX)) {
             throw new IllegalArgumentException("地形切片任务缺少合法的产物 Key");
         }
     }
@@ -139,11 +143,11 @@ public class TerrainPublicationService {
     }
 
     private GisTerrainPublicationVO toVO(GisPublication publication) {
+        GisTileSet tileSet = publicationService.getPublicationTileSet(publication);
         return GisTerrainPublicationVO.builder()
                 .id(publication.getId())
                 .serviceCode(publication.getServiceCode())
-                .sourceTaskId(publication.getSourceTaskId())
-                .publishTaskId(publication.getPublishTaskId())
+                .sourceTaskId(tileSet.getTaskId())
                 .dataSetId(publication.getDataSetId())
                 .status(publication.getStatus())
                 .serviceUrl(publicationService.buildPublicUrl(

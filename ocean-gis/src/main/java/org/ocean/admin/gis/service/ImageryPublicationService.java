@@ -1,8 +1,9 @@
 package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisPublication;
-import org.ocean.admin.gis.entity.GisTask;
+import org.ocean.admin.gis.entity.GisTileSet;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.vo.GisImageryPublicationVO;
 import org.ocean.admin.kernel.common.PageResult;
@@ -35,7 +36,7 @@ public class ImageryPublicationService {
             Pattern.CASE_INSENSITIVE);
 
     private final GisPublicationService publicationService;
-    private final GisTaskService gisTaskService;
+    private final GisProcessingTaskRecordService taskService;
     private final GisProcessingStorageService processingStorageService;
     private final ObjectMapper objectMapper;
     private final Map<String, PublishedTiles> publishedTiles = new ConcurrentHashMap<>();
@@ -56,18 +57,16 @@ public class ImageryPublicationService {
     }
 
     public GisImageryPublicationVO publish(Long sourceTaskId) {
-        GisTask sourceTask = gisTaskService.getRequired(sourceTaskId);
-        validateSourceTask(sourceTask);
-        PublishedTiles tiles = validateTiles(sourceTask.getOutputKey());
-        sourceTask.setTargetCrs(tiles.metadata().targetCrs());
-        sourceTask.setTileProfile(tiles.metadata().tileProfile());
-        sourceTask.setOutputFormat(tiles.metadata().format());
+        GisProcessingTask sourceTask = taskService.getRequired(sourceTaskId);
+        GisTileSet tileSet = publicationService.getRequiredTileSet(sourceTaskId, PROCESSING_TYPE);
+        validateSourceTask(sourceTask, tileSet);
+        PublishedTiles tiles = validateTiles(tileSet.getOutputKey());
 
         GisPublication existing = publicationService.findBySourceTaskId(
                 PROCESSING_TYPE, sourceTaskId);
         String serviceCode = existing == null ? generateServiceCode() : existing.getServiceCode();
-        GisPublication publication = publicationService.publish(sourceTask, serviceCode,
-                tiles.metadata().minZoom(), tiles.metadata().maxZoom(), "影像服务");
+        GisPublication publication = publicationService.publish(
+                tileSet, serviceCode, "影像服务");
         publishedTiles.put(publication.getServiceCode(), tiles);
         return toVO(publication);
     }
@@ -106,18 +105,20 @@ public class ImageryPublicationService {
         if (!GisPublicationService.PUBLISHED.equals(publication.getStatus())) {
             throw new IllegalStateException("影像服务已停用");
         }
-        return validateTiles(publication.getOutputKey());
+        return validateTiles(publicationService.getPublicationTileSet(publication).getOutputKey());
     }
 
-    private void validateSourceTask(GisTask task) {
-        if (!Long.valueOf(2L).equals(task.getTaskType())
-                || !PROCESSING_TYPE.equals(task.getProcessingType())) {
+    private void validateSourceTask(GisProcessingTask task, GisTileSet tileSet) {
+        if (!PROCESSING_TYPE.equals(task.getProcessingType())
+                || !PROCESSING_TYPE.equals(tileSet.getTileType())) {
             throw new IllegalArgumentException("只能发布影像切片任务: " + task.getId());
         }
         if (!"COMPLETED".equals(task.getTaskStatus())) {
             throw new IllegalStateException("只有 COMPLETED 状态的影像切片任务可以发布");
         }
-        if (task.getOutputKey() == null || !task.getOutputKey().startsWith(IMAGERY_PREFIX)) {
+        if (!"READY".equals(tileSet.getTileSetStatus())
+                || tileSet.getOutputKey() == null
+                || !tileSet.getOutputKey().startsWith(IMAGERY_PREFIX)) {
             throw new IllegalArgumentException("影像切片任务缺少合法的产物 Key");
         }
     }
@@ -229,21 +230,21 @@ public class ImageryPublicationService {
     }
 
     private GisImageryPublicationVO toVO(GisPublication publication) {
+        GisTileSet tileSet = publicationService.getPublicationTileSet(publication);
         String root = publicationService.buildPublicUrl(
                 "/imagery/" + publication.getServiceCode() + "/");
-        String extension = "PNG".equals(publication.getOutputFormat()) ? "png" : "jpg";
+        String extension = "PNG".equals(tileSet.getOutputFormat()) ? "png" : "jpg";
         return GisImageryPublicationVO.builder()
                 .id(publication.getId())
                 .serviceCode(publication.getServiceCode())
-                .sourceTaskId(publication.getSourceTaskId())
-                .publishTaskId(publication.getPublishTaskId())
+                .sourceTaskId(tileSet.getTaskId())
                 .dataSetId(publication.getDataSetId())
                 .status(publication.getStatus())
-                .targetCrs(publication.getTargetCrs())
-                .tileProfile(publication.getTileProfile())
-                .outputFormat(publication.getOutputFormat())
-                .minZoom(publication.getMinZoom())
-                .maxZoom(publication.getMaxZoom())
+                .targetCrs(tileSet.getTargetCrs())
+                .tileProfile(tileSet.getTileProfile())
+                .outputFormat(tileSet.getOutputFormat())
+                .minZoom(tileSet.getMinZoom())
+                .maxZoom(tileSet.getMaxZoom())
                 .serviceUrl(root)
                 .tileJsonUrl(root + "tilejson.json")
                 .tileUrlTemplate(root + "{z}/{x}/{y}." + extension)

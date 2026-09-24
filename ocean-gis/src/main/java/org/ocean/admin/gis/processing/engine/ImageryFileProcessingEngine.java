@@ -1,10 +1,8 @@
 package org.ocean.admin.gis.processing.engine;
 
 import org.ocean.admin.gis.dto.GisProcessingParameters;
-import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.imagery.GeoTiffTileGenerator;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
-import org.ocean.admin.gis.processing.GisProcessingExecution;
 import org.ocean.admin.gis.processing.GisProcessingProgress;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
@@ -31,20 +29,12 @@ public class ImageryFileProcessingEngine implements GisFileProcessingEngine {
     }
 
     @Override
-    public void validate(GisFileMeta fileMeta, Path inputPath) {
-        String extension = fileMeta.getExtension() == null
-                ? "" : fileMeta.getExtension().toLowerCase(Locale.ROOT);
+    public void validate(String originalName, String extension, Path inputPath) {
+        extension = extension == null ? "" : extension.toLowerCase(Locale.ROOT);
         if (!SUPPORTED_EXTENSIONS.contains(extension)) {
             throw new IllegalArgumentException("影像切片仅支持 tif/tiff，当前文件: "
-                    + fileMeta.getOriginalName());
+                    + originalName);
         }
-    }
-
-    @Override
-    public void process(GisProcessingExecution execution,
-            Consumer<GisProcessingProgress> progressListener) {
-        tileGenerator.generate(execution.inputPath(), execution.workspace().outputPath(),
-                ImageryTileOptions.from(execution.parameters()), progressListener);
     }
 
     @Override

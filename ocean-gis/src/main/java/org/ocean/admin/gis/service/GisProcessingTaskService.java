@@ -1,108 +1,104 @@
 package org.ocean.admin.gis.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
-import org.ocean.admin.gis.dto.GisProcessingParameters;
-import org.ocean.admin.gis.dto.TempFile;
-import org.ocean.admin.gis.dto.GisStoredFile;
-import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.entity.GisProcessingTaskFile;
-import org.ocean.admin.gis.entity.GisTask;
-import org.ocean.admin.gis.mapper.GisProcessingTaskFileMapper;
-import org.ocean.admin.gis.mapper.GisTaskMapper;
-import org.ocean.admin.gis.processing.GisBatchProcessingExecution;
-import org.ocean.admin.gis.processing.GisFolderProcessingExecution;
-import org.ocean.admin.gis.processing.GisProcessingExecution;
-import org.ocean.admin.gis.processing.GisProcessingType;
+import org.ocean.admin.gis.entity.GisProcessingInput;
+import org.ocean.admin.gis.entity.GisProcessingTask;
+import org.ocean.admin.gis.entity.GisTileSet;
+import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
+import org.ocean.admin.gis.mapper.GisTileSetMapper;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
+import org.ocean.admin.gis.processing.GisSubmitProcessingCommand;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
-import java.nio.file.Path;
-import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.List;
 
-/** 在独立事务中创建单文件、目录和多文件切片任务。 */
+/** 在单一事务中创建任务、处理作业、输入快照和唯一瓦片集。 */
 @Service
 @RequiredArgsConstructor
 public class GisProcessingTaskService {
-    private final GisTaskService gisTaskService;
-    private final GisTaskMapper gisTaskMapper;
-    private final GisProcessingTaskFileMapper fileMapper;
+    private final GisProcessingTaskRecordService taskService;
+    private final GisProcessingInputMapper inputMapper;
+    private final GisTileSetMapper tileSetMapper;
+    private final ObjectMapper objectMapper;
 
     @Transactional(rollbackFor = Exception.class)
-    public GisProcessingExecution createSingle(String taskNo, GisFileMeta fileMeta,
-            GisProcessingType processingType, Path inputPath, GisProcessingWorkspace workspace,
-            GisProcessingParameters parameters) {
-        boolean active = gisTaskMapper.exists(new LambdaQueryWrapper<GisTask>()
-                .eq(GisTask::getSourceFileMetaId, fileMeta.getId())
-                .eq(GisTask::getProcessingType, processingType.name())
-                .in(GisTask::getTaskStatus, "QUEUED", "RUNNING"));
-        if (active) {
-            throw new IllegalStateException("该文件已有同类型切片任务正在执行");
-        }
+    public CreatedProcessingTask create(String taskNo, GisSubmitProcessingCommand command,
+            GisProcessingWorkspace workspace, List<GisProcessingInput> inputs) {
+        LocalDateTime now = LocalDateTime.now();
+        String parametersJson = writeParameters(command);
+        GisProcessingTask task = GisProcessingTaskFactory.queued(
+                taskNo, command.taskName().trim(), inputs.size(), "QUEUED");
+        task.setProcessingType(command.processingType().name());
+        task.setSourceType(command.sourceType().name());
+        task.setParametersJson(parametersJson);
+        task.setParameterSchemaVersion(1);
+        task.setRequestFingerprint(fingerprint(command, inputs, parametersJson));
+        taskService.insert(task);
 
-        GisTask task = GisTaskFactory.queued(taskNo,
-                processingType.displayName() + "：" + fileMeta.getOriginalName(),
-                2L, 1L, "QUEUED");
-        task.setDataSetId(fileMeta.getDataSetId());
-        task.setProcessingType(processingType.name());
-        task.setSourceFileMetaId(fileMeta.getId());
-        task.setOutputKey(workspace.outputKey());
-        if (parameters != null) {
-            task.setTargetCrs(parameters.targetCrs());
-            task.setTileProfile(parameters.tileProfile());
-            task.setOutputFormat(parameters.outputFormat());
-        }
-        gisTaskService.insert(task);
-
-        return new GisProcessingExecution(
-                task.getId(), taskNo, fileMeta.getId(), processingType, inputPath, workspace,
-                parameters);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public GisFolderProcessingExecution createFolder(
-            String taskNo, Path inputFolder, GisProcessingWorkspace workspace) {
-        GisTask task = GisTaskFactory.queued(taskNo,
-                "地形目录处理：" + ProcessingService.displayName(inputFolder),
-                2L, 1L, "QUEUED");
-        task.setProcessingType(GisProcessingType.TERRAIN.name());
-        task.setOutputKey(workspace.outputKey());
-        gisTaskService.insert(task);
-        return new GisFolderProcessingExecution(task.getId(), taskNo, inputFolder, workspace);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public GisBatchProcessingExecution createBatch(String taskNo,
-                                                   GisCreateProcessingTaskRequest request, GisProcessingWorkspace workspace,
-                                                   List<TempFile> stagedFiles, List<GisStoredFile> storedFiles) {
-        GisProcessingParameters parameters = request.parameters();
-        GisTask task = GisTaskFactory.queued(taskNo, request.taskName().trim(),
-                2L, storedFiles.size(), "QUEUED");
-        task.setProcessingType(request.processingType().name());
-        task.setTargetCrs(parameters.targetCrs());
-        task.setTileProfile(parameters.tileProfile());
-        task.setOutputFormat(parameters.outputFormat());
-        task.setOutputKey(workspace.outputKey());
-        gisTaskService.insert(task);
-
-        List<GisProcessingTaskFile> items = new ArrayList<>(storedFiles.size());
-        for (int i = 0; i < storedFiles.size(); i++) {
-            GisProcessingTaskFile item = new GisProcessingTaskFile();
-            item.setTaskId(task.getId());
-            item.setFileIndex(i + 1);
-            item.setOriginalName(stagedFiles.get(i).getOriginalName());
-            item.setStorageKey(storedFiles.get(i).getStorageKey());
-            item.setOutputKey(workspace.outputKey());
-            item.setStatus("QUEUED");
-            if (fileMapper.insert(item) != 1) {
-                throw new IllegalStateException("处理文件工作项创建失败");
+        for (GisProcessingInput input : inputs) {
+            input.setTaskId(task.getId());
+            input.setCreateTime(now);
+            input.setUpdateTime(now);
+            if (inputMapper.insert(input) != 1) {
+                throw new IllegalStateException("GIS处理输入创建失败: " + input.getSequenceNo());
             }
-            items.add(item);
         }
-        return new GisBatchProcessingExecution(task.getId(), taskNo,
-                request.processingType(), workspace, List.copyOf(items), request.parameters());
+
+        GisTileSet tileSet = new GisTileSet();
+        tileSet.setTaskId(task.getId());
+        tileSet.setTileType(command.processingType().name());
+        tileSet.setTileSetStatus("BUILDING");
+        tileSet.setOutputKey(workspace.outputKey());
+        tileSet.setTargetCrs(command.parameters().targetCrs());
+        tileSet.setTileProfile(command.parameters().tileProfile());
+        tileSet.setOutputFormat(command.parameters().outputFormat());
+        tileSet.setMinZoom(command.parameters().minZoom());
+        tileSet.setMaxZoom(command.parameters().maxZoom());
+        tileSet.setManifestKey(workspace.outputKey() + "/tiles/"
+                + ("TERRAIN".equals(tileSet.getTileType()) ? "layer.json" : "manifest.json"));
+        tileSet.setCreateTime(now);
+        tileSet.setUpdateTime(now);
+        if (tileSetMapper.insert(tileSet) != 1) {
+            throw new IllegalStateException("GIS瓦片集创建失败");
+        }
+        return new CreatedProcessingTask(task.getId(), tileSet.getId());
     }
+
+    private String writeParameters(GisSubmitProcessingCommand command) {
+        try {
+            return objectMapper.writeValueAsString(command.parameters());
+        } catch (JacksonException ex) {
+            throw new IllegalArgumentException("处理参数无法序列化", ex);
+        }
+    }
+
+    private String fingerprint(GisSubmitProcessingCommand command,
+            List<GisProcessingInput> inputs, String parametersJson) {
+        StringBuilder value = new StringBuilder(command.processingType().name())
+                .append('|').append(command.sourceType().name()).append('|')
+                .append(parametersJson);
+        for (GisProcessingInput input : inputs) {
+            value.append('|').append(input.getFileMetaId())
+                    .append('|').append(input.getWorkspaceCode())
+                    .append('|').append(input.getRelativePath())
+                    .append('|').append(input.getStorageKey())
+                    .append('|').append(input.getSha256());
+        }
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.toString().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("运行环境不支持 SHA-256", ex);
+        }
+    }
+
+    public record CreatedProcessingTask(Long taskId, Long tileSetId) { }
 }

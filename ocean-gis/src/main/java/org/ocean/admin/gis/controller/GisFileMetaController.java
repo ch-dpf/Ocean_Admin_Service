@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisFileProcessRequest;
+import org.ocean.admin.gis.dto.GisProcessingParameters;
 import org.ocean.admin.gis.service.FileUploadService;
 import org.ocean.admin.gis.service.ProcessingService;
 import org.ocean.admin.gis.service.GisFileMetaService;
@@ -158,5 +159,18 @@ public class GisFileMetaController {
             @Valid @RequestBody GisFileProcessRequest request) {
         return ResponseResult.success("处理任务已提交",
                 processingService.submitSingle(id, request));
+    }
+
+    @PostMapping("/{id}/imagery/process")
+    @Operation(summary = "提交单个已入库影像切片任务",
+            description = "仅处理 READY、LOCAL、影像类别下的 tif/tiff 文件；不传参数时使用 EPSG:3857、XYZ、PNG 默认配置")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT,
+            description = "提交单个已入库影像切片任务", recordResponse = true)
+    public ResponseResult<GisProcessingTaskVO> processImagery(
+            @Parameter(description = "影像文件元数据 ID", required = true)
+            @PathVariable Long id,
+            @Valid @RequestBody(required = false) GisProcessingParameters parameters) {
+        return ResponseResult.success("影像切片任务已提交",
+                processingService.submitSingleImagery(id, parameters));
     }
 }

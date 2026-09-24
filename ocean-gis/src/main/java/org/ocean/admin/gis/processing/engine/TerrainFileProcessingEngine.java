@@ -1,7 +1,5 @@
 package org.ocean.admin.gis.processing.engine;
 
-import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.processing.GisProcessingExecution;
 import org.ocean.admin.gis.processing.GisProcessingProgress;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisProcessingType;
@@ -31,27 +29,14 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
     }
 
     @Override
-    public void validate(GisFileMeta fileMeta, Path inputPath) {
-        String extension = fileMeta.getExtension() == null
+    public void validate(String originalName, String extension, Path inputPath) {
+        extension = extension == null
                 ? ""
-                : fileMeta.getExtension().toLowerCase(Locale.ROOT);
+                : extension.toLowerCase(Locale.ROOT);
         if (!SUPPORTED_EXTENSIONS.contains(extension)) {
             throw new IllegalArgumentException("mago 地形切片仅支持 tif/tiff 单文件，当前文件: "
-                    + fileMeta.getOriginalName());
+                    + originalName);
         }
-    }
-
-    @Override
-    public void process(GisProcessingExecution execution,
-            Consumer<GisProcessingProgress> progressListener) {
-        terrainEngine.generate(
-                new TerrainGenerationRequest(
-                        java.util.List.of(execution.inputPath()),
-                        execution.workspace().outputPath(),
-                        execution.workspace().tempPath(),
-                        execution.workspace().logPath(),
-                        TerrainOptions.defaults()),
-                progressListener::accept);
     }
 
     @Override

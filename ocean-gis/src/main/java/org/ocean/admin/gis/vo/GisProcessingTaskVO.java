@@ -10,6 +10,7 @@ import lombok.Data;
 public class GisProcessingTaskVO {
 
     private Long taskId;
+    private Long tileSetId;
     private String taskNo;
     private Long fileMetaId;
     private Long dataSetId;

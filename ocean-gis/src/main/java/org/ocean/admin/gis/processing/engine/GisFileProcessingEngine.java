@@ -1,7 +1,5 @@
 package org.ocean.admin.gis.processing.engine;
 
-import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.processing.GisProcessingExecution;
 import org.ocean.admin.gis.processing.GisProcessingProgress;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisProcessingType;
@@ -16,19 +14,12 @@ public interface GisFileProcessingEngine {
 
     GisProcessingType type();
 
-    void validate(GisFileMeta fileMeta, Path inputPath);
+    void validate(String originalName, String extension, Path inputPath);
 
-    void process(GisProcessingExecution execution, Consumer<GisProcessingProgress> progressListener);
-
-    /** 处理多个输入文件并生成一个统一瓦片集；单文件引擎默认复用单文件实现。 */
+    /** 处理多个输入文件并生成一个统一瓦片集。 */
     default void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
             Consumer<GisProcessingProgress> progressListener) {
-        if (inputPaths == null || inputPaths.size() != 1) {
-            throw new UnsupportedOperationException(type().displayName() + "引擎不支持多文件合并处理");
-        }
-        process(new GisProcessingExecution(null, null, null, type(), inputPaths.get(0), workspace,
-                        null),
-                progressListener);
+        throw new UnsupportedOperationException(type().displayName() + "引擎不支持文件列表处理");
     }
 
     /** 使用任务参数处理多个输入文件。 */

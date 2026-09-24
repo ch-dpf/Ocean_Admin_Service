@@ -16,16 +16,8 @@ public class GisPublication {
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private String serviceCode;
-    private String processingType;
-    private Long sourceTaskId;
-    private Long publishTaskId;
+    private Long tileSetId;
     private Long dataSetId;
-    private String outputKey;
-    private String targetCrs;
-    private String tileProfile;
-    private String outputFormat;
-    private Integer minZoom;
-    private Integer maxZoom;
     private String status;
     private LocalDateTime publishTime;
     private LocalDateTime updateTime;

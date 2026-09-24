@@ -8,7 +8,9 @@ import lombok.Data;
 @Builder
 public class GisBatchProcessingTaskVO {
     private Long taskId;
+    private Long tileSetId;
     private String taskNo;
+    private String sourceType;
     private String processingType;
     private String outputKey;
     private Integer totalCount;

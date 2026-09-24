@@ -237,84 +237,156 @@ CREATE UNIQUE INDEX uk_gis_file_opt_record_item_file
 
 
 -- =========================================================
--- GIS 异步任务
+-- GIS 处理任务
 -- =========================================================
 
-CREATE TABLE ocean_gis.gis_task (
-    id                  BIGINT       PRIMARY KEY,
-    task_no             VARCHAR(64)  NOT NULL,
-    task_name           VARCHAR(200) NOT NULL,
-    task_type           BIGINT       NOT NULL,
-    priority            INTEGER      NOT NULL DEFAULT 0,
-    total_count         BIGINT       NOT NULL DEFAULT 0,
-    completed_count     BIGINT       NOT NULL DEFAULT 0,
-    failed_count        BIGINT       NOT NULL DEFAULT 0,
-    data_set_id         BIGINT,
-    parent_task_id      BIGINT,
-    root_task_id        BIGINT,
-    task_status         VARCHAR(20) NOT NULL DEFAULT 'QUEUED',
-    current_stage       VARCHAR(32),
-    error_message       VARCHAR(1000),
-    start_time          TIMESTAMP,
-    finish_time         TIMESTAMP,
-    processing_type     VARCHAR(20),
-    source_file_meta_id BIGINT,
-    output_key          VARCHAR(1000),
-    target_crs          VARCHAR(100),
-    tile_profile        VARCHAR(100),
-    output_format       VARCHAR(100),
-    create_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted             INTEGER      NOT NULL DEFAULT 0,
-    CONSTRAINT uk_gis_task_no
+CREATE TABLE ocean_gis.gis_processing_task (
+    id                        BIGINT       PRIMARY KEY,
+    task_no                   VARCHAR(64)  NOT NULL,
+    task_name                 VARCHAR(200) NOT NULL,
+    processing_type           VARCHAR(20)  NOT NULL,
+    source_type               VARCHAR(20)  NOT NULL,
+    parameters                JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    parameter_schema_version  INTEGER      NOT NULL DEFAULT 1,
+    request_fingerprint       VARCHAR(64),
+    priority                  INTEGER      NOT NULL DEFAULT 0,
+    total_count               BIGINT       NOT NULL DEFAULT 0,
+    completed_count           BIGINT       NOT NULL DEFAULT 0,
+    failed_count              BIGINT       NOT NULL DEFAULT 0,
+    task_status               VARCHAR(20)  NOT NULL DEFAULT 'QUEUED',
+    current_stage             VARCHAR(32),
+    error_message             VARCHAR(1000),
+    start_time                TIMESTAMP,
+    finish_time               TIMESTAMP,
+    create_time               TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time               TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                   INTEGER      NOT NULL DEFAULT 0,
+    CONSTRAINT uk_gis_processing_task_no
         UNIQUE (task_no),
-    CONSTRAINT ck_gis_task_type
-        CHECK (task_type BETWEEN 1 AND 4),
-    CONSTRAINT ck_gis_task_counts
-        CHECK (total_count >= 0 AND completed_count >= 0 AND failed_count >= 0),
-    CONSTRAINT ck_gis_task_deleted
+    CONSTRAINT ck_gis_processing_task_type
+        CHECK (processing_type IN ('TERRAIN', 'IMAGERY', 'VECTOR')),
+    CONSTRAINT ck_gis_processing_task_source
+        CHECK (source_type IN ('UPLOAD', 'WORKSPACE', 'MANAGED_FILE')),
+    CONSTRAINT ck_gis_processing_task_schema_version
+        CHECK (parameter_schema_version > 0),
+    CONSTRAINT ck_gis_processing_task_counts
+        CHECK (total_count >= 0 AND completed_count >= 0 AND failed_count >= 0
+            AND completed_count + failed_count <= total_count),
+    CONSTRAINT ck_gis_processing_task_deleted
         CHECK (deleted IN (0, 1)),
-    CONSTRAINT ck_gis_task_status
-        CHECK (task_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'PARTIAL_FAILED', 'FAILED')),
-    CONSTRAINT ck_gis_task_processing_type
-        CHECK (processing_type IS NULL OR processing_type IN ('TERRAIN', 'IMAGERY', 'VECTOR'))
+    CONSTRAINT ck_gis_processing_task_status
+        CHECK (task_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'PARTIAL_FAILED', 'FAILED'))
 );
 
-COMMENT ON TABLE ocean_gis.gis_task IS 'GIS 异步任务';
-COMMENT ON COLUMN ocean_gis.gis_task.task_type IS '任务类型：1-上传，2-切片，3-发布，4-导出或下载';
-COMMENT ON COLUMN ocean_gis.gis_task.processing_type IS '切片处理类型：TERRAIN、IMAGERY、VECTOR';
-COMMENT ON COLUMN ocean_gis.gis_task.source_file_meta_id IS '切片任务的源文件元数据 ID';
-COMMENT ON COLUMN ocean_gis.gis_task.output_key IS '切片产物在处理存储根目录下的相对 Key';
+COMMENT ON TABLE ocean_gis.gis_processing_task IS '静态瓦片生成任务及不可变处理参数快照';
+COMMENT ON COLUMN ocean_gis.gis_processing_task.parameters IS '按处理类型保存的完整参数 JSON 快照';
 
-CREATE INDEX idx_gis_task_data_set
-    ON ocean_gis.gis_task (data_set_id, create_time DESC)
+CREATE INDEX idx_gis_processing_task_schedule
+    ON ocean_gis.gis_processing_task (priority DESC, create_time)
     WHERE deleted = 0;
 
-CREATE INDEX idx_gis_task_parent
-    ON ocean_gis.gis_task (parent_task_id)
-    WHERE deleted = 0 AND parent_task_id IS NOT NULL;
-
-CREATE INDEX idx_gis_task_root
-    ON ocean_gis.gis_task (root_task_id)
-    WHERE deleted = 0 AND root_task_id IS NOT NULL;
-
-CREATE INDEX idx_gis_task_schedule
-    ON ocean_gis.gis_task (priority DESC, create_time)
+CREATE INDEX idx_gis_processing_task_status
+    ON ocean_gis.gis_processing_task (task_status, priority DESC, create_time)
     WHERE deleted = 0;
 
-CREATE INDEX idx_gis_task_status
-    ON ocean_gis.gis_task (task_status, priority DESC, create_time)
+CREATE INDEX idx_gis_processing_task_type
+    ON ocean_gis.gis_processing_task (processing_type, source_type, create_time DESC)
     WHERE deleted = 0;
 
-CREATE INDEX idx_gis_task_source_processing
-    ON ocean_gis.gis_task (source_file_meta_id, processing_type, create_time DESC)
-    WHERE deleted = 0 AND source_file_meta_id IS NOT NULL;
+-- =========================================================
+-- GIS 处理输入
+-- =========================================================
 
-CREATE UNIQUE INDEX uk_gis_task_active_file_processing
-    ON ocean_gis.gis_task (source_file_meta_id, processing_type)
-    WHERE deleted = 0
-      AND source_file_meta_id IS NOT NULL
-      AND task_status IN ('QUEUED', 'RUNNING');
+CREATE TABLE ocean_gis.gis_processing_input (
+    id              BIGINT       PRIMARY KEY,
+    task_id         BIGINT       NOT NULL,
+    sequence_no     INTEGER      NOT NULL,
+    input_kind      VARCHAR(16)  NOT NULL,
+    input_status    VARCHAR(20)  NOT NULL DEFAULT 'READY',
+    file_meta_id    BIGINT,
+    workspace_code  VARCHAR(64),
+    relative_path   VARCHAR(1000),
+    storage_key     VARCHAR(1000),
+    original_name   VARCHAR(500) NOT NULL,
+    extension       VARCHAR(32),
+    size_bytes      BIGINT,
+    sha256          VARCHAR(64),
+    error_message   VARCHAR(1000),
+    create_time     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_gis_processing_input_task
+        FOREIGN KEY (task_id) REFERENCES ocean_gis.gis_processing_task (id),
+    CONSTRAINT fk_gis_processing_input_file
+        FOREIGN KEY (file_meta_id) REFERENCES ocean_gis.gis_file_meta (id),
+    CONSTRAINT uk_gis_processing_input_sequence
+        UNIQUE (task_id, sequence_no),
+    CONSTRAINT ck_gis_processing_input_sequence
+        CHECK (sequence_no > 0),
+    CONSTRAINT ck_gis_processing_input_kind
+        CHECK (input_kind IN ('FILE', 'DIRECTORY')),
+    CONSTRAINT ck_gis_processing_input_status
+        CHECK (input_status IN ('READY', 'RUNNING', 'CONSUMED', 'FAILED')),
+    CONSTRAINT ck_gis_processing_input_size
+        CHECK (size_bytes IS NULL OR size_bytes >= 0),
+    CONSTRAINT ck_gis_processing_input_locator
+        CHECK (
+            (file_meta_id IS NOT NULL AND workspace_code IS NULL
+                AND relative_path IS NULL AND storage_key IS NULL)
+            OR (file_meta_id IS NULL AND workspace_code IS NOT NULL
+                AND relative_path IS NOT NULL AND storage_key IS NULL)
+            OR (file_meta_id IS NULL AND workspace_code IS NULL
+                AND relative_path IS NULL AND storage_key IS NOT NULL)
+        )
+);
+
+COMMENT ON TABLE ocean_gis.gis_processing_input IS '处理任务输入快照，统一上传、受控工作空间和已管理文件';
+COMMENT ON COLUMN ocean_gis.gis_processing_input.relative_path IS '受控工作空间根目录下的相对路径，禁止保存绝对路径';
+
+CREATE INDEX idx_gis_processing_input_task
+    ON ocean_gis.gis_processing_input (task_id, sequence_no);
+
+CREATE INDEX idx_gis_processing_input_file
+    ON ocean_gis.gis_processing_input (file_meta_id)
+    WHERE file_meta_id IS NOT NULL;
+
+-- =========================================================
+-- GIS 静态瓦片集
+-- =========================================================
+
+CREATE TABLE ocean_gis.gis_tile_set (
+    id              BIGINT        PRIMARY KEY,
+    task_id         BIGINT        NOT NULL,
+    tile_type       VARCHAR(20)   NOT NULL,
+    tile_set_status VARCHAR(20)   NOT NULL DEFAULT 'BUILDING',
+    output_key      VARCHAR(1000) NOT NULL,
+    target_crs      VARCHAR(100),
+    tile_profile    VARCHAR(100),
+    output_format   VARCHAR(100),
+    min_zoom        INTEGER,
+    max_zoom        INTEGER,
+    manifest_key    VARCHAR(1000),
+    error_message   VARCHAR(1000),
+    create_time     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_gis_tile_set_task
+        FOREIGN KEY (task_id) REFERENCES ocean_gis.gis_processing_task (id),
+    CONSTRAINT uk_gis_tile_set_task UNIQUE (task_id),
+    CONSTRAINT uk_gis_tile_set_output UNIQUE (output_key),
+    CONSTRAINT ck_gis_tile_set_type
+        CHECK (tile_type IN ('TERRAIN', 'IMAGERY', 'VECTOR')),
+    CONSTRAINT ck_gis_tile_set_status
+        CHECK (tile_set_status IN ('BUILDING', 'READY', 'FAILED')),
+    CONSTRAINT ck_gis_tile_set_zoom
+        CHECK ((min_zoom IS NULL AND max_zoom IS NULL)
+            OR (min_zoom BETWEEN 0 AND 22 AND max_zoom BETWEEN 0 AND 22
+                AND min_zoom <= max_zoom))
+);
+
+COMMENT ON TABLE ocean_gis.gis_tile_set IS '一次处理任务唯一生成的静态瓦片集';
+COMMENT ON COLUMN ocean_gis.gis_tile_set.output_key IS '处理存储根目录下的瓦片集 Key';
+
+CREATE INDEX idx_gis_tile_set_type_status
+    ON ocean_gis.gis_tile_set (tile_type, tile_set_status, create_time DESC);
 
 -- =========================================================
 -- GIS 瓦片服务发布记录
@@ -323,62 +395,28 @@ CREATE UNIQUE INDEX uk_gis_task_active_file_processing
 CREATE TABLE ocean_gis.gis_publication (
     id                  BIGINT       PRIMARY KEY,
     service_code        VARCHAR(64)  NOT NULL,
-    processing_type     VARCHAR(20)  NOT NULL,
-    source_task_id      BIGINT       NOT NULL,
-    publish_task_id     BIGINT       NOT NULL,
+    tile_set_id         BIGINT       NOT NULL,
     data_set_id         BIGINT,
-    output_key          VARCHAR(1000) NOT NULL,
-    target_crs          VARCHAR(100),
-    tile_profile        VARCHAR(100),
-    output_format       VARCHAR(100),
-    min_zoom            INTEGER,
-    max_zoom            INTEGER,
     status              VARCHAR(20)  NOT NULL DEFAULT 'PUBLISHED',
     publish_time        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted             INTEGER      NOT NULL DEFAULT 0,
     CONSTRAINT uk_gis_publication_code UNIQUE (service_code),
-    CONSTRAINT uk_gis_publication_source UNIQUE (source_task_id),
-    CONSTRAINT ck_gis_publication_type
-        CHECK (processing_type IN ('TERRAIN', 'IMAGERY', 'VECTOR')),
+    CONSTRAINT uk_gis_publication_tile_set UNIQUE (tile_set_id),
+    CONSTRAINT fk_gis_publication_tile_set
+        FOREIGN KEY (tile_set_id) REFERENCES ocean_gis.gis_tile_set (id),
+    CONSTRAINT fk_gis_publication_data_set
+        FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id),
     CONSTRAINT ck_gis_publication_status
         CHECK (status IN ('PUBLISHED', 'DISABLED')),
     CONSTRAINT ck_gis_publication_deleted
-        CHECK (deleted IN (0, 1)),
-    CONSTRAINT ck_gis_publication_zoom
-        CHECK ((min_zoom IS NULL AND max_zoom IS NULL)
-            OR (min_zoom BETWEEN 0 AND 22 AND max_zoom BETWEEN 0 AND 22
-                AND min_zoom <= max_zoom))
+        CHECK (deleted IN (0, 1))
 );
 
-COMMENT ON TABLE ocean_gis.gis_publication IS '地形、影像和矢量瓦片服务共用发布记录';
+COMMENT ON TABLE ocean_gis.gis_publication IS '静态瓦片集的公开发布记录';
 COMMENT ON COLUMN ocean_gis.gis_publication.service_code IS '公开服务 URL 中使用的稳定编码';
-COMMENT ON COLUMN ocean_gis.gis_publication.processing_type IS '发布类型：TERRAIN、IMAGERY、VECTOR';
-COMMENT ON COLUMN ocean_gis.gis_publication.source_task_id IS '已完成的切片任务 ID';
-COMMENT ON COLUMN ocean_gis.gis_publication.publish_task_id IS '对应的发布任务 ID';
-COMMENT ON COLUMN ocean_gis.gis_publication.output_key IS '处理存储根目录下的切片产物 Key';
+COMMENT ON COLUMN ocean_gis.gis_publication.tile_set_id IS '被发布的静态瓦片集 ID';
 
-CREATE INDEX idx_gis_publication_type_status
-    ON ocean_gis.gis_publication (processing_type, status, publish_time DESC)
+CREATE INDEX idx_gis_publication_status
+    ON ocean_gis.gis_publication (status, publish_time DESC)
     WHERE deleted = 0;
-
--- =========================================================
--- 多文件处理任务逐文件结果
--- =========================================================
-
-CREATE TABLE ocean_gis.gis_processing_task_file (
-    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    task_id BIGINT NOT NULL REFERENCES ocean_gis.gis_task(id),
-    file_index INTEGER NOT NULL,
-    original_name VARCHAR(500) NOT NULL,
-    storage_key VARCHAR(1000) NOT NULL,
-    output_key VARCHAR(1000) NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'QUEUED',
-    error_message VARCHAR(1000),
-    CONSTRAINT uk_gis_processing_task_file_index UNIQUE (task_id, file_index),
-    CONSTRAINT ck_gis_processing_task_file_status
-        CHECK (status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED'))
-);
-
-CREATE INDEX idx_gis_processing_task_file_task
-    ON ocean_gis.gis_processing_task_file (task_id, file_index);

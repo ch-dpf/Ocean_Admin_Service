@@ -2,7 +2,7 @@
 
 ## 设计目标
 
-影像与地形共用发布记录、状态流转和发布任务；各类型服务保留独立的产物校验、公开 URL 和资源 MIME 处理。影像数据面只暴露已发布的 TileJSON 和 XYZ PNG/JPEG 文件。
+影像与地形共用发布记录和状态流转；发布记录直接关联静态瓦片集，不创建额外任务。各类型服务保留独立的产物校验、公开 URL 和资源 MIME 处理。影像数据面只暴露已发布的 TileJSON 和 XYZ PNG/JPEG 文件。
 
 ## 类图
 
@@ -10,7 +10,12 @@
 classDiagram
     class GisPublication {
         String serviceCode
-        String processingType
+        Long tileSetId
+        String status
+    }
+    class GisTileSet {
+        Long taskId
+        String tileType
         String outputKey
         String outputFormat
         Integer minZoom
@@ -19,7 +24,7 @@ classDiagram
     }
     class GisPublicationService {
         +getPublicationPage(type, filters)
-        +publish(sourceTask, serviceCode, zooms)
+        +publish(tileSet, serviceCode)
         +getRequired(type, serviceCode)
         +disable(type, serviceCode)
     }
@@ -38,6 +43,7 @@ classDiagram
 
     GisPublicationService --> GisPublicationMapper
     GisPublicationMapper --> GisPublication
+    GisPublication --> GisTileSet
     TerrainPublicationService --> GisPublicationService
     ImageryPublicationService --> GisPublicationService
     ImageryPublicationService --> GisProcessingStorageService
@@ -60,8 +66,8 @@ sequenceDiagram
     API->>TypeService: publish(taskId)
     TypeService->>TypeService: 校验 IMAGERY + COMPLETED
     TypeService->>FS: 校验 TileJSON、manifest 和 XYZ 瓦片
-    TypeService->>CommonService: publish(task, metadata)
-    CommonService->>DB: 创建发布任务并保存发布记录
+    TypeService->>CommonService: publish(tileSet, serviceCode)
+    CommonService->>DB: 按 tileSetId 新增或更新发布记录
     CommonService-->>TypeService: GisPublication
     TypeService-->>API: TileJSON URL 和瓦片 URL 模板
 ```

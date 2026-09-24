@@ -14,7 +14,6 @@ public class GisImageryPublicationVO {
     private Long id;
     private String serviceCode;
     private Long sourceTaskId;
-    private Long publishTaskId;
     private Long dataSetId;
 
     @Schema(description = "PUBLISHED 或 DISABLED")

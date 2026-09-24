@@ -18,8 +18,9 @@ sys_exception_log   系统异常日志
 ocean gis 模式
 gis_data_set    数据集表
 gis_file_meta   文件元数据表
-gis_task        任务表
+gis_processing_task     静态瓦片处理任务及完整参数快照
+gis_processing_input    处理输入快照（上传、受控工作空间、已管理文件）
+gis_tile_set            一次处理任务唯一生成的静态瓦片集
 
 
-gis_publication             GIS统一发布记录表（地形、影像、矢量）
-gis_processing_task_file    多文件处理任务逐文件结果
+gis_publication             静态瓦片集统一发布记录（地形、影像、矢量）

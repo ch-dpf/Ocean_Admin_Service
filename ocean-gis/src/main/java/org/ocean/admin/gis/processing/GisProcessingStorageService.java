@@ -1,6 +1,6 @@
 package org.ocean.admin.gis.processing;
 
-import org.springframework.beans.factory.annotation.Value;
+import org.ocean.admin.gis.processing.config.GisProcessingProperties;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -12,9 +12,8 @@ public class GisProcessingStorageService {
 
     private final Path processingRoot;
 
-    public GisProcessingStorageService(
-            @Value("${gis.processing.base-path:processed/gis}") String basePath) {
-        this.processingRoot = Path.of(basePath).toAbsolutePath().normalize();
+    public GisProcessingStorageService(GisProcessingProperties properties) {
+        this.processingRoot = Path.of(properties.getBasePath()).toAbsolutePath().normalize();
     }
 
     public GisProcessingWorkspace workspace(
@@ -59,12 +58,35 @@ public class GisProcessingStorageService {
                 taskRoot.resolve("logs").resolve("engine.log"));
     }
 
+    /** 每次处理任务分配一个与输入来源无关的瓦片集目录。 */
+    public GisProcessingWorkspace taskWorkspace(GisProcessingType type, String taskNo) {
+        if (type == null || taskNo == null || !taskNo.matches("[A-Za-z0-9_.-]+")) {
+            throw new IllegalArgumentException("无法创建非法的 GIS 处理工作目录");
+        }
+        String outputKey = type.name().toLowerCase(Locale.ROOT) + "/tasks/" + taskNo;
+        Path taskRoot = resolve(outputKey);
+        return new GisProcessingWorkspace(outputKey,
+                taskRoot.resolve("tiles"), taskRoot.resolve("temp"),
+                taskRoot.resolve("logs").resolve("engine.log"));
+    }
+
     /** 将数据库中的产物 Key 安全解析到切片目录。 */
     public Path resolveTiles(String outputKey) {
         if (outputKey == null || outputKey.isBlank()) {
             throw new IllegalArgumentException("切片产物 Key 不能为空");
         }
         return resolve(outputKey).resolve("tiles").normalize();
+    }
+
+    /** 根据持久化 outputKey 重建执行工作区。 */
+    public GisProcessingWorkspace workspaceFromOutputKey(String outputKey) {
+        if (outputKey == null || outputKey.isBlank()) {
+            throw new IllegalArgumentException("切片产物 Key 不能为空");
+        }
+        Path taskRoot = resolve(outputKey);
+        return new GisProcessingWorkspace(outputKey,
+                taskRoot.resolve("tiles"), taskRoot.resolve("temp"),
+                taskRoot.resolve("logs").resolve("engine.log"));
     }
 
     private Path resolve(String key) {

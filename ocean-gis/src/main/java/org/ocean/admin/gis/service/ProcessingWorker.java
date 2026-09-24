@@ -2,97 +2,113 @@ package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.entity.GisProcessingTaskFile;
-import org.ocean.admin.gis.mapper.GisProcessingTaskFileMapper;
-import org.ocean.admin.gis.processing.GisBatchProcessingExecution;
-import org.ocean.admin.gis.processing.GisFolderProcessingExecution;
-import org.ocean.admin.gis.processing.GisProcessingExecution;
+import org.ocean.admin.gis.dto.GisProcessingParameters;
+import org.ocean.admin.gis.entity.GisProcessingInput;
+import org.ocean.admin.gis.entity.GisProcessingTask;
+import org.ocean.admin.gis.entity.GisTileSet;
+import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
+import org.ocean.admin.gis.mapper.GisTileSetMapper;
+import org.ocean.admin.gis.processing.GisInputSourceType;
+import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngineRegistry;
-import org.ocean.admin.gis.util.FileUploadUtil;
+import org.ocean.admin.gis.processing.input.GisProcessingInputResolverRegistry;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.List;
 
-/** 三种 GIS 切片输入的异步执行入口。 */
+/** 仅接收任务 ID，并从持久化快照恢复处理上下文。 */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ProcessingWorker {
-    private final FileUploadUtil fileUploadUtil;
+    private final GisProcessingInputMapper inputMapper;
+    private final GisTileSetMapper tileSetMapper;
+    private final GisProcessingInputResolverRegistry inputResolverRegistry;
     private final GisFileProcessingEngineRegistry engineRegistry;
-    private final GisProcessingTaskFileMapper fileMapper;
-    private final GisTaskLifecycleService taskLifecycle;
+    private final GisProcessingStorageService storageService;
+    private final GisProcessingTaskLifecycleService taskLifecycle;
+    private final GisProcessingTaskRecordService taskService;
+    private final ObjectMapper objectMapper;
 
     @Async("gisTaskExecutor")
-    public void process(GisProcessingExecution execution) {
-        try {
-            taskLifecycle.start(execution.taskId(), execution.taskNo(), 0, "开始执行切片引擎");
-            GisFileProcessingEngine engine = engineRegistry.require(execution.processingType());
-            engine.process(execution,
-                    progress -> taskLifecycle.reportProgress(execution.taskNo(), progress));
-            taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), true);
-            taskLifecycle.finish(execution.taskId(), execution.taskNo(), ignored -> "切片处理完成");
-        } catch (Exception ex) {
-            taskLifecycle.fail(execution.taskId(), execution.taskNo(), "切片处理失败: ", ex);
-            log.error("GIS单文件切片失败: taskNo={}, fileMetaId={}",
-                    execution.taskNo(), execution.fileMetaId(), ex);
+    public void process(Long taskId) {
+        GisProcessingTask task = taskService.getRequired(taskId);
+        GisTileSet tileSet = tileSetMapper.selectByTaskId(taskId);
+        String taskNo = task.getTaskNo();
+        if (tileSet == null) {
+            throw new IllegalStateException("处理任务对应的瓦片集不存在: " + taskId);
         }
-    }
-
-    @Async("gisTaskExecutor")
-    public void process(GisFolderProcessingExecution execution) {
+        List<GisProcessingInput> inputs = inputMapper.selectByTaskId(taskId);
         try {
-            taskLifecycle.start(execution.taskId(), execution.taskNo(), 0, "开始执行文件夹切片");
-            GisFileProcessingEngine engine = engineRegistry.require(GisProcessingType.TERRAIN);
-            engine.processFolder(execution.inputFolder(), execution.workspace(),
-                    progress -> taskLifecycle.reportProgress(execution.taskNo(), progress));
-            taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), true);
-            taskLifecycle.finish(execution.taskId(), execution.taskNo(),
-                    ignored -> "文件夹切片处理完成");
-        } catch (Exception ex) {
-            taskLifecycle.fail(execution.taskId(), execution.taskNo(),
-                    "文件夹切片处理失败: ", ex);
-            log.error("GIS文件夹切片失败: taskNo={}, folder={}",
-                    execution.taskNo(), execution.inputFolder(), ex);
-        }
-    }
+            GisProcessingType processingType =
+                    GisProcessingType.valueOf(task.getProcessingType());
+            GisInputSourceType sourceType = GisInputSourceType.valueOf(task.getSourceType());
+            GisProcessingParameters parameters = objectMapper.readValue(
+                    task.getParametersJson(), GisProcessingParameters.class);
+            List<Path> paths = inputResolverRegistry.require(sourceType).resolveRuntime(inputs);
+            GisProcessingWorkspace workspace = storageService.workspaceFromOutputKey(
+                    tileSet.getOutputKey());
+            GisFileProcessingEngine engine = engineRegistry.require(processingType);
 
-    @Async("gisTaskExecutor")
-    public void process(GisBatchProcessingExecution execution) {
-        try {
-            taskLifecycle.start(execution.taskId(), execution.taskNo(), 0, "开始执行多文件切片");
-            GisFileProcessingEngine engine = engineRegistry.require(execution.processingType());
-            execution.files().forEach(file -> updateFile(file.getId(), "RUNNING", null));
-            java.util.List<Path> inputs = execution.files().stream()
-                    .map(file -> fileUploadUtil.resolveStoredPath(file.getStorageKey()))
-                    .toList();
-            engine.process(inputs, execution.workspace(), execution.parameters(),
-                    progress -> taskLifecycle.reportProgress(execution.taskNo(), progress));
-            for (GisProcessingTaskFile file : execution.files()) {
-                updateFile(file.getId(), "COMPLETED", null);
-                taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), true);
+            taskLifecycle.start(taskId, taskNo, 0, "开始执行切片引擎");
+            inputMapper.updateTaskStatus(taskId, "RUNNING", null);
+            if (inputs.size() == 1 && "DIRECTORY".equals(inputs.get(0).getInputKind())) {
+                engine.processFolder(paths.get(0), workspace,
+                        progress -> taskLifecycle.reportProgress(taskNo, progress));
+            } else {
+                engine.process(paths, workspace, parameters,
+                        progress -> taskLifecycle.reportProgress(taskNo, progress));
             }
-            taskLifecycle.finish(execution.taskId(), execution.taskNo(),
-                    finished -> "处理结束，成功" + finished.getCompletedCount()
-                            + "个，失败" + finished.getFailedCount() + "个");
-        } catch (Exception ex) {
-            execution.files().forEach(file -> updateFile(file.getId(), "FAILED", abbreviate(ex.getMessage())));
-            for (int i = 0; i < execution.files().size(); i++) {
-                taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), false);
+            refreshTileMetadata(tileSet, workspace);
+            tileSet.setTileSetStatus("READY");
+            tileSet.setUpdateTime(LocalDateTime.now());
+            tileSetMapper.updateById(tileSet);
+            inputMapper.updateTaskStatus(taskId, "CONSUMED", null);
+            for (int i = 0; i < inputs.size(); i++) {
+                taskLifecycle.recordResult(taskId, taskNo, true);
             }
-            taskLifecycle.fail(execution.taskId(), execution.taskNo(), "多文件处理失败: ", ex);
-            log.error("GIS多文件切片任务失败: taskNo={}", execution.taskNo(), ex);
+            taskLifecycle.finish(taskId, taskNo,
+                    finished -> "处理结束，已生成一个静态瓦片集");
+        } catch (Exception ex) {
+            String error = abbreviate(ex.getMessage());
+            inputMapper.updateTaskStatus(taskId, "FAILED", error);
+            tileSet.setTileSetStatus("FAILED");
+            tileSet.setErrorMessage(error);
+            tileSet.setUpdateTime(LocalDateTime.now());
+            tileSetMapper.updateById(tileSet);
+            taskLifecycle.fail(taskId, taskNo, "切片处理失败: ", ex);
+            log.error("GIS切片任务失败: taskId={}", taskId, ex);
         }
     }
 
-    private void updateFile(Long id, String status, String error) {
-        int updated = fileMapper.updateStatus(id, status, error);
-        if (updated != 1) {
-            throw new IllegalStateException("处理文件状态更新失败: " + id);
+    private void refreshTileMetadata(GisTileSet tileSet, GisProcessingWorkspace workspace) {
+        if (!"IMAGERY".equals(tileSet.getTileType())) {
+            return;
+        }
+        Path manifest = workspace.outputPath().resolve("manifest.json");
+        if (!Files.isRegularFile(manifest)) {
+            return;
+        }
+        try {
+            JsonNode json = objectMapper.readTree(manifest.toFile());
+            tileSet.setTargetCrs(json.path("targetCrs").asText(tileSet.getTargetCrs()));
+            tileSet.setTileProfile(json.path("tileProfile").asText(tileSet.getTileProfile()));
+            tileSet.setOutputFormat(json.path("format").asText(tileSet.getOutputFormat()));
+            tileSet.setMinZoom(json.path("minZoom").isNumber()
+                    ? json.path("minZoom").asInt() : tileSet.getMinZoom());
+            tileSet.setMaxZoom(json.path("maxZoom").isNumber()
+                    ? json.path("maxZoom").asInt() : tileSet.getMaxZoom());
+        } catch (Exception ex) {
+            throw new IllegalStateException("无法读取切片产物元数据", ex);
         }
     }
 

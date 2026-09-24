@@ -89,6 +89,8 @@ gis:
     session-ttl: ${GIS_UPLOAD_SESSION_TTL:2h}
   processing:
     base-path: ${GIS_PROCESSING_BASE_PATH:processed/gis}
+    workspaces:
+      default: ${GIS_PROCESSING_WORKSPACE_DEFAULT:workspace/gis}
   publication:
     # 对外返回的服务地址；经反向代理部署时配置为浏览器可访问的域名。
     public-base-url: ${GIS_PUBLIC_BASE_URL:http://192.168.14.65:8090}
