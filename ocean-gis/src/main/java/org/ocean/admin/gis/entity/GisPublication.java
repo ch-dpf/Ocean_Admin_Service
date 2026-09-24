@@ -8,18 +8,24 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** Cesium quantized-mesh 地形发布记录。 */
+/** 地形、影像和矢量服务共用的发布记录。 */
 @Data
-@TableName(value = "gis_terrain_publication", schema = "ocean_gis")
-public class GisTerrainPublication {
+@TableName(value = "gis_publication", schema = "ocean_gis")
+public class GisPublication {
 
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private String serviceCode;
+    private String processingType;
     private Long sourceTaskId;
     private Long publishTaskId;
     private Long dataSetId;
     private String outputKey;
+    private String targetCrs;
+    private String tileProfile;
+    private String outputFormat;
+    private Integer minZoom;
+    private Integer maxZoom;
     private String status;
     private LocalDateTime publishTime;
     private LocalDateTime updateTime;

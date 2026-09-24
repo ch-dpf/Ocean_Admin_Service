@@ -3,6 +3,7 @@ package org.ocean.admin.gis.imagery;
 import org.eclipse.imagen.Interpolation;
 import org.eclipse.imagen.RenderedOp;
 import org.eclipse.imagen.media.scale.ScaleDescriptor;
+import org.geotools.api.feature.simple.SimpleFeature;
 import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
 import org.geotools.api.referencing.operation.MathTransform;
 import org.geotools.api.style.Style;
@@ -12,6 +13,7 @@ import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.map.GridCoverageLayer;
 import org.geotools.map.MapContent;
 import org.geotools.referencing.CRS;
+import org.geotools.renderer.RenderListener;
 import org.geotools.renderer.lite.StreamingRenderer;
 import org.geotools.styling.StyleBuilder;
 
@@ -29,6 +31,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import tools.jackson.databind.ObjectMapper;
 
@@ -37,6 +40,7 @@ public class GeoTiffTileGenerator {
 
     private static final double WEB_MERCATOR_LIMIT = 20_037_508.342789244;
     private static final int RENDER_SCALE = 2;
+    private static final int MIN_VISIBLE_PIXELS = 1;
     private static final CoordinateReferenceSystem WEB_MERCATOR = decode("EPSG:3857");
     private static final CoordinateReferenceSystem WGS84 = decode("EPSG:4326");
 
@@ -97,7 +101,7 @@ public class GeoTiffTileGenerator {
                 TileRange range = tileRange(mercatorBounds, zoom);
                 for (int x = range.minX(); x <= range.maxX(); x++) {
                     for (int y = range.minY(); y <= range.maxY(); y++) {
-                        writeTile(renderer, target, zoom, x, y, options);
+                        writeTile(renderer, target, mercatorBounds, zoom, x, y, options);
                         completed++;
                     }
                 }
@@ -130,7 +134,8 @@ public class GeoTiffTileGenerator {
         }
     }
 
-    private void writeTile(StreamingRenderer renderer, Path output, int zoom, int x, int y,
+    private void writeTile(StreamingRenderer renderer, Path output,
+            ReferencedEnvelope coverageBounds, int zoom, int x, int y,
             ImageryTileOptions options) throws IOException {
         int renderSize = ImageryTileOptions.TILE_SIZE * RENDER_SCALE;
         int imageType = options.transparent()
@@ -141,7 +146,13 @@ public class GeoTiffTileGenerator {
             graphics.setColor(options.transparent() ? new Color(0, 0, 0, 0) : Color.WHITE);
             graphics.fillRect(0, 0, renderSize, renderSize);
             graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-            renderer.paint(graphics, new Rectangle(renderSize, renderSize), tileEnvelope(zoom, x, y));
+            ReferencedEnvelope tileBounds = tileEnvelope(zoom, x, y);
+            ReferencedEnvelope renderBounds = intersection(tileBounds, coverageBounds);
+            if (renderBounds != null) {
+                Rectangle renderArea = renderArea(tileBounds, renderBounds, renderSize);
+                renderCoverage(renderer, graphics, renderBounds, renderArea, imageType,
+                        options.transparent(), zoom, x, y);
+            }
         } finally {
             graphics.dispose();
         }
@@ -174,6 +185,72 @@ public class GeoTiffTileGenerator {
         } finally {
             scaled.dispose();
         }
+    }
+
+    private void renderCoverage(StreamingRenderer renderer, Graphics2D tileGraphics,
+            ReferencedEnvelope renderBounds, Rectangle renderArea, int imageType,
+            boolean transparent, int zoom, int x, int y) throws IOException {
+        BufferedImage patch = new BufferedImage(renderArea.width, renderArea.height, imageType);
+        Graphics2D graphics = patch.createGraphics();
+        AtomicReference<Exception> renderingError = new AtomicReference<>();
+        RenderListener listener = new RenderListener() {
+            @Override
+            public void featureRenderer(SimpleFeature feature) {
+                // 栅格渲染不产生矢量要素事件。
+            }
+
+            @Override
+            public void errorOccurred(Exception exception) {
+                renderingError.compareAndSet(null, exception);
+            }
+        };
+        renderer.addRenderListener(listener);
+        try {
+            graphics.setColor(transparent ? new Color(0, 0, 0, 0) : Color.WHITE);
+            graphics.fillRect(0, 0, patch.getWidth(), patch.getHeight());
+            graphics.setRenderingHint(RenderingHints.KEY_RENDERING,
+                    RenderingHints.VALUE_RENDER_QUALITY);
+            renderer.paint(graphics, new Rectangle(patch.getWidth(), patch.getHeight()),
+                    renderBounds);
+        } finally {
+            renderer.removeRenderListener(listener);
+            graphics.dispose();
+        }
+        Exception error = renderingError.get();
+        if (error != null) {
+            throw new IOException("影像瓦片渲染失败: z=" + zoom + ", x=" + x + ", y=" + y,
+                    error);
+        }
+        tileGraphics.drawImage(patch, renderArea.x, renderArea.y, null);
+    }
+
+    private ReferencedEnvelope intersection(ReferencedEnvelope tileBounds,
+            ReferencedEnvelope coverageBounds) {
+        double minX = Math.max(tileBounds.getMinX(), coverageBounds.getMinX());
+        double maxX = Math.min(tileBounds.getMaxX(), coverageBounds.getMaxX());
+        double minY = Math.max(tileBounds.getMinY(), coverageBounds.getMinY());
+        double maxY = Math.min(tileBounds.getMaxY(), coverageBounds.getMaxY());
+        if (minX >= maxX || minY >= maxY) {
+            return null;
+        }
+        return new ReferencedEnvelope(minX, maxX, minY, maxY, WEB_MERCATOR);
+    }
+
+    private Rectangle renderArea(ReferencedEnvelope tileBounds,
+            ReferencedEnvelope renderBounds, int renderSize) {
+        double scaleX = renderSize / tileBounds.getWidth();
+        double scaleY = renderSize / tileBounds.getHeight();
+        int minX = Math.min(renderSize - 1, clampPixel((int) Math.floor(
+                (renderBounds.getMinX() - tileBounds.getMinX()) * scaleX), renderSize));
+        int maxX = clampPixel((int) Math.ceil(
+                (renderBounds.getMaxX() - tileBounds.getMinX()) * scaleX), renderSize);
+        int minY = Math.min(renderSize - 1, clampPixel((int) Math.floor(
+                (tileBounds.getMaxY() - renderBounds.getMaxY()) * scaleY), renderSize));
+        int maxY = clampPixel((int) Math.ceil(
+                (tileBounds.getMaxY() - renderBounds.getMinY()) * scaleY), renderSize);
+        maxX = Math.max(minX + 1, maxX);
+        maxY = Math.max(minY + 1, maxY);
+        return new Rectangle(minX, minY, maxX - minX, maxY - minY);
     }
 
     private void writeMetadata(Path output, Path source, ReferencedEnvelope bounds,
@@ -220,8 +297,22 @@ public class GeoTiffTileGenerator {
                 / (ImageryTileOptions.TILE_SIZE * sourceResolution)) / Math.log(2));
         nativeZoom = Math.max(0, Math.min(ImageryTileOptions.MAX_ZOOM, nativeZoom));
         int max = options.maxZoom() == null ? nativeZoom : options.maxZoom();
-        int min = options.minZoom() == null ? Math.max(0, max - 5) : options.minZoom();
+        int min = options.minZoom() == null
+                ? Math.min(max, calculateMinimumZoom(bounds)) : options.minZoom();
         return new ZoomRange(min, max);
+    }
+
+    private int calculateMinimumZoom(ReferencedEnvelope bounds) {
+        double minimumExtent = Math.min(bounds.getWidth(), bounds.getHeight());
+        double worldWidth = WEB_MERCATOR_LIMIT * 2;
+        for (int zoom = 0; zoom < ImageryTileOptions.MAX_ZOOM; zoom++) {
+            double visiblePixels = minimumExtent * ImageryTileOptions.TILE_SIZE
+                    * (1L << zoom) / worldWidth;
+            if (visiblePixels >= MIN_VISIBLE_PIXELS) {
+                return zoom;
+            }
+        }
+        return ImageryTileOptions.MAX_ZOOM;
     }
 
     private long countTiles(ReferencedEnvelope bounds, ZoomRange zooms) {
@@ -297,6 +388,10 @@ public class GeoTiffTileGenerator {
 
     private int clampTile(int value, int dimension) {
         return Math.max(0, Math.min(dimension - 1, value));
+    }
+
+    private int clampPixel(int value, int renderSize) {
+        return Math.max(0, Math.min(renderSize, value));
     }
 
     private String fileName(Path path) {

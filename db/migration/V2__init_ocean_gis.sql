@@ -317,36 +317,49 @@ CREATE UNIQUE INDEX uk_gis_task_active_file_processing
       AND task_status IN ('QUEUED', 'RUNNING');
 
 -- =========================================================
--- Cesium 地形发布记录
+-- GIS 瓦片服务发布记录
 -- =========================================================
 
-CREATE TABLE ocean_gis.gis_terrain_publication (
+CREATE TABLE ocean_gis.gis_publication (
     id                  BIGINT       PRIMARY KEY,
     service_code        VARCHAR(64)  NOT NULL,
+    processing_type     VARCHAR(20)  NOT NULL,
     source_task_id      BIGINT       NOT NULL,
     publish_task_id     BIGINT       NOT NULL,
     data_set_id         BIGINT,
     output_key          VARCHAR(1000) NOT NULL,
+    target_crs          VARCHAR(100),
+    tile_profile        VARCHAR(100),
+    output_format       VARCHAR(100),
+    min_zoom            INTEGER,
+    max_zoom            INTEGER,
     status              VARCHAR(20)  NOT NULL DEFAULT 'PUBLISHED',
     publish_time        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted             INTEGER      NOT NULL DEFAULT 0,
-    CONSTRAINT uk_gis_terrain_publication_code UNIQUE (service_code),
-    CONSTRAINT uk_gis_terrain_publication_source UNIQUE (source_task_id),
-    CONSTRAINT ck_gis_terrain_publication_status
+    CONSTRAINT uk_gis_publication_code UNIQUE (service_code),
+    CONSTRAINT uk_gis_publication_source UNIQUE (source_task_id),
+    CONSTRAINT ck_gis_publication_type
+        CHECK (processing_type IN ('TERRAIN', 'IMAGERY', 'VECTOR')),
+    CONSTRAINT ck_gis_publication_status
         CHECK (status IN ('PUBLISHED', 'DISABLED')),
-    CONSTRAINT ck_gis_terrain_publication_deleted
-        CHECK (deleted IN (0, 1))
+    CONSTRAINT ck_gis_publication_deleted
+        CHECK (deleted IN (0, 1)),
+    CONSTRAINT ck_gis_publication_zoom
+        CHECK ((min_zoom IS NULL AND max_zoom IS NULL)
+            OR (min_zoom BETWEEN 0 AND 22 AND max_zoom BETWEEN 0 AND 22
+                AND min_zoom <= max_zoom))
 );
 
-COMMENT ON TABLE ocean_gis.gis_terrain_publication IS 'Cesium quantized-mesh 地形发布记录';
-COMMENT ON COLUMN ocean_gis.gis_terrain_publication.service_code IS '公开服务 URL 中使用的稳定编码';
-COMMENT ON COLUMN ocean_gis.gis_terrain_publication.source_task_id IS '已完成的地形切片任务 ID';
-COMMENT ON COLUMN ocean_gis.gis_terrain_publication.publish_task_id IS '对应的发布任务 ID';
-COMMENT ON COLUMN ocean_gis.gis_terrain_publication.output_key IS '处理存储根目录下的切片产物 Key';
+COMMENT ON TABLE ocean_gis.gis_publication IS '地形、影像和矢量瓦片服务共用发布记录';
+COMMENT ON COLUMN ocean_gis.gis_publication.service_code IS '公开服务 URL 中使用的稳定编码';
+COMMENT ON COLUMN ocean_gis.gis_publication.processing_type IS '发布类型：TERRAIN、IMAGERY、VECTOR';
+COMMENT ON COLUMN ocean_gis.gis_publication.source_task_id IS '已完成的切片任务 ID';
+COMMENT ON COLUMN ocean_gis.gis_publication.publish_task_id IS '对应的发布任务 ID';
+COMMENT ON COLUMN ocean_gis.gis_publication.output_key IS '处理存储根目录下的切片产物 Key';
 
-CREATE INDEX idx_gis_terrain_publication_status
-    ON ocean_gis.gis_terrain_publication (status, publish_time DESC)
+CREATE INDEX idx_gis_publication_type_status
+    ON ocean_gis.gis_publication (processing_type, status, publish_time DESC)
     WHERE deleted = 0;
 
 -- =========================================================

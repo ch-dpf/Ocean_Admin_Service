@@ -21,5 +21,5 @@ gis_file_meta   文件元数据表
 gis_task        任务表
 
 
-gis_terrain_publication     地形发布表
+gis_publication             GIS统一发布记录表（地形、影像、矢量）
 gis_processing_task_file    多文件处理任务逐文件结果

@@ -1,6 +1,5 @@
 package org.ocean.admin.platform.workbench.websocket;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +15,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.util.List;
 import java.util.concurrent.*;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 系统指标实时 WebSocket 处理器
@@ -26,7 +26,7 @@ import java.util.concurrent.*;
 public class SystemMetricsWebSocketHandler extends TextWebSocketHandler {
 
     private final MonitorService monitorService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
     private final List<WebSocketSession> sessions = new CopyOnWriteArrayList<>();
     private ScheduledExecutorService scheduler;
 

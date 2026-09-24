@@ -1,6 +1,6 @@
 package org.ocean.admin.gis.websocket;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.ocean.admin.gis.dto.TaskProgressMessage;
@@ -12,6 +12,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 任务实时 处理器
@@ -21,12 +22,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class TaskWebSocketHandler extends TextWebSocketHandler {
 
     // 存储所有连接的会话
     private static final List<WebSocketSession> sessions = new CopyOnWriteArrayList<>();
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {

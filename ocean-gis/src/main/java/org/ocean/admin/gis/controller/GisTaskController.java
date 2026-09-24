@@ -3,21 +3,23 @@ package org.ocean.admin.gis.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.media.Encoding;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.service.ProcessingService;
-import org.ocean.admin.gis.vo.GisProcessingTaskFileVO;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
-import org.ocean.admin.gis.vo.GisBatchProcessingTaskVO;
 import org.ocean.admin.gis.service.GisTaskService;
+import org.ocean.admin.gis.service.ProcessingService;
+import org.ocean.admin.gis.vo.GisBatchProcessingTaskVO;
+import org.ocean.admin.gis.vo.GisProcessingTaskFileVO;
 import org.ocean.admin.gis.vo.GisProcessingTaskVO;
 import org.ocean.admin.gis.vo.GisTaskVO;
-import org.ocean.admin.kernel.common.PageResult;
-import org.ocean.admin.kernel.common.ResponseResult;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
+import org.ocean.admin.kernel.common.PageResult;
+import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -25,7 +27,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import jakarta.validation.Valid;
 
 /**
  * GIS任务管理
@@ -81,6 +82,8 @@ public class GisTaskController {
     @OperationLog(module = "GIS_TASK", type = OperationType.SUBMIT,
             description = "新建GIS多文件处理任务", recordResponse = true)
     public ResponseResult<GisBatchProcessingTaskVO> createProcessingTask(
+            @RequestBody(content = @Content(encoding = @Encoding(
+                    name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)))
             @Valid @RequestPart("request") GisCreateProcessingTaskRequest request,
             @Parameter(description = "待处理文件列表", required = true)
             @RequestPart("files") List<MultipartFile> files) {
