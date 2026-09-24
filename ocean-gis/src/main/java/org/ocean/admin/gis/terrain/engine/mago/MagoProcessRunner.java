@@ -1,7 +1,5 @@
 package org.ocean.admin.gis.terrain.engine.mago;
 
-import org.ocean.admin.gis.terrain.engine.TerrainProgressListener;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -11,6 +9,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /** 运行 mago 子进程并负责超时、中断和日志尾部采集。 */
 public class MagoProcessRunner {
@@ -20,7 +19,7 @@ public class MagoProcessRunner {
     public ProcessResult run(
             List<String> command,
             Duration timeout,
-            TerrainProgressListener progressListener) {
+            Consumer<String> outputListener) {
         Instant startedAt = Instant.now();
         Process process;
         try {
@@ -31,9 +30,7 @@ public class MagoProcessRunner {
             throw new MagoTerrainException("无法启动 mago 地形引擎", ex);
         }
 
-        TerrainProgressListener listener = progressListener == null
-                ? TerrainProgressListener.NO_OP
-                : progressListener;
+        Consumer<String> listener = outputListener == null ? ignored -> { } : outputListener;
         Deque<String> outputTail = new ArrayDeque<>(ERROR_TAIL_LINES);
         Thread outputReader = Thread.ofVirtual()
                 .name("mago-output-reader")
@@ -62,7 +59,7 @@ public class MagoProcessRunner {
 
     private void consumeOutput(
             Process process,
-            TerrainProgressListener listener,
+            Consumer<String> listener,
             Deque<String> outputTail) {
         try (BufferedReader reader = process.inputReader(StandardCharsets.UTF_8)) {
             String line;
@@ -74,7 +71,7 @@ public class MagoProcessRunner {
                     outputTail.addLast(line);
                 }
                 try {
-                    listener.onOutput(line);
+                    listener.accept(line);
                 } catch (RuntimeException ignored) {
                     // 进度消费者不能中断地形引擎。
                 }

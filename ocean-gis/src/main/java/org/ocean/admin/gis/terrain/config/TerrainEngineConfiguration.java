@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import tools.jackson.databind.ObjectMapper;
 
 /** 地形引擎装配。 */
 @Configuration(proxyBeanMethods = false)
@@ -21,10 +22,13 @@ public class TerrainEngineConfiguration {
             name = "enabled",
             havingValue = "true",
             matchIfMissing = true)
-    public TerrainEngine magoTerrainEngine(MagoTerrainProperties properties) {
+    public TerrainEngine magoTerrainEngine(
+            MagoTerrainProperties properties,
+            ObjectMapper objectMapper) {
         return new MagoTerrainEngine(
                 properties,
                 new MagoCommandBuilder(),
-                new MagoProcessRunner());
+                new MagoProcessRunner(),
+                objectMapper);
     }
 }

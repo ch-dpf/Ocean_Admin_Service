@@ -23,6 +23,10 @@ public class TaskProgressMessage {
     private Long fileId;            // 关联文件ID
     private String stage;           // 当前阶段
     private String message;         // 阶段说明
+    private String progressMode;    // DETERMINATE / INDETERMINATE
+    private Long completedUnits;    // 已完成工作单元
+    private Long totalUnits;        // 总工作单元
+    private long version;           // 任务内单调事件序号
     private boolean done;           // 是否完成
     private long timestamp;         // 时间戳
 }

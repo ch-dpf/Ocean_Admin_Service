@@ -1,10 +1,12 @@
 package org.ocean.admin.gis.terrain.engine;
 
-/** 接收地形引擎的原始输出，后续可在 Worker 层解析为结构化进度。 */
+import org.ocean.admin.gis.processing.GisProcessingProgress;
+
+/** 接收地形引擎的结构化工作量进度。 */
 @FunctionalInterface
 public interface TerrainProgressListener {
 
-    TerrainProgressListener NO_OP = line -> { };
+    TerrainProgressListener NO_OP = progress -> { };
 
-    void onOutput(String line);
+    void onProgress(GisProcessingProgress progress);
 }

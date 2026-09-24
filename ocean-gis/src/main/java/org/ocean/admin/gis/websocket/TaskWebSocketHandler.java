@@ -8,10 +8,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.io.IOException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -25,20 +27,24 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class TaskWebSocketHandler extends TextWebSocketHandler {
 
-    // 存储所有连接的会话
-    private static final List<WebSocketSession> sessions = new CopyOnWriteArrayList<>();
+    private static final int SEND_TIME_LIMIT_MILLIS = 10_000;
+    private static final int BUFFER_SIZE_LIMIT_BYTES = 512 * 1024;
+
+    // 按会话串行化并发发送，避免多任务同时推送损坏 WebSocket 会话。
+    private static final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
 
     private final ObjectMapper objectMapper;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        sessions.add(session);
+        sessions.put(session.getId(), new ConcurrentWebSocketSessionDecorator(
+                session, SEND_TIME_LIMIT_MILLIS, BUFFER_SIZE_LIMIT_BYTES));
         log.info("任务 WebSocket 连接建立: sessionId={}, 当前连接数={}", session.getId(), sessions.size());
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
-        sessions.remove(session);
+        sessions.remove(session.getId());
         log.info("任务 WebSocket 连接关闭: sessionId={}, 当前连接数={}", session.getId(), sessions.size());
     }
 
@@ -54,17 +60,27 @@ public class TaskWebSocketHandler extends TextWebSocketHandler {
             String jsonMessage = objectMapper.writeValueAsString(message);
             TextMessage textMessage = new TextMessage(jsonMessage);
 
-            for (WebSocketSession session : sessions) {
+            for (WebSocketSession session : sessions.values()) {
                 if (session.isOpen()) {
                     try {
                         session.sendMessage(textMessage);
                     } catch (Exception e) {
                         log.error("发送消息失败: sessionId={}", session.getId(), e);
+                        sessions.remove(session.getId());
+                        closeQuietly(session);
                     }
                 }
             }
         } catch (Exception e) {
             log.error("序列化消息失败", e);
+        }
+    }
+
+    private void closeQuietly(WebSocketSession session) {
+        try {
+            session.close(CloseStatus.SERVER_ERROR);
+        } catch (IOException ignored) {
+            // 会话已不可用，清理失败无需影响任务线程。
         }
     }
 }

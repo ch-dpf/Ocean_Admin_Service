@@ -16,6 +16,7 @@ import org.geotools.referencing.CRS;
 import org.geotools.renderer.RenderListener;
 import org.geotools.renderer.lite.StreamingRenderer;
 import org.geotools.styling.StyleBuilder;
+import org.ocean.admin.gis.processing.GisProcessingProgress;
 
 import javax.imageio.ImageIO;
 import javax.imageio.stream.ImageInputStream;
@@ -51,7 +52,9 @@ public class GeoTiffTileGenerator {
     }
 
     public void generate(Path input, Path output, ImageryTileOptions options,
-            Consumer<String> progressListener) {
+            Consumer<GisProcessingProgress> progressListener) {
+        progressListener.accept(GisProcessingProgress.indeterminate(
+                "analyzing", "正在分析影像范围和切片层级"));
         Path source = input.toAbsolutePath().normalize();
         Path target = output.toAbsolutePath().normalize();
         if (!Files.isRegularFile(source) || !Files.isReadable(source)) {
@@ -89,6 +92,9 @@ public class GeoTiffTileGenerator {
                 throw new IllegalArgumentException("预计生成瓦片" + tileCount
                         + "张，超过单任务上限" + ImageryTileOptions.MAX_TILE_COUNT + "张");
             }
+            progressListener.accept(GisProcessingProgress.determinate(
+                    "generating", 0, tileCount,
+                    "影像切片工作量已确定，共" + tileCount + "张瓦片"));
 
             Style style = new StyleBuilder().createStyle(
                     new StyleBuilder().createRasterSymbolizer());
@@ -97,17 +103,26 @@ public class GeoTiffTileGenerator {
             renderer.setMapContent(map);
 
             long completed = 0;
+            int lastProgress = 0;
             for (int zoom = zooms.min(); zoom <= zooms.max(); zoom++) {
                 TileRange range = tileRange(mercatorBounds, zoom);
                 for (int x = range.minX(); x <= range.maxX(); x++) {
                     for (int y = range.minY(); y <= range.maxY(); y++) {
                         writeTile(renderer, target, mercatorBounds, zoom, x, y, options);
                         completed++;
+                        int progress = processingProgress(completed, tileCount);
+                        if (progress > lastProgress) {
+                            lastProgress = progress;
+                            progressListener.accept(GisProcessingProgress.determinate(
+                                    "generating", completed, tileCount,
+                                    "正在生成影像瓦片："
+                                            + completed + "/" + tileCount + "张"));
+                        }
                     }
                 }
-                progressListener.accept("影像层级" + zoom + "完成，累计"
-                        + completed + "/" + tileCount + "张瓦片");
             }
+            progressListener.accept(GisProcessingProgress.determinate(
+                    "finalizing", completed, tileCount, "正在写入影像切片元数据"));
             writeMetadata(target, source, geographicBounds, zooms, options, tileCount);
         } catch (IOException ex) {
             throw new IllegalStateException("GeoTIFF 读取或瓦片写入失败: " + ex.getMessage(), ex);
@@ -132,6 +147,13 @@ public class GeoTiffTileGenerator {
                 }
             }
         }
+    }
+
+    private int processingProgress(long completed, long total) {
+        if (total <= 0) {
+            return 0;
+        }
+        return (int) Math.min(99L, completed * 100L / total);
     }
 
     private void writeTile(StreamingRenderer renderer, Path output,

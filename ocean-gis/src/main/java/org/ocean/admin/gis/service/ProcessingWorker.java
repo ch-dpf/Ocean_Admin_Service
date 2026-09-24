@@ -30,10 +30,10 @@ public class ProcessingWorker {
     @Async("gisTaskExecutor")
     public void process(GisProcessingExecution execution) {
         try {
-            taskLifecycle.start(execution.taskId(), execution.taskNo(), 5, "开始执行切片引擎");
+            taskLifecycle.start(execution.taskId(), execution.taskNo(), 0, "开始执行切片引擎");
             GisFileProcessingEngine engine = engineRegistry.require(execution.processingType());
             engine.process(execution,
-                    line -> log.debug("GIS切片引擎输出: taskNo={}, {}", execution.taskNo(), line));
+                    progress -> taskLifecycle.reportProgress(execution.taskNo(), progress));
             taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), true);
             taskLifecycle.finish(execution.taskId(), execution.taskNo(), ignored -> "切片处理完成");
         } catch (Exception ex) {
@@ -46,11 +46,10 @@ public class ProcessingWorker {
     @Async("gisTaskExecutor")
     public void process(GisFolderProcessingExecution execution) {
         try {
-            taskLifecycle.start(execution.taskId(), execution.taskNo(), 5, "开始执行文件夹切片");
+            taskLifecycle.start(execution.taskId(), execution.taskNo(), 0, "开始执行文件夹切片");
             GisFileProcessingEngine engine = engineRegistry.require(GisProcessingType.TERRAIN);
             engine.processFolder(execution.inputFolder(), execution.workspace(),
-                    line -> log.debug("GIS文件夹切片引擎输出: taskNo={}, {}",
-                            execution.taskNo(), line));
+                    progress -> taskLifecycle.reportProgress(execution.taskNo(), progress));
             taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), true);
             taskLifecycle.finish(execution.taskId(), execution.taskNo(),
                     ignored -> "文件夹切片处理完成");
@@ -72,7 +71,7 @@ public class ProcessingWorker {
                     .map(file -> fileUploadUtil.resolveStoredPath(file.getStorageKey()))
                     .toList();
             engine.process(inputs, execution.workspace(), execution.parameters(),
-                    line -> log.debug("GIS多文件切片引擎输出: taskNo={}, {}", execution.taskNo(), line));
+                    progress -> taskLifecycle.reportProgress(execution.taskNo(), progress));
             for (GisProcessingTaskFile file : execution.files()) {
                 updateFile(file.getId(), "COMPLETED", null);
                 taskLifecycle.recordResult(execution.taskId(), execution.taskNo(), true);

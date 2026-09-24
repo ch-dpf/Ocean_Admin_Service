@@ -1,6 +1,7 @@
 package org.ocean.admin.gis.service;
 
 import org.ocean.admin.gis.dto.TaskProgressMessage;
+import org.ocean.admin.gis.processing.GisProcessingProgress;
 import org.ocean.admin.gis.websocket.TaskWebSocketHandler;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -65,6 +66,9 @@ public class AsyncTaskService {
                 if (info.getTaskId() == null || info.getTaskId().isBlank()) {
                     continue;
                 }
+                if (info.getProgressMode() == null || info.getProgressMode().isBlank()) {
+                    info.setProgressMode(GisProcessingProgress.ProgressMode.DETERMINATE.name());
+                }
                 taskMap.put(info.getTaskId(), info);
                 restored++;
             }
@@ -125,6 +129,7 @@ public class AsyncTaskService {
         taskInfo.setStage("queued");
         taskInfo.setMessage("任务已创建");
         taskInfo.setManualProgress(null);
+        taskInfo.setProgressMode(GisProcessingProgress.ProgressMode.INDETERMINATE.name());
 
         taskMap.put(taskId, taskInfo);
         persistTask(taskInfo);
@@ -161,6 +166,8 @@ public class AsyncTaskService {
         if (done) {
             taskInfo.setCompletedCount(taskInfo.getTotalCount());
             taskInfo.setFailedCount(0);
+            taskInfo.setManualProgress(100);
+            taskInfo.setProgressMode(GisProcessingProgress.ProgressMode.DETERMINATE.name());
             taskInfo.setStatus("completed");
             taskInfo.setEndTime(LocalDateTime.now());
         }
@@ -178,6 +185,7 @@ public class AsyncTaskService {
         }
         synchronized (taskInfo) {
             taskInfo.setManualProgress(100);
+            taskInfo.setProgressMode(GisProcessingProgress.ProgressMode.DETERMINATE.name());
             taskInfo.setStage("completed");
             taskInfo.setMessage(message != null && !message.isBlank() ? message : "任务结束");
             if (taskInfo.getFailedCount() == 0) {
@@ -201,13 +209,14 @@ public class AsyncTaskService {
             return;
         }
         synchronized (taskInfo) {
+            int lastProgress = taskInfo.getProgress();
             int unprocessed = taskInfo.getTotalCount()
                     - taskInfo.getCompletedCount()
                     - taskInfo.getFailedCount();
             if (unprocessed > 0) {
                 taskInfo.setFailedCount(taskInfo.getFailedCount() + unprocessed);
             }
-            taskInfo.setManualProgress(100);
+            taskInfo.setManualProgress(lastProgress);
             taskInfo.setStatus("failed");
             taskInfo.setStage("failed");
             taskInfo.setMessage(message != null && !message.isBlank() ? message : "任务失败");
@@ -226,7 +235,9 @@ public class AsyncTaskService {
                 if (isTerminal(taskInfo.getStatus())) {
                     return;
                 }
-                taskInfo.setManualProgress(null);
+                if (!taskInfo.isProcessingProgressManaged()) {
+                    taskInfo.setManualProgress(null);
+                }
                 if (success) {
                     taskInfo.setCompletedCount(taskInfo.getCompletedCount() + 1);
                 } else {
@@ -281,9 +292,10 @@ public class AsyncTaskService {
             return;
         }
 
-        int safeProgress = Math.max(0, Math.min(100, progress));
+        int safeProgress = Math.max(taskInfo.getProgress(), Math.max(0, Math.min(100, progress)));
 
         taskInfo.setManualProgress(safeProgress);
+        taskInfo.setProgressMode(GisProcessingProgress.ProgressMode.DETERMINATE.name());
         taskInfo.setStage(stage);
         taskInfo.setMessage(message);
 
@@ -297,6 +309,31 @@ public class AsyncTaskService {
                 taskId, stage, taskInfo.getProgress(), message);
     }
 
+    /** 合并切片引擎的结构化工作量，保证百分比不回退。 */
+    public void updateProcessingProgress(String taskId, GisProcessingProgress progress) {
+        TaskInfo taskInfo = taskMap.get(taskId);
+        if (taskInfo == null || progress == null) {
+            return;
+        }
+        synchronized (taskInfo) {
+            if (isTerminal(taskInfo.getStatus())) {
+                return;
+            }
+            taskInfo.setStage(progress.phase());
+            taskInfo.setMessage(progress.message());
+            taskInfo.setProgressMode(progress.mode().name());
+            taskInfo.setProcessingProgressManaged(true);
+            if (progress.mode() == GisProcessingProgress.ProgressMode.DETERMINATE) {
+                taskInfo.setCompletedUnits(progress.completedUnits());
+                taskInfo.setTotalUnits(progress.totalUnits());
+                taskInfo.setManualProgress(Math.max(
+                        taskInfo.getProgress(), progress.processingPercent()));
+            }
+            taskInfo.setStatus("running");
+        }
+        pushProgress(taskId);
+    }
+
     /**
      * 推送任务进度到前端
      */
@@ -307,23 +344,30 @@ public class AsyncTaskService {
     private void pushProgress(String taskId, String eventType) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo != null) {
-            persistTask(taskInfo);
             TaskProgressMessage message = new TaskProgressMessage();
-            message.setEventType(eventType == null || eventType.isBlank() ? "task_update" : eventType);
-            message.setTaskId(taskInfo.getTaskId());
-            message.setTaskName(taskInfo.getTaskName());
-            message.setTotalCount(taskInfo.getTotalCount());
-            message.setCompletedCount(taskInfo.getCompletedCount());
-            message.setFailedCount(taskInfo.getFailedCount());
-            message.setStatus(taskInfo.getStatus());
-            message.setProgress(taskInfo.getProgress());
-            message.setTaskType(taskInfo.getTaskType());
-            message.setFileType(taskInfo.getFileType());
-            message.setFileId(taskInfo.getFileId());
-            message.setStage(taskInfo.getStage());
-            message.setMessage(taskInfo.getMessage());
-            message.setDone(isTerminal(taskInfo.getStatus()));
-            message.setTimestamp(System.currentTimeMillis());
+            synchronized (taskInfo) {
+                taskInfo.setVersion(taskInfo.getVersion() + 1);
+                persistTask(taskInfo);
+                message.setEventType(eventType == null || eventType.isBlank() ? "task_update" : eventType);
+                message.setTaskId(taskInfo.getTaskId());
+                message.setTaskName(taskInfo.getTaskName());
+                message.setTotalCount(taskInfo.getTotalCount());
+                message.setCompletedCount(taskInfo.getCompletedCount());
+                message.setFailedCount(taskInfo.getFailedCount());
+                message.setStatus(taskInfo.getStatus());
+                message.setProgress(taskInfo.getProgress());
+                message.setTaskType(taskInfo.getTaskType());
+                message.setFileType(taskInfo.getFileType());
+                message.setFileId(taskInfo.getFileId());
+                message.setStage(taskInfo.getStage());
+                message.setMessage(taskInfo.getMessage());
+                message.setProgressMode(taskInfo.getProgressMode());
+                message.setCompletedUnits(taskInfo.getCompletedUnits());
+                message.setTotalUnits(taskInfo.getTotalUnits());
+                message.setVersion(taskInfo.getVersion());
+                message.setDone(isTerminal(taskInfo.getStatus()));
+                message.setTimestamp(System.currentTimeMillis());
+            }
             
             // 通过 WebSocket 广播
             webSocketHandler.broadcastTaskProgress(message);
@@ -418,6 +462,11 @@ public class AsyncTaskService {
         private String stage;
         private String message;
         private Integer manualProgress;
+        private String progressMode;
+        private Long completedUnits;
+        private Long totalUnits;
+        private long version;
+        private boolean processingProgressManaged;
 
         /**
          * 获取进度百分比

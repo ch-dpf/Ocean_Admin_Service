@@ -2,6 +2,7 @@ package org.ocean.admin.gis.processing.engine;
 
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.processing.GisProcessingExecution;
+import org.ocean.admin.gis.processing.GisProcessingProgress;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.terrain.engine.TerrainEngine;
@@ -9,8 +10,8 @@ import org.ocean.admin.gis.terrain.engine.TerrainGenerationRequest;
 import org.ocean.admin.gis.terrain.engine.TerrainOptions;
 
 import java.nio.file.Path;
-import java.util.Locale;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -41,7 +42,8 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
     }
 
     @Override
-    public void process(GisProcessingExecution execution, Consumer<String> outputListener) {
+    public void process(GisProcessingExecution execution,
+            Consumer<GisProcessingProgress> progressListener) {
         terrainEngine.generate(
                 new TerrainGenerationRequest(
                         java.util.List.of(execution.inputPath()),
@@ -49,23 +51,23 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
                         execution.workspace().tempPath(),
                         execution.workspace().logPath(),
                         TerrainOptions.defaults()),
-                outputListener::accept);
+                progressListener::accept);
     }
 
     @Override
     public void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
-            Consumer<String> outputListener) {
+            Consumer<GisProcessingProgress> progressListener) {
         terrainEngine.generate(
                 new TerrainGenerationRequest(inputPaths, workspace.outputPath(),
                         workspace.tempPath(), workspace.logPath(), TerrainOptions.defaults()),
-                outputListener::accept);
+                progressListener::accept);
     }
 
     @Override
     public void processFolder(
             Path inputFolder,
             GisProcessingWorkspace workspace,
-            Consumer<String> outputListener) {
+            Consumer<GisProcessingProgress> progressListener) {
         terrainEngine.generate(
                 new TerrainGenerationRequest(
                         java.util.List.of(inputFolder),
@@ -73,6 +75,6 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
                         workspace.tempPath(),
                         workspace.logPath(),
                         TerrainOptions.defaults()),
-                outputListener::accept);
+                progressListener::accept);
     }
 }

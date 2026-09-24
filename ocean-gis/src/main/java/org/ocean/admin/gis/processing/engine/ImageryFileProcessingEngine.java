@@ -5,6 +5,7 @@ import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.imagery.GeoTiffTileGenerator;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
 import org.ocean.admin.gis.processing.GisProcessingExecution;
+import org.ocean.admin.gis.processing.GisProcessingProgress;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 
@@ -40,18 +41,19 @@ public class ImageryFileProcessingEngine implements GisFileProcessingEngine {
     }
 
     @Override
-    public void process(GisProcessingExecution execution, Consumer<String> outputListener) {
+    public void process(GisProcessingExecution execution,
+            Consumer<GisProcessingProgress> progressListener) {
         tileGenerator.generate(execution.inputPath(), execution.workspace().outputPath(),
-                ImageryTileOptions.from(execution.parameters()), outputListener);
+                ImageryTileOptions.from(execution.parameters()), progressListener);
     }
 
     @Override
     public void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
-            GisProcessingParameters parameters, Consumer<String> outputListener) {
+            GisProcessingParameters parameters, Consumer<GisProcessingProgress> progressListener) {
         if (inputPaths == null || inputPaths.size() != 1) {
             throw new IllegalArgumentException("首期影像切片每个任务仅支持一个 GeoTIFF");
         }
         tileGenerator.generate(inputPaths.get(0), workspace.outputPath(),
-                ImageryTileOptions.from(parameters), outputListener);
+                ImageryTileOptions.from(parameters), progressListener);
     }
 }

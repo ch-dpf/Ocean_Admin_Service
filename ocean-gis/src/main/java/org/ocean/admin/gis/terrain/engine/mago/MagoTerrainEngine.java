@@ -4,6 +4,7 @@ import org.ocean.admin.gis.terrain.engine.TerrainEngine;
 import org.ocean.admin.gis.terrain.engine.TerrainGenerationRequest;
 import org.ocean.admin.gis.terrain.engine.TerrainGenerationResult;
 import org.ocean.admin.gis.terrain.engine.TerrainProgressListener;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -17,14 +18,17 @@ public class MagoTerrainEngine implements TerrainEngine {
     private final MagoTerrainProperties properties;
     private final MagoCommandBuilder commandBuilder;
     private final MagoProcessRunner processRunner;
+    private final ObjectMapper objectMapper;
 
     public MagoTerrainEngine(
             MagoTerrainProperties properties,
             MagoCommandBuilder commandBuilder,
-            MagoProcessRunner processRunner) {
+            MagoProcessRunner processRunner,
+            ObjectMapper objectMapper) {
         this.properties = properties;
         this.commandBuilder = commandBuilder;
         this.processRunner = processRunner;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -34,17 +38,23 @@ public class MagoTerrainEngine implements TerrainEngine {
         validateRequest(request);
         prepareDirectories(request);
         List<String> command = commandBuilder.build(properties, request);
-        MagoProcessRunner.ProcessResult generationResult = processRunner.run(
-                command,
-                properties.getProcessTimeout(),
-                progressListener);
+        MagoProcessRunner.ProcessResult generationResult;
+        try (MagoTerrainProgressMonitor monitor = new MagoTerrainProgressMonitor(
+                request.outputPath(), objectMapper, progressListener)) {
+            monitor.start();
+            generationResult = processRunner.run(
+                    command,
+                    properties.getProcessTimeout(),
+                    monitor::onOutput);
+            monitor.generationFinished();
+        }
         Duration elapsed = generationResult.elapsed();
         if (request.options().generateLayerJson()) {
             double[] sourceBounds = MagoLayerJsonMetadata.readValidBounds(request.outputPath());
             MagoProcessRunner.ProcessResult layerJsonResult = processRunner.run(
                     commandBuilder.buildLayerJson(properties, request),
                     properties.getProcessTimeout(),
-                    progressListener);
+                    ignored -> { });
             MagoLayerJsonMetadata.restoreBounds(request.outputPath(), sourceBounds);
             elapsed = elapsed.plus(layerJsonResult.elapsed());
         }
