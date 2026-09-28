@@ -104,6 +104,10 @@ gis:
 
 ocean:
   audit:
+    ip-location:
+      # ip2region 离线库由部署环境独立维护；未配置时公网地址降级为“未知”。
+      ipv4-xdb-path: ${IP2REGION_V4_XDB_PATH:}
+      ipv6-xdb-path: ${IP2REGION_V6_XDB_PATH:}
     operation-log:
       async-enabled: ${OPERATION_LOG_ASYNC_ENABLED:true}
       core-pool-size: ${OPERATION_LOG_CORE_POOL_SIZE:2}

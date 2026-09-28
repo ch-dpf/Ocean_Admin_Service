@@ -3,6 +3,7 @@ package org.ocean.admin.platform.audit.listener;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.platform.audit.entity.SysLoginLog;
+import org.ocean.admin.platform.audit.service.IpLocationResolver;
 import org.ocean.admin.platform.audit.service.SysLoginLogService;
 import org.ocean.admin.platform.audit.utils.UserAgentParser;
 import org.ocean.admin.platform.identity.event.UserLoginEvent;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
 public class UserLoginAuditListener {
 
     private final SysLoginLogService loginLogService;
+    private final IpLocationResolver ipLocationResolver;
 
     @EventListener
     public void onUserLogin(UserLoginEvent event) {
@@ -34,6 +36,7 @@ public class UserLoginAuditListener {
             loginLog.setPlatform(event.platform());
             loginLog.setDeviceId(event.deviceId());
             loginLog.setIpAddress(event.ipAddress());
+            loginLog.setLocation(ipLocationResolver.resolve(event.ipAddress()));
             loginLog.setUserAgent(event.userAgent());
             loginLog.setBrowser(firstNonBlank(event.browser(), UserAgentParser.parseBrowser(event.userAgent())));
             loginLog.setOs(firstNonBlank(event.os(), UserAgentParser.parseOS(event.userAgent())));
