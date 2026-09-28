@@ -15,7 +15,7 @@ CREATE TABLE ocean_platform.sys_user (
                                          status                      INTEGER      NOT NULL DEFAULT 1,
                                          last_login_time             TIMESTAMP,
                                          last_login_ip               VARCHAR(50),
-                                         max_login_devices           INTEGER      NOT NULL DEFAULT 1,
+                                         max_concurrent_sessions     INTEGER      NOT NULL DEFAULT 1,
                                          valid_from                  TIMESTAMP,
                                          valid_to                    TIMESTAMP,
                                          is_permanent_valid          INTEGER      NOT NULL DEFAULT 1,
@@ -32,7 +32,7 @@ CREATE TABLE ocean_platform.sys_user (
 
 COMMENT ON TABLE ocean_platform.sys_user IS '用户信息表';
 COMMENT ON COLUMN ocean_platform.sys_user.status IS '状态：0-禁用，1-启用';
-COMMENT ON COLUMN ocean_platform.sys_user.max_login_devices IS '允许同时登录的设备数量';
+COMMENT ON COLUMN ocean_platform.sys_user.max_concurrent_sessions IS '允许同时存在的有效登录会话数量';
 COMMENT ON COLUMN ocean_platform.sys_user.is_permanent_valid IS '是否永久有效：0-否，1-是';
 COMMENT ON COLUMN ocean_platform.sys_user.failed_password_attempts IS '连续密码错误次数';
 COMMENT ON COLUMN ocean_platform.sys_user.lock_level IS '锁定等级，每次触发锁定后递增';

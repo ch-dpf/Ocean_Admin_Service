@@ -6,7 +6,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@Schema(description = "用户在线设备信息")
+@Schema(description = "用户有效登录会话信息")
 public class UserOnlineDeviceVO {
 
     @Schema(description = "会话ID")

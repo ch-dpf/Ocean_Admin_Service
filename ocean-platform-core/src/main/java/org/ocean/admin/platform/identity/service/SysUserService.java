@@ -53,24 +53,24 @@ public class SysUserService {
         List<SysUser> records = result.getRecords();
         fillRoleInfo(records);
         fillPlatformInfo(records);
-        fillOnlineDeviceInfo(records);
+        fillActiveSessionInfo(records);
         pageResult.setRecords(records);
         return pageResult;
     }
 
-    public List<UserOnlineDeviceVO> listOnlineDevices(Long userId) {
-        List<AuthUserSessionService.ActiveDeviceSession> activeDevices = authUserSessionService.listActiveDevices(userId);
-        if (activeDevices.isEmpty()) {
+    public List<UserOnlineDeviceVO> listActiveSessions(Long userId) {
+        List<AuthUserSessionService.ActiveSession> activeSessions = authUserSessionService.listActiveSessions(userId);
+        if (activeSessions.isEmpty()) {
             return List.of();
         }
 
-        List<String> sessionIds = activeDevices.stream()
-                .map(AuthUserSessionService.ActiveDeviceSession::getSessionId)
+        List<String> sessionIds = activeSessions.stream()
+                .map(AuthUserSessionService.ActiveSession::getSessionId)
                 .filter(sessionId -> sessionId != null && !sessionId.isBlank())
                 .toList();
         Map<String, SysLoginLog> latestLogMap = loginLogService.getLatestLoginLogsBySessionIds(sessionIds);
 
-        return activeDevices.stream()
+        return activeSessions.stream()
                 .map(item -> toOnlineDeviceVO(item, latestLogMap.get(item.getSessionId())))
                 .sorted(Comparator
                         .comparing(UserOnlineDeviceVO::getLastActiveTime, Comparator.nullsLast(Comparator.reverseOrder()))
@@ -79,7 +79,7 @@ public class SysUserService {
     }
 
     @Transactional
-    public boolean kickoutOnlineDevice(Long userId, String sessionId) {
+    public boolean revokeActiveSession(Long userId, String sessionId) {
         if (userId == null) {
             throw new RuntimeException("用户ID不能为空");
         }
@@ -249,20 +249,20 @@ public class SysUserService {
         }
     }
 
-    private void fillOnlineDeviceInfo(List<SysUser> users) {
+    private void fillActiveSessionInfo(List<SysUser> users) {
         if (users == null || users.isEmpty()) {
             return;
         }
         for (SysUser user : users) {
             if (user.getId() == null) {
-                user.setOnlineDeviceCount(0);
+                user.setActiveSessionCount(0);
                 continue;
             }
-            user.setOnlineDeviceCount(authUserSessionService.countActiveSessions(user.getId()));
+            user.setActiveSessionCount(authUserSessionService.countActiveSessions(user.getId()));
         }
     }
 
-    private UserOnlineDeviceVO toOnlineDeviceVO(AuthUserSessionService.ActiveDeviceSession session, SysLoginLog loginLog) {
+    private UserOnlineDeviceVO toOnlineDeviceVO(AuthUserSessionService.ActiveSession session, SysLoginLog loginLog) {
         UserOnlineDeviceVO vo = new UserOnlineDeviceVO();
         vo.setSessionId(session.getSessionId());
         vo.setDeviceId(session.getDeviceId());
@@ -376,12 +376,12 @@ public class SysUserService {
             return;
         }
 
-        Integer maxDevices = user.getMaxLoginDevices();
-        if (!partialUpdate || maxDevices != null) {
-            if (maxDevices == null || maxDevices <= 0) {
-                user.setMaxLoginDevices(1);
+        Integer maxSessions = user.getMaxConcurrentSessions();
+        if (!partialUpdate || maxSessions != null) {
+            if (maxSessions == null || maxSessions <= 0) {
+                user.setMaxConcurrentSessions(1);
             } else {
-                user.setMaxLoginDevices(Math.min(maxDevices, 10));
+                user.setMaxConcurrentSessions(Math.min(maxSessions, 10));
             }
         }
 

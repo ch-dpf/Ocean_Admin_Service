@@ -37,17 +37,17 @@ public class SysUserController {
         return ResponseResult.success(result);
     }
 
-    @GetMapping("/{id}/online-devices")
-    @Operation(summary = "查询用户当前在线设备")
-    public ResponseResult<List<UserOnlineDeviceVO>> listOnlineDevices(@PathVariable Long id) {
-        return ResponseResult.success(userService.listOnlineDevices(id));
+    @GetMapping({"/{id}/active-sessions", "/{id}/online-devices"})
+    @Operation(summary = "查询用户当前有效登录会话")
+    public ResponseResult<List<UserOnlineDeviceVO>> listActiveSessions(@PathVariable Long id) {
+        return ResponseResult.success(userService.listActiveSessions(id));
     }
 
-    @PostMapping("/{id}/online-devices/{sessionId}/kickout")
-    @Operation(summary = "踢出用户指定在线设备")
-    @OperationLog(module = "USER_MANAGEMENT", type = OperationType.UPDATE, description = "踢出用户在线设备")
-    public ResponseResult<Boolean> kickoutOnlineDevice(@PathVariable Long id, @PathVariable String sessionId) {
-        boolean success = userService.kickoutOnlineDevice(id, sessionId);
+    @PostMapping({"/{id}/active-sessions/{sessionId}/revoke", "/{id}/online-devices/{sessionId}/kickout"})
+    @Operation(summary = "撤销用户指定登录会话")
+    @OperationLog(module = "USER_MANAGEMENT", type = OperationType.UPDATE, description = "撤销用户登录会话")
+    public ResponseResult<Boolean> revokeActiveSession(@PathVariable Long id, @PathVariable String sessionId) {
+        boolean success = userService.revokeActiveSession(id, sessionId);
         return success ? ResponseResult.success(true) : ResponseResult.error("踢出失败");
     }
 

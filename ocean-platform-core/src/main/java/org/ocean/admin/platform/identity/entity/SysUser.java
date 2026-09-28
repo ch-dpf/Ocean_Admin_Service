@@ -51,8 +51,8 @@ public class SysUser implements Serializable {
     @Schema(description = "最后登录IP")
     private String lastLoginIp;
 
-    @Schema(description = "允许同时登录设备数")
-    private Integer maxLoginDevices;
+    @Schema(description = "允许同时存在的有效登录会话数")
+    private Integer maxConcurrentSessions;
 
     @Schema(description = "有效期开始时间")
     private LocalDateTime validFrom;
@@ -106,8 +106,8 @@ public class SysUser implements Serializable {
     private List<String> platformCodes;
 
     @TableField(exist = false)
-    @Schema(description = "当前在线设备数量")
-    private Integer onlineDeviceCount;
+    @Schema(description = "当前有效登录会话数量")
+    private Integer activeSessionCount;
 
 
 }

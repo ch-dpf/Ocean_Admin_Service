@@ -10,6 +10,7 @@ import org.ocean.admin.platform.audit.utils.ApiExceptionLogRecorder;
 import org.ocean.admin.platform.audit.utils.RequestIpResolver;
 import org.ocean.admin.platform.identity.entity.SysUser;
 import org.ocean.admin.platform.identity.service.AuthService;
+import org.ocean.admin.platform.identity.service.AuthUserSessionService;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -123,9 +124,23 @@ public class AuthController {
                     request == null ? null : request.getHeader("User-Agent")
             );
             String ipAddress = RequestIpResolver.resolve(request);
+            boolean forceLogin = toBoolean(loginRequest.get("forceLogin"));
+            String currentToken = firstNonBlank(
+                    toText(loginRequest.get("currentToken")),
+                    extractBearerToken(request == null ? null : request.getHeader("Authorization"))
+            );
 
-            Map<String, Object> result = authService.login(username, password, platform, deviceId, browser, os, userAgent, ipAddress);
+            Map<String, Object> result = authService.login(username, password, platform, deviceId, browser, os,
+                    userAgent, ipAddress, forceLogin, currentToken);
             return ResponseResult.success("登录成功", result);
+        } catch (AuthUserSessionService.ConcurrentSessionLimitException e) {
+            Map<String, Object> data = Map.of(
+                    "reason", "MAX_CONCURRENT_SESSIONS_REACHED",
+                    "maxConcurrentSessions", e.getMaxConcurrentSessions(),
+                    "activeSessionCount", e.getActiveSessionCount(),
+                    "forceLoginSupported", true
+            );
+            return new ResponseResult<>(409, e.getMessage(), data);
         } catch (RuntimeException e) {
             return ResponseResult.error(e.getMessage());
         } catch (Exception e) {
@@ -155,5 +170,19 @@ public class AuthController {
             }
         }
         return null;
+    }
+
+    private boolean toBoolean(Object value) {
+        if (value instanceof Boolean boolValue) {
+            return boolValue;
+        }
+        return value != null && ("true".equalsIgnoreCase(String.valueOf(value)) || "1".equals(String.valueOf(value)));
+    }
+
+    private String extractBearerToken(String authorization) {
+        if (authorization == null || authorization.isBlank()) {
+            return null;
+        }
+        return authorization.startsWith("Bearer ") ? authorization.substring(7).trim() : authorization.trim();
     }
 }

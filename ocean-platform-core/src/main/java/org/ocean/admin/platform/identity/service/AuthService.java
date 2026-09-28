@@ -64,11 +64,14 @@ public class AuthService {
                                      String browser,
                                      String os,
                                      String userAgent,
-                                     String ipAddress) {
+                                     String ipAddress,
+                                     boolean forceLogin,
+                                     String currentToken) {
         String resolvedUserAgent = resolveUserAgent(userAgent);
         String resolvedIpAddress = resolveIpAddress(ipAddress);
         try {
-            return doLogin(username, password, platform, deviceId, browser, os, resolvedUserAgent, resolvedIpAddress);
+            return doLogin(username, password, platform, deviceId, browser, os, resolvedUserAgent, resolvedIpAddress,
+                    forceLogin, currentToken);
         } catch (RuntimeException e) {
             publishLoginEvent(null, username, false, e.getMessage(), null, platform, deviceId,
                     browser, os, resolvedUserAgent, resolvedIpAddress);
@@ -83,7 +86,9 @@ public class AuthService {
                                         String browser,
                                         String os,
                                         String userAgent,
-                                        String ipAddress) {
+                                         String ipAddress,
+                                         boolean forceLogin,
+                                         String currentToken) {
         if (username == null || username.isBlank() || password == null || password.isBlank()) {
             throw new RuntimeException("用户名和密码不能为空");
         }
@@ -117,10 +122,7 @@ public class AuthService {
             throw new RuntimeException("当前账号不在有效期内，无法登录");
         }
 
-        // 最大登录设备数量
-        int maxDevices = resolveMaxLoginDevices(user);
-        // 活跃会话数量
-        int activeSessions = countActiveSessions(user.getId());
+        int maxConcurrentSessions = resolveMaxConcurrentSessions(user);
 
         String requestedPlatformCode = resolvePlatformCode(platform);
         String resolvedDeviceId = resolveDeviceId(deviceId, requestedPlatformCode, userAgent, ipAddress);
@@ -128,13 +130,6 @@ public class AuthService {
         String resolvedBrowser = normalizeOptional(browser);
         String resolvedOs = normalizeOptional(os);
         String resolvedIpAddress = ipAddress;
-        boolean currentDeviceActive = authUserSessionService.hasActiveDeviceSession(user.getId(), resolvedDeviceId);
-        if (activeSessions >= maxDevices) {
-            if (!currentDeviceActive) {
-                throw new RuntimeException("已达到最大同时登录设备数限制(" + maxDevices + ")");
-            }
-        }
-
         List<String> roleCodes = userRoleService.getUserRoleCodes(user.getId());
         String roleType = userRoleService.resolveRoleType(roleCodes);
         String normalizedPlatform = userRoleService.normalizePlatform(platform);
@@ -148,13 +143,18 @@ public class AuthService {
             throw new RuntimeException("当前用户未授权登录该平台");
         }
 
-        // 生成 Token 并写入设备会话契约
+        String replaceSessionId = authSessionContractService.resolveOwnedSessionId(currentToken, user.getId());
+        // 生成 Token 并原子注册并发登录会话
         AuthSessionContractService.LoginSession loginSession = authSessionContractService.createLoginSession(
                 user.getUsername(),
                 user.getId(),
-                resolvedDeviceId
+                resolvedDeviceId,
+                maxConcurrentSessions,
+                forceLogin,
+                replaceSessionId
         );
-        int activeSessionsAfterLogin = countActiveSessions(user.getId());
+        publishLogoutEvent(loginSession.getReplacedSessionId());
+        publishLogoutEvent(loginSession.getEvictedSessionId());
 
         // 更新最后登录时间和IP
         user.setLastLoginTime(LocalDateTime.now());
@@ -176,8 +176,11 @@ public class AuthService {
         result.put("deviceId", resolvedDeviceId);
         result.put("sessionId", loginSession.getSessionId());
         result.put("expiresInSeconds", loginSession.getExpiresInSeconds());
-        result.put("maxLoginDevices", maxDevices);
-        result.put("activeSessionCount", activeSessionsAfterLogin);
+        result.put("idleTimeoutSeconds", loginSession.getIdleTimeoutSeconds());
+        result.put("maxConcurrentSessions", maxConcurrentSessions);
+        result.put("activeSessionCount", loginSession.getActiveSessionCount());
+        result.put("forceLogin", forceLogin);
+        result.put("evictedSessionId", loginSession.getEvictedSessionId());
         result.put("authProvider", "OCEAN_CLOUD");
 
         publishLoginEvent(user.getId(), user.getUsername(), true, "登录成功", loginSession.getSessionId(),
@@ -218,31 +221,12 @@ public class AuthService {
         return validTo == null || !now.isAfter(validTo);
     }
 
-    private int resolveMaxLoginDevices(SysUser user) {
-        Integer maxDevices = user.getMaxLoginDevices();
-        if (maxDevices == null || maxDevices <= 0) {
+    private int resolveMaxConcurrentSessions(SysUser user) {
+        Integer maxSessions = user.getMaxConcurrentSessions();
+        if (maxSessions == null || maxSessions <= 0) {
             return 1;
         }
-        return Math.min(maxDevices, 10);
-    }
-
-    private int countActiveSessions(Long userId) {
-        return authUserSessionService.countActiveSessions(userId);
-    }
-
-    private String resolveCurrentDeviceId() {
-        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        if (attributes == null) {
-            return null;
-        }
-        HttpServletRequest request = attributes.getRequest();
-        if (request == null) {
-            return null;
-        }
-        String userAgent = request.getHeader("User-Agent");
-        String remoteAddr = RequestIpResolver.resolve(request);
-        String source = String.format("%s|%s|OCEAN_CLOUD", remoteAddr == null ? "-" : remoteAddr, userAgent == null ? "-" : userAgent);
-        return "fp-" + Base64.getUrlEncoder().withoutPadding().encodeToString(source.getBytes(StandardCharsets.UTF_8));
+        return Math.min(maxSessions, 10);
     }
 
     private String resolveIpAddress(String ipAddress) {
@@ -316,7 +300,7 @@ public class AuthService {
         data.put("deviceId", null);
         data.put("platformCodes", List.of());
         data.put("exp", null);
-        data.put("maxLoginDevices", null);
+        data.put("maxConcurrentSessions", null);
         data.put("reason", "missing_token");
 
         String status = jwtUtil.classifyTokenStatus(token);
@@ -356,7 +340,7 @@ public class AuthService {
         data.put("reason", "ok");
         data.put("deviceId", authUserSessionService.findDeviceIdBySession(userId, sessionId));
         data.put("platformCodes", userRoleService.getUserPlatformCodes(userId));
-        data.put("maxLoginDevices", resolveMaxLoginDevices(user));
+        data.put("maxConcurrentSessions", resolveMaxConcurrentSessions(user));
         return data;
     }
 
@@ -366,18 +350,18 @@ public class AuthService {
             return;
         }
         authSessionContractService.logout(token);
+        publishLogoutEvent(session.getSessionId());
+    }
+
+    private void publishLogoutEvent(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return;
+        }
         try {
-            eventPublisher.publishEvent(new UserLogoutEvent(session.getSessionId(), LocalDateTime.now()));
+            eventPublisher.publishEvent(new UserLogoutEvent(sessionId, LocalDateTime.now()));
         } catch (Exception e) {
             log.error("发布用户登出事件失败: {}", e.getMessage(), e);
         }
-    }
-
-    public boolean isSessionActive(Long userId, String sessionId) {
-        if (userId == null || sessionId == null || sessionId.isBlank()) {
-            return false;
-        }
-        return authUserSessionService.isSessionActive(userId, sessionId, authSessionContractService.getExpirationTimeSeconds());
     }
 
     public void confirmAdminAccess(String token) {

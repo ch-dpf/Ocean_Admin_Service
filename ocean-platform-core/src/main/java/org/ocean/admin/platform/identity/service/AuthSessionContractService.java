@@ -18,12 +18,37 @@ public class AuthSessionContractService {
     private final JwtUtil jwtUtil;
     private final AuthUserSessionService authUserSessionService;
 
-    public LoginSession createLoginSession(String username, Long userId, String deviceId) {
+    public LoginSession createLoginSession(String username,
+                                           Long userId,
+                                           String deviceId,
+                                           int maxConcurrentSessions,
+                                           boolean forceLogin,
+                                           String replaceSessionId) {
         String sessionId = UUID.randomUUID().toString();
         String token = jwtUtil.generateToken(username, userId, sessionId);
         long expiresInSeconds = jwtUtil.getExpirationTimeSeconds();
-        authUserSessionService.registerSession(userId, deviceId, sessionId, expiresInSeconds);
-        return new LoginSession(token, sessionId, expiresInSeconds);
+        Long absoluteExpireAtSeconds = jwtUtil.getExpirationEpochSeconds(token);
+        if (absoluteExpireAtSeconds == null) {
+            throw new IllegalStateException("无法获取JWT绝对过期时间");
+        }
+        AuthUserSessionService.RegistrationResult registration = authUserSessionService.registerSession(
+                userId,
+                deviceId,
+                sessionId,
+                absoluteExpireAtSeconds * 1000L,
+                maxConcurrentSessions,
+                forceLogin,
+                replaceSessionId
+        );
+        return new LoginSession(
+                token,
+                sessionId,
+                expiresInSeconds,
+                authUserSessionService.getIdleTimeoutSeconds(),
+                registration.getActiveSessionCount(),
+                registration.getEvictedSessionId(),
+                registration.getReplacedSessionId()
+        );
     }
 
     public AuthenticatedSession authenticate(String token) {
@@ -36,7 +61,9 @@ public class AuthSessionContractService {
         if (userId == null || sessionId == null || sessionId.isBlank()) {
             return null;
         }
-        if (!authUserSessionService.isSessionActive(userId, sessionId, jwtUtil.getExpirationTimeSeconds())) {
+        Long absoluteExpireAtSeconds = jwtUtil.getExpirationEpochSeconds(token);
+        if (absoluteExpireAtSeconds == null
+                || !authUserSessionService.isSessionActive(userId, sessionId, absoluteExpireAtSeconds * 1000L)) {
             return null;
         }
         return new AuthenticatedSession(userId, sessionId, username);
@@ -46,8 +73,16 @@ public class AuthSessionContractService {
         return authenticate(token) != null;
     }
 
-    public long getExpirationTimeSeconds() {
-        return jwtUtil.getExpirationTimeSeconds();
+    public String resolveOwnedSessionId(String token, Long expectedUserId) {
+        if (token == null || token.isBlank() || expectedUserId == null || !jwtUtil.validateToken(token)) {
+            return null;
+        }
+        Long tokenUserId = jwtUtil.getUserIdFromToken(token);
+        String sessionId = jwtUtil.getSessionIdFromToken(token);
+        if (!expectedUserId.equals(tokenUserId) || sessionId == null || sessionId.isBlank()) {
+            return null;
+        }
+        return authUserSessionService.isSessionOwned(expectedUserId, sessionId) ? sessionId : null;
     }
 
     public Long getUserIdFromToken(String token) {
@@ -75,6 +110,10 @@ public class AuthSessionContractService {
         private final String token;
         private final String sessionId;
         private final long expiresInSeconds;
+        private final long idleTimeoutSeconds;
+        private final int activeSessionCount;
+        private final String evictedSessionId;
+        private final String replacedSessionId;
     }
 
     @Getter
