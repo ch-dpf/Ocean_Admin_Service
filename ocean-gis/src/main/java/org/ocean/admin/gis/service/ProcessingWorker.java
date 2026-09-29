@@ -52,8 +52,7 @@ public class ProcessingWorker {
             GisProcessingType processingType =
                     GisProcessingType.valueOf(task.getProcessingType());
             GisInputSourceType sourceType = GisInputSourceType.valueOf(task.getSourceType());
-            GisProcessingParameters parameters = objectMapper.readValue(
-                    task.getParametersJson(), GisProcessingParameters.class);
+            GisProcessingParameters parameters = taskService.readParameters(task);
             List<Path> paths = inputResolverRegistry.require(sourceType).resolveRuntime(inputs);
             GisProcessingWorkspace workspace = storageService.workspaceFromOutputKey(
                     tileSet.getOutputKey());
@@ -62,7 +61,7 @@ public class ProcessingWorker {
             taskLifecycle.start(taskId, taskNo, 0, "开始执行切片引擎");
             inputMapper.updateTaskStatus(taskId, "RUNNING", null);
             if (inputs.size() == 1 && "DIRECTORY".equals(inputs.get(0).getInputKind())) {
-                engine.processFolder(paths.get(0), workspace,
+                engine.processFolder(paths.get(0), workspace, parameters,
                         progress -> taskLifecycle.reportProgress(taskNo, progress));
             } else {
                 engine.process(paths, workspace, parameters,

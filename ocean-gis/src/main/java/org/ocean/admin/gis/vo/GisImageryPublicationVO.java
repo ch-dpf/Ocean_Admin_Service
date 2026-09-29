@@ -6,7 +6,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** XYZ 影像瓦片发布结果。 */
+/** XYZ/TMS 影像瓦片发布结果。 */
 @Data
 @Builder
 public class GisImageryPublicationVO {
@@ -31,7 +31,7 @@ public class GisImageryPublicationVO {
     @Schema(description = "TileJSON 地址")
     private String tileJsonUrl;
 
-    @Schema(description = "XYZ 瓦片 URL 模板")
+    @Schema(description = "瓦片 URL 模板，Y 轴含义由 tileProfile 和 TileJSON scheme 决定")
     private String tileUrlTemplate;
 
     private LocalDateTime publishTime;

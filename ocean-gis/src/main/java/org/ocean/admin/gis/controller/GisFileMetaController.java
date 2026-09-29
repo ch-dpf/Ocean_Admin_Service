@@ -6,13 +6,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.dto.GisFileProcessRequest;
-import org.ocean.admin.gis.dto.GisProcessingParameters;
 import org.ocean.admin.gis.service.FileUploadService;
-import org.ocean.admin.gis.service.ProcessingService;
 import org.ocean.admin.gis.service.GisFileMetaService;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
-import org.ocean.admin.gis.vo.GisProcessingTaskVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
@@ -37,7 +33,6 @@ import java.util.Map;
 public class GisFileMetaController {
 
     private final GisFileMetaService gisFileMetaService;
-    private final ProcessingService processingService;
     private final FileUploadService fileUploadService;
 
     @GetMapping("/page")
@@ -149,28 +144,4 @@ public class GisFileMetaController {
                 fileUploadService.importBatch(taskId, files));
     }
 
-    @PostMapping("/{id}/process")
-    @Operation(summary = "处理元数据",
-            description = "按 TERRAIN、IMAGERY 或 VECTOR 选择处理引擎；任务异步执行；提交已入库单文件切片任务")
-    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT,
-            description = "提交GIS文件切片任务", recordResponse = true)
-    public ResponseResult<GisProcessingTaskVO> processFile(
-            @PathVariable Long id,
-            @Valid @RequestBody GisFileProcessRequest request) {
-        return ResponseResult.success("处理任务已提交",
-                processingService.submitSingle(id, request));
-    }
-
-    @PostMapping("/{id}/imagery/process")
-    @Operation(summary = "提交单个已入库影像切片任务",
-            description = "仅处理 READY、LOCAL、影像类别下的 tif/tiff 文件；不传参数时使用 EPSG:3857、XYZ、PNG 默认配置")
-    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT,
-            description = "提交单个已入库影像切片任务", recordResponse = true)
-    public ResponseResult<GisProcessingTaskVO> processImagery(
-            @Parameter(description = "影像文件元数据 ID", required = true)
-            @PathVariable Long id,
-            @Valid @RequestBody(required = false) GisProcessingParameters parameters) {
-        return ResponseResult.success("影像切片任务已提交",
-                processingService.submitSingleImagery(id, parameters));
-    }
 }

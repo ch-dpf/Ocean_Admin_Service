@@ -23,7 +23,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Locale;
 
-/** 无需业务鉴权的影像瓦片数据面，仅暴露已发布的 TileJSON 和 XYZ 瓦片。 */
+/** 无需业务鉴权的影像瓦片数据面，仅暴露已发布的 TileJSON 和 XYZ/TMS 瓦片。 */
 @RestController
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*", maxAge = 3600)

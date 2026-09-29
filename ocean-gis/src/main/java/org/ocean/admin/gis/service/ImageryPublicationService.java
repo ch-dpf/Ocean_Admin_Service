@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisPublication;
 import org.ocean.admin.gis.entity.GisTileSet;
+import org.ocean.admin.gis.imagery.ImageryTileOptions;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.vo.GisImageryPublicationVO;
 import org.ocean.admin.kernel.common.PageResult;
@@ -24,7 +25,7 @@ import java.util.stream.Stream;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** 管理 XYZ 影像瓦片发布，并将公开服务编码解析为受控的本地文件。 */
+/** 管理 XYZ/TMS 影像瓦片发布，并将公开服务编码解析为受控的本地文件。 */
 @Service
 @RequiredArgsConstructor
 public class ImageryPublicationService {
@@ -61,6 +62,7 @@ public class ImageryPublicationService {
         GisTileSet tileSet = publicationService.getRequiredTileSet(sourceTaskId, PROCESSING_TYPE);
         validateSourceTask(sourceTask, tileSet);
         PublishedTiles tiles = validateTiles(tileSet.getOutputKey());
+        validateTileSetMetadata(tileSet, tiles.metadata());
 
         GisPublication existing = publicationService.findBySourceTaskId(
                 PROCESSING_TYPE, sourceTaskId);
@@ -84,7 +86,7 @@ public class ImageryPublicationService {
         return toVO(publication);
     }
 
-    /** 空路径映射到 tilejson.json，其余路径仅允许已发布格式的 XYZ 瓦片。 */
+    /** 空路径映射到 tilejson.json，其余路径仅允许已发布格式的影像瓦片。 */
     public Path resolvePublishedFile(String serviceCode, String relativePath) {
         String normalizedCode = normalizeServiceCode(serviceCode);
         PublishedTiles tiles = publishedTiles.computeIfAbsent(
@@ -105,7 +107,10 @@ public class ImageryPublicationService {
         if (!GisPublicationService.PUBLISHED.equals(publication.getStatus())) {
             throw new IllegalStateException("影像服务已停用");
         }
-        return validateTiles(publicationService.getPublicationTileSet(publication).getOutputKey());
+        GisTileSet tileSet = publicationService.getPublicationTileSet(publication);
+        PublishedTiles tiles = validateTiles(tileSet.getOutputKey());
+        validateTileSetMetadata(tileSet, tiles.metadata());
+        return tiles;
     }
 
     private void validateSourceTask(GisProcessingTask task, GisTileSet tileSet) {
@@ -120,6 +125,16 @@ public class ImageryPublicationService {
                 || tileSet.getOutputKey() == null
                 || !tileSet.getOutputKey().startsWith(IMAGERY_PREFIX)) {
             throw new IllegalArgumentException("影像切片任务缺少合法的产物 Key");
+        }
+    }
+
+    private void validateTileSetMetadata(GisTileSet tileSet, TileMetadata metadata) {
+        if (!metadata.targetCrs().equalsIgnoreCase(tileSet.getTargetCrs())
+                || !metadata.tileProfile().equalsIgnoreCase(tileSet.getTileProfile())
+                || !metadata.format().equalsIgnoreCase(tileSet.getOutputFormat())
+                || !Integer.valueOf(metadata.minZoom()).equals(tileSet.getMinZoom())
+                || !Integer.valueOf(metadata.maxZoom()).equals(tileSet.getMaxZoom())) {
+            throw new IllegalStateException("影像瓦片产物元数据与瓦片集记录不一致");
         }
     }
 
@@ -148,12 +163,33 @@ public class ImageryPublicationService {
     }
 
     private TileMetadata readMetadata(JsonNode tileJson, JsonNode manifest) {
-        if (!"xyz".equalsIgnoreCase(tileJson.path("scheme").asText())) {
-            throw new IllegalStateException("影像 TileJSON 的 scheme 必须为 xyz");
+        ImageryTileOptions.TileProfile profile;
+        ImageryTileOptions.TargetCrs targetCrs;
+        try {
+            profile = ImageryTileOptions.TileProfile.valueOf(
+                    tileJson.path("scheme").asText().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("影像 TileJSON 的 scheme 必须为 xyz 或 tms", ex);
         }
-        if (!"IMAGERY_XYZ".equals(manifest.path("type").asText())
-                || !"EPSG:3857".equalsIgnoreCase(manifest.path("targetCrs").asText())
-                || !"XYZ".equalsIgnoreCase(manifest.path("tileProfile").asText())) {
+        try {
+            targetCrs = ImageryTileOptions.TargetCrs.fromCode(
+                    manifest.path("targetCrs").asText());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException(
+                    "影像 manifest 的目标坐标系必须为 EPSG:3857 或 EPSG:4326", ex);
+        }
+        String tileJsonCrs = tileJson.path("crs").asText();
+        String tileJsonMatrixSet = tileJson.path("tileMatrixSet").asText();
+        String manifestMatrixSet = manifest.path("tileMatrixSet").asText();
+        if (!profile.manifestType().equalsIgnoreCase(manifest.path("type").asText())
+                || !profile.name().equalsIgnoreCase(
+                        manifest.path("tileProfile").asText())
+                || (!tileJsonCrs.isBlank()
+                        && !targetCrs.code().equalsIgnoreCase(tileJsonCrs))
+                || (!tileJsonMatrixSet.isBlank()
+                        && !targetCrs.tileMatrixSet().equalsIgnoreCase(tileJsonMatrixSet))
+                || (!manifestMatrixSet.isBlank()
+                        && !targetCrs.tileMatrixSet().equalsIgnoreCase(manifestMatrixSet))) {
             throw new IllegalStateException("影像 manifest 类型、目标坐标系或瓦片剖面不合法");
         }
         String tileJsonFormat = tileJson.path("format").asText().toLowerCase(Locale.ROOT);
@@ -181,7 +217,8 @@ public class ImageryPublicationService {
                 || !expectedTemplate.equals(templates.get(0).asText())) {
             throw new IllegalStateException("影像 TileJSON 瓦片模板不合法");
         }
-        return new TileMetadata("EPSG:3857", "XYZ", format, extension, minZoom, maxZoom);
+        return new TileMetadata(
+                targetCrs.code(), profile.name(), format, extension, minZoom, maxZoom);
     }
 
     private void validateTilePath(String path, TileMetadata metadata) {
@@ -199,9 +236,14 @@ public class ImageryPublicationService {
         } catch (NumberFormatException ex) {
             throw new IllegalArgumentException("非法影像瓦片坐标", ex);
         }
-        long dimension = 1L << zoom;
-        if (zoom < metadata.minZoom() || zoom > metadata.maxZoom()
-                || x < 0 || y < 0 || x >= dimension || y >= dimension) {
+        if (zoom < metadata.minZoom() || zoom > metadata.maxZoom()) {
+            throw new IllegalArgumentException("影像瓦片坐标超出发布范围");
+        }
+        ImageryTileOptions.TargetCrs targetCrs =
+                ImageryTileOptions.TargetCrs.fromCode(metadata.targetCrs());
+        long matrixWidth = targetCrs.matrixWidth(zoom);
+        long matrixHeight = targetCrs.matrixHeight(zoom);
+        if (x < 0 || y < 0 || x >= matrixWidth || y >= matrixHeight) {
             throw new IllegalArgumentException("影像瓦片坐标超出发布范围");
         }
     }

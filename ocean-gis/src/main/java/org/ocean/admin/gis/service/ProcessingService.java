@@ -2,11 +2,13 @@ package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
-import org.ocean.admin.gis.dto.GisFileProcessRequest;
 import org.ocean.admin.gis.dto.GisManagedProcessingRequest;
+import org.ocean.admin.gis.dto.ImageryProcessingParameters;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
+import org.ocean.admin.gis.dto.TerrainProcessingParameters;
 import org.ocean.admin.gis.dto.GisWorkspaceProcessingRequest;
 import org.ocean.admin.gis.entity.GisProcessingInput;
+import org.ocean.admin.gis.imagery.ImageryTileOptions;
 import org.ocean.admin.gis.processing.GisInputSourceType;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisProcessingType;
@@ -17,10 +19,14 @@ import org.ocean.admin.gis.processing.engine.GisFileProcessingEngineRegistry;
 import org.ocean.admin.gis.processing.input.GisProcessingInputResolver;
 import org.ocean.admin.gis.processing.input.GisProcessingInputResolverRegistry;
 import org.ocean.admin.gis.util.FileUploadUtil;
+import org.ocean.admin.gis.terrain.engine.TerrainOptions;
 import org.ocean.admin.gis.vo.GisBatchProcessingTaskVO;
-import org.ocean.admin.gis.vo.GisProcessingTaskVO;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,57 +45,69 @@ public class ProcessingService {
     private final GisProcessingTaskService transactionService;
     private final ProcessingWorker worker;
     private final GisProcessingTaskLifecycleService taskLifecycle;
-
-    public GisProcessingTaskVO submitSingle(Long fileMetaId, GisFileProcessRequest request) {
-        if (request == null || request.getProcessingType() == null) {
-            throw new IllegalArgumentException("处理类型不能为空");
-        }
-        return submitSingle(fileMetaId, request.getProcessingType(), request.getParameters());
-    }
-
-    public GisProcessingTaskVO submitSingleImagery(
-            Long fileMetaId, GisProcessingParameters parameters) {
-        return submitSingle(fileMetaId, GisProcessingType.IMAGERY, parameters);
-    }
-
-    private GisProcessingTaskVO submitSingle(Long fileMetaId, GisProcessingType processingType,
-            GisProcessingParameters requestedParameters) {
-        GisProcessingParameters parameters = parametersOrDefault(
-                processingType, requestedParameters);
-        GisSubmitProcessingCommand command = new GisSubmitProcessingCommand(
-                GisInputSourceType.MANAGED_FILE, processingType,
-                processingType.displayName() + "：" + fileMetaId,
-                parameters, null, null, null, List.of(fileMetaId));
-        GisBatchProcessingTaskVO submitted = submit(command);
-        return GisProcessingTaskVO.builder()
-                .taskId(submitted.getTaskId())
-                .tileSetId(submitted.getTileSetId())
-                .taskNo(submitted.getTaskNo())
-                .fileMetaId(fileMetaId)
-                .processingType(submitted.getProcessingType())
-                .outputKey(submitted.getOutputKey())
-                .status(submitted.getStatus())
-                .build();
-    }
+    private final ObjectMapper objectMapper;
 
     public GisBatchProcessingTaskVO submitBatch(GisCreateProcessingTaskRequest request,
             List<MultipartFile> files) {
         validateUploadRequest(request, files);
         return submit(new GisSubmitProcessingCommand(GisInputSourceType.UPLOAD,
-                request.processingType(), request.taskName(), request.parameters(), files,
+                request.processingType(), request.taskName(),
+                readParameters(request.processingType(), request.parameters()), files,
                 null, null, null));
     }
 
     public GisBatchProcessingTaskVO submitWorkspace(GisWorkspaceProcessingRequest request) {
         return submit(new GisSubmitProcessingCommand(GisInputSourceType.WORKSPACE,
-                request.processingType(), request.taskName(), request.parameters(), null,
+                request.processingType(), request.taskName(),
+                readParameters(request.processingType(), request.parameters()), null,
                 request.workspaceCode(), request.relativePath(), null));
     }
 
     public GisBatchProcessingTaskVO submitManaged(GisManagedProcessingRequest request) {
         return submit(new GisSubmitProcessingCommand(GisInputSourceType.MANAGED_FILE,
-                request.processingType(), request.taskName(), request.parameters(), null,
+                request.processingType(), request.taskName(),
+                readParameters(request.processingType(), request.parameters()), null,
                 null, null, request.fileMetaIds()));
+    }
+
+    private GisProcessingParameters readParameters(
+            GisProcessingType type, JsonNode parameters) {
+        if (parameters == null || parameters.isNull()) {
+            return null;
+        }
+        if (type == null) {
+            throw new IllegalArgumentException("处理类型不能为空");
+        }
+        try {
+            return switch (type) {
+                case TERRAIN -> objectMapper.treeToValue(
+                        normalizeTerrainZoomFields(parameters),
+                        TerrainProcessingParameters.class);
+                case IMAGERY -> objectMapper.treeToValue(
+                        parameters, ImageryProcessingParameters.class);
+                case VECTOR -> objectMapper.treeToValue(parameters,
+                        GisProcessingParameters.VectorProcessingParameters.class);
+            };
+        } catch (JacksonException ex) {
+            throw new IllegalArgumentException(type.displayName() + "参数格式不正确", ex);
+        }
+    }
+
+    private JsonNode normalizeTerrainZoomFields(JsonNode parameters) {
+        if (!(parameters instanceof ObjectNode objectParameters)) {
+            return parameters;
+        }
+        ObjectNode normalized = objectParameters.deepCopy();
+        moveLegacyField(normalized, "minDepth", "minZoom");
+        moveLegacyField(normalized, "maxDepth", "maxZoom");
+        return normalized;
+    }
+
+    private void moveLegacyField(ObjectNode parameters, String legacyName, String currentName) {
+        if (!parameters.has(currentName) && parameters.has(legacyName)) {
+            parameters.set(currentName, parameters.get(legacyName));
+        }
+        parameters.remove(legacyName);
     }
 
     private GisBatchProcessingTaskVO submit(GisSubmitProcessingCommand command) {
@@ -170,52 +188,17 @@ public class ProcessingService {
                 "单次处理文件总大小不能超过5GB");
     }
 
-    private GisProcessingParameters parametersOrDefault(
-            GisProcessingType type, GisProcessingParameters parameters) {
-        if (parameters != null) {
-            return parameters;
-        }
-        return switch (type) {
-            case TERRAIN -> new GisProcessingParameters(
-                    "EPSG:4326", "GEODETIC", "QUANTIZED_MESH",
-                    null, null, null, null);
-            case IMAGERY -> new GisProcessingParameters(
-                    "EPSG:3857", "XYZ", "PNG", null, null, "BILINEAR", true);
-            case VECTOR -> new GisProcessingParameters(
-                    "EPSG:3857", "MVT", "PBF", null, null, null, null);
-        };
-    }
-
     private void validateParameters(GisProcessingType type, GisProcessingParameters parameters) {
-        if (parameters.targetCrs() == null || parameters.tileProfile() == null
-                || parameters.outputFormat() == null) {
-            throw new IllegalArgumentException("目标坐标系、瓦片剖面和输出格式不能为空");
-        }
-        if (type == GisProcessingType.TERRAIN
-                && (!"EPSG:4326".equalsIgnoreCase(parameters.targetCrs())
-                || !"GEODETIC".equalsIgnoreCase(parameters.tileProfile())
-                || !"QUANTIZED_MESH".equalsIgnoreCase(parameters.outputFormat()))) {
+        if (parameters.processingType() != type) {
             throw new IllegalArgumentException(
-                    "当前地形引擎仅支持 EPSG:4326、GEODETIC、QUANTIZED_MESH");
+                    "处理类型与参数类型不一致: " + type + "/" + parameters.processingType());
         }
-        if (type == GisProcessingType.IMAGERY) {
-            if (!"EPSG:3857".equalsIgnoreCase(parameters.targetCrs())
-                    || !"XYZ".equalsIgnoreCase(parameters.tileProfile())
-                    || !("PNG".equalsIgnoreCase(parameters.outputFormat())
-                    || "JPEG".equalsIgnoreCase(parameters.outputFormat())
-                    || "JPG".equalsIgnoreCase(parameters.outputFormat()))) {
-                throw new IllegalArgumentException(
-                        "当前影像引擎仅支持 EPSG:3857、XYZ、PNG/JPEG");
-            }
-            if (parameters.minZoom() != null && parameters.maxZoom() != null
-                    && parameters.minZoom() > parameters.maxZoom()) {
-                throw new IllegalArgumentException("影像最小层级不能大于最大层级");
-            }
-            if (parameters.resampling() != null
-                    && !"NEAREST".equalsIgnoreCase(parameters.resampling())
-                    && !"BILINEAR".equalsIgnoreCase(parameters.resampling())) {
-                throw new IllegalArgumentException("影像重采样仅支持 NEAREST 或 BILINEAR");
-            }
+        if (parameters instanceof TerrainProcessingParameters terrainParameters) {
+            TerrainOptions.from(terrainParameters);
+            return;
+        }
+        if (parameters instanceof ImageryProcessingParameters imageryParameters) {
+            ImageryTileOptions.from(imageryParameters);
         }
     }
 }

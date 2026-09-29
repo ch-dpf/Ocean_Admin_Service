@@ -6,7 +6,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.service.AsyncTaskService;
 import org.ocean.admin.kernel.common.ResponseResult;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -16,7 +15,7 @@ import java.util.List;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/task")
+@RequestMapping("/api/gis/async/task")
 @Tag(name = "异步任务管理", description = "查看和管理后台异步任务")
 @RequiredArgsConstructor
 public class AsyncTaskController {

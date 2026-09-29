@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
+import org.ocean.admin.gis.dto.ImageryProcessingParameters;
+import org.ocean.admin.gis.dto.TerrainProcessingParameters;
 import org.ocean.admin.gis.entity.GisProcessingInput;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisTileSet;
@@ -19,7 +21,9 @@ import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -212,13 +216,115 @@ public class GisProcessingTaskRecordService {
         return result;
     }
 
-    private GisProcessingParameters readParameters(GisProcessingTask task) {
+    public GisProcessingParameters readParameters(GisProcessingTask task) {
         try {
-            return objectMapper.readValue(
-                    task.getParametersJson(), GisProcessingParameters.class);
+            GisProcessingType type = GisProcessingType.valueOf(task.getProcessingType());
+            if (task.getParameterSchemaVersion() == null
+                    || task.getParameterSchemaVersion() < 2) {
+                return readLegacyParameters(type, task.getParametersJson());
+            }
+            return switch (type) {
+                case TERRAIN -> readTerrainParameters(task);
+                case IMAGERY -> normalizeImageryParameters(task,
+                        objectMapper.readValue(task.getParametersJson(),
+                                ImageryProcessingParameters.class));
+                case VECTOR -> objectMapper.readValue(task.getParametersJson(),
+                        GisProcessingParameters.VectorProcessingParameters.class);
+            };
         } catch (JacksonException ex) {
             throw new IllegalStateException("处理任务参数快照无法解析: " + task.getId(), ex);
         }
+    }
+
+    private TerrainProcessingParameters readTerrainParameters(
+            GisProcessingTask task) throws JacksonException {
+        JsonNode parameters = objectMapper.readTree(task.getParametersJson());
+        if (parameters instanceof ObjectNode objectParameters) {
+            ObjectNode normalized = objectParameters.deepCopy();
+            if (task.getParameterSchemaVersion() != null
+                    && task.getParameterSchemaVersion() < 5) {
+                moveLegacyField(normalized, "minDepth", "minZoom");
+                moveLegacyField(normalized, "maxDepth", "maxZoom");
+            }
+            if (task.getParameterSchemaVersion() == null
+                    || task.getParameterSchemaVersion() < 6) {
+                putTextIfMissing(normalized, "targetCrs", "EPSG:4326");
+                putTextIfMissing(normalized, "tileProfile", "TMS");
+                putTextIfMissing(normalized, "outputFormat", "QUANTIZED_MESH");
+                if ("GEODETIC".equalsIgnoreCase(
+                        normalized.path("tileProfile").asText())) {
+                    normalized.put("tileProfile", "TMS");
+                }
+            }
+            parameters = normalized;
+        }
+        return objectMapper.treeToValue(parameters, TerrainProcessingParameters.class);
+    }
+
+    private void putTextIfMissing(ObjectNode parameters, String name, String value) {
+        if (!parameters.has(name) || parameters.path(name).asText().isBlank()) {
+            parameters.put(name, value);
+        }
+    }
+
+    private void moveLegacyField(ObjectNode parameters, String legacyName, String currentName) {
+        if (!parameters.has(currentName) && parameters.has(legacyName)) {
+            parameters.set(currentName, parameters.get(legacyName));
+        }
+        parameters.remove(legacyName);
+    }
+
+    private GisProcessingParameters readLegacyParameters(
+            GisProcessingType type, String parametersJson) throws JacksonException {
+        JsonNode json = objectMapper.readTree(parametersJson);
+        return switch (type) {
+            case TERRAIN -> TerrainProcessingParameters.defaults();
+            case IMAGERY -> new ImageryProcessingParameters(
+                    "EPSG:3857",
+                    "XYZ",
+                    textOrDefault(json, "outputFormat", "PNG"),
+                    integerOrNull(json, "minZoom"),
+                    integerOrNull(json, "maxZoom"),
+                    textOrDefault(json, "resampling", null),
+                    booleanOrNull(json, "transparent"));
+            case VECTOR -> new GisProcessingParameters.VectorProcessingParameters(
+                    textOrDefault(json, "targetCrs", "EPSG:3857"),
+                    textOrDefault(json, "tileProfile", "MVT"),
+                    textOrDefault(json, "outputFormat", "PBF"));
+        };
+    }
+
+    private ImageryProcessingParameters normalizeImageryParameters(
+            GisProcessingTask task, ImageryProcessingParameters parameters) {
+        if (task.getParameterSchemaVersion() != null
+                && task.getParameterSchemaVersion() >= 4) {
+            return parameters;
+        }
+        return new ImageryProcessingParameters(
+                "EPSG:3857",
+                task.getParameterSchemaVersion() != null
+                        && task.getParameterSchemaVersion() >= 3
+                        ? parameters.tileProfile() : "XYZ",
+                parameters.outputFormat(),
+                parameters.minZoom(),
+                parameters.maxZoom(),
+                parameters.resampling(),
+                parameters.transparent());
+    }
+
+    private String textOrDefault(JsonNode json, String field, String defaultValue) {
+        JsonNode value = json.path(field);
+        return value.isString() && !value.asText().isBlank() ? value.asText() : defaultValue;
+    }
+
+    private Integer integerOrNull(JsonNode json, String field) {
+        JsonNode value = json.path(field);
+        return value.isNumber() ? value.asInt() : null;
+    }
+
+    private Boolean booleanOrNull(JsonNode json, String field) {
+        JsonNode value = json.path(field);
+        return value.isBoolean() ? value.asBoolean() : null;
     }
 
     private GisProcessingTaskDetailVO.InputVO toInputVO(GisProcessingInput input) {

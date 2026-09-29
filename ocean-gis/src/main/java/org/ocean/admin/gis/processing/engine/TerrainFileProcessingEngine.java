@@ -1,5 +1,7 @@
 package org.ocean.admin.gis.processing.engine;
 
+import org.ocean.admin.gis.dto.GisProcessingParameters;
+import org.ocean.admin.gis.dto.TerrainProcessingParameters;
 import org.ocean.admin.gis.processing.GisProcessingProgress;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisProcessingType;
@@ -41,17 +43,17 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
 
     @Override
     public void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
+            GisProcessingParameters parameters,
             Consumer<GisProcessingProgress> progressListener) {
         terrainEngine.generate(
                 new TerrainGenerationRequest(inputPaths, workspace.outputPath(),
-                        workspace.tempPath(), workspace.logPath(), TerrainOptions.defaults()),
+                        workspace.tempPath(), workspace.logPath(), options(parameters)),
                 progressListener::accept);
     }
 
     @Override
-    public void processFolder(
-            Path inputFolder,
-            GisProcessingWorkspace workspace,
+    public void processFolder(Path inputFolder, GisProcessingWorkspace workspace,
+            GisProcessingParameters parameters,
             Consumer<GisProcessingProgress> progressListener) {
         terrainEngine.generate(
                 new TerrainGenerationRequest(
@@ -59,7 +61,14 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
                         workspace.outputPath(),
                         workspace.tempPath(),
                         workspace.logPath(),
-                        TerrainOptions.defaults()),
+                        options(parameters)),
                 progressListener::accept);
+    }
+
+    private TerrainOptions options(GisProcessingParameters parameters) {
+        if (!(parameters instanceof TerrainProcessingParameters terrainParameters)) {
+            throw new IllegalArgumentException("地形切片任务参数类型不正确");
+        }
+        return TerrainOptions.from(terrainParameters);
     }
 }

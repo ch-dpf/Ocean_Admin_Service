@@ -2,7 +2,7 @@
 
 ## 设计目标
 
-影像与地形共用发布记录和状态流转；发布记录直接关联静态瓦片集，不创建额外任务。各类型服务保留独立的产物校验、公开 URL 和资源 MIME 处理。影像数据面只暴露已发布的 TileJSON 和 XYZ PNG/JPEG 文件。
+影像与地形共用发布记录和状态流转；发布记录直接关联静态瓦片集，不创建额外任务。各类型服务保留独立的产物校验、公开 URL 和资源 MIME 处理。影像数据面只暴露已发布的 TileJSON 和 XYZ/TMS PNG/JPEG 文件，并支持 WebMercatorQuad（EPSG:3857）与 WorldCRS84Quad（EPSG:4326）瓦片矩阵。
 
 ## 类图
 
@@ -65,7 +65,7 @@ sequenceDiagram
     User->>API: POST /api/gis/imagery-publications/{taskId}/publish
     API->>TypeService: publish(taskId)
     TypeService->>TypeService: 校验 IMAGERY + COMPLETED
-    TypeService->>FS: 校验 TileJSON、manifest 和 XYZ 瓦片
+    TypeService->>FS: 校验 TileJSON、manifest 和 XYZ/TMS 瓦片
     TypeService->>CommonService: publish(tileSet, serviceCode)
     CommonService->>DB: 按 tileSetId 新增或更新发布记录
     CommonService-->>TypeService: GisPublication
@@ -85,6 +85,6 @@ sequenceDiagram
 
 - 只允许发布 `COMPLETED` 的 `IMAGERY` 切片任务。
 - `output_key` 必须位于 `imagery/` 命名空间。
-- 发布前校验 `tilejson.json`、`manifest.json`、格式、层级和至少一张瓦片。
-- 公开资源仅允许 TileJSON 和符合已发布格式、层级范围的 XYZ 路径。
+- 发布前校验 `tilejson.json`、`manifest.json`、目标坐标系、瓦片矩阵、格式、层级和至少一张瓦片。
+- 公开资源仅允许 TileJSON 和符合已发布格式、层级范围的 XYZ/TMS 路径。
 - 所有文件路径必须规范化并保持在任务瓦片根目录内。

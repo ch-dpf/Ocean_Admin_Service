@@ -39,7 +39,7 @@ public class GisProcessingTaskService {
         task.setProcessingType(command.processingType().name());
         task.setSourceType(command.sourceType().name());
         task.setParametersJson(parametersJson);
-        task.setParameterSchemaVersion(1);
+        task.setParameterSchemaVersion(6);
         task.setRequestFingerprint(fingerprint(command, inputs, parametersJson));
         taskService.insert(task);
 

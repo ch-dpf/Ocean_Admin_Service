@@ -1,6 +1,7 @@
 package org.ocean.admin.gis.processing.engine;
 
 import org.ocean.admin.gis.dto.GisProcessingParameters;
+import org.ocean.admin.gis.dto.ImageryProcessingParameters;
 import org.ocean.admin.gis.imagery.GeoTiffTileGenerator;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
 import org.ocean.admin.gis.processing.GisProcessingProgress;
@@ -43,7 +44,10 @@ public class ImageryFileProcessingEngine implements GisFileProcessingEngine {
         if (inputPaths == null || inputPaths.size() != 1) {
             throw new IllegalArgumentException("首期影像切片每个任务仅支持一个 GeoTIFF");
         }
+        if (!(parameters instanceof ImageryProcessingParameters imageryParameters)) {
+            throw new IllegalArgumentException("影像切片任务参数类型不正确");
+        }
         tileGenerator.generate(inputPaths.get(0), workspace.outputPath(),
-                ImageryTileOptions.from(parameters), progressListener);
+                ImageryTileOptions.from(imageryParameters), progressListener);
     }
 }

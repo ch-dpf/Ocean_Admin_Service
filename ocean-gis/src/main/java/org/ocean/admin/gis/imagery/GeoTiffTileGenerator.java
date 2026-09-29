@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import tools.jackson.databind.ObjectMapper;
 
-/** 使用 GeoTools、Eclipse ImageN 与 ImageIO 将普通 GeoTIFF 生成为 XYZ 静态瓦片集。 */
+/** 使用 GeoTools、Eclipse ImageN 与 ImageIO 将普通 GeoTIFF 生成为静态影像瓦片集。 */
 public class GeoTiffTileGenerator {
 
     private static final double WEB_MERCATOR_LIMIT = 20_037_508.342789244;
@@ -83,11 +83,12 @@ public class GeoTiffTileGenerator {
             validateCoverage(coverage);
 
             ReferencedEnvelope sourceBounds = new ReferencedEnvelope(coverage.getEnvelope2D());
-            ReferencedEnvelope mercatorBounds = clampMercator(sourceBounds.transform(
-                    WEB_MERCATOR, true));
+            CoordinateReferenceSystem targetCrs = coordinateReferenceSystem(options.targetCrs());
+            ReferencedEnvelope targetBounds = clampTarget(sourceBounds.transform(
+                    targetCrs, true), options.targetCrs());
             ReferencedEnvelope geographicBounds = sourceBounds.transform(WGS84, true);
-            ZoomRange zooms = resolveZooms(coverage, mercatorBounds, options);
-            long tileCount = countTiles(mercatorBounds, zooms);
+            ZoomRange zooms = resolveZooms(coverage, targetBounds, options);
+            long tileCount = countTiles(targetBounds, zooms, options.targetCrs());
             if (tileCount > ImageryTileOptions.MAX_TILE_COUNT) {
                 throw new IllegalArgumentException("预计生成瓦片" + tileCount
                         + "张，超过单任务上限" + ImageryTileOptions.MAX_TILE_COUNT + "张");
@@ -105,10 +106,10 @@ public class GeoTiffTileGenerator {
             long completed = 0;
             int lastProgress = 0;
             for (int zoom = zooms.min(); zoom <= zooms.max(); zoom++) {
-                TileRange range = tileRange(mercatorBounds, zoom);
+                TileRange range = tileRange(targetBounds, zoom, options.targetCrs());
                 for (int x = range.minX(); x <= range.maxX(); x++) {
                     for (int y = range.minY(); y <= range.maxY(); y++) {
-                        writeTile(renderer, target, mercatorBounds, zoom, x, y, options);
+                        writeTile(renderer, target, targetBounds, zoom, x, y, options);
                         completed++;
                         int progress = processingProgress(completed, tileCount);
                         if (progress > lastProgress) {
@@ -168,7 +169,7 @@ public class GeoTiffTileGenerator {
             graphics.setColor(options.transparent() ? new Color(0, 0, 0, 0) : Color.WHITE);
             graphics.fillRect(0, 0, renderSize, renderSize);
             graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-            ReferencedEnvelope tileBounds = tileEnvelope(zoom, x, y);
+            ReferencedEnvelope tileBounds = tileEnvelope(zoom, x, y, options.targetCrs());
             ReferencedEnvelope renderBounds = intersection(tileBounds, coverageBounds);
             if (renderBounds != null) {
                 Rectangle renderArea = renderArea(tileBounds, renderBounds, renderSize);
@@ -196,9 +197,11 @@ public class GeoTiffTileGenerator {
             } finally {
                 tileGraphics.dispose();
             }
+            int storedY = options.tileProfile().storedY(
+                    options.targetCrs().matrixHeight(zoom), y);
             Path tilePath = output.resolve(Integer.toString(zoom))
                     .resolve(Integer.toString(x))
-                    .resolve(y + "." + options.outputFormat().extension());
+                    .resolve(storedY + "." + options.outputFormat().extension());
             Files.createDirectories(tilePath.getParent());
             if (!ImageIO.write(tile, options.outputFormat().extension(), tilePath.toFile())) {
                 throw new IOException("当前 JVM 没有可用的影像编码器: "
@@ -255,7 +258,8 @@ public class GeoTiffTileGenerator {
         if (minX >= maxX || minY >= maxY) {
             return null;
         }
-        return new ReferencedEnvelope(minX, maxX, minY, maxY, WEB_MERCATOR);
+        return new ReferencedEnvelope(minX, maxX, minY, maxY,
+                tileBounds.getCoordinateReferenceSystem());
     }
 
     private Rectangle renderArea(ReferencedEnvelope tileBounds,
@@ -282,7 +286,9 @@ public class GeoTiffTileGenerator {
         Map<String, Object> tileJson = new LinkedHashMap<>();
         tileJson.put("tilejson", "3.0.0");
         tileJson.put("name", fileName(source));
-        tileJson.put("scheme", "xyz");
+        tileJson.put("scheme", options.tileProfile().scheme());
+        tileJson.put("crs", options.targetCrs().code());
+        tileJson.put("tileMatrixSet", options.targetCrs().tileMatrixSet());
         tileJson.put("tiles", new String[]{"{z}/{x}/{y}."
                 + options.outputFormat().extension()});
         tileJson.put("minzoom", zooms.min());
@@ -293,11 +299,12 @@ public class GeoTiffTileGenerator {
                 .writeValue(output.resolve("tilejson.json").toFile(), tileJson);
 
         Map<String, Object> manifest = new LinkedHashMap<>();
-        manifest.put("type", "IMAGERY_XYZ");
+        manifest.put("type", options.tileProfile().manifestType());
         manifest.put("source", source.toString());
         manifest.put("createdAt", Instant.now().toString());
-        manifest.put("targetCrs", "EPSG:3857");
-        manifest.put("tileProfile", "XYZ");
+        manifest.put("targetCrs", options.targetCrs().code());
+        manifest.put("tileMatrixSet", options.targetCrs().tileMatrixSet());
+        manifest.put("tileProfile", options.tileProfile().name());
         manifest.put("format", options.outputFormat().name());
         manifest.put("resampling", options.resampling().name());
         manifest.put("transparent", options.transparent());
@@ -314,22 +321,24 @@ public class GeoTiffTileGenerator {
         int width = coverage.getRenderedImage().getWidth();
         int height = coverage.getRenderedImage().getHeight();
         double sourceResolution = Math.max(bounds.getWidth() / width, bounds.getHeight() / height);
-        double worldWidth = WEB_MERCATOR_LIMIT * 2;
-        int nativeZoom = (int) Math.floor(Math.log(worldWidth
+        double levelZeroSpan = worldHeight(options.targetCrs());
+        int nativeZoom = (int) Math.floor(Math.log(levelZeroSpan
                 / (ImageryTileOptions.TILE_SIZE * sourceResolution)) / Math.log(2));
         nativeZoom = Math.max(0, Math.min(ImageryTileOptions.MAX_ZOOM, nativeZoom));
         int max = options.maxZoom() == null ? nativeZoom : options.maxZoom();
         int min = options.minZoom() == null
-                ? Math.min(max, calculateMinimumZoom(bounds)) : options.minZoom();
+                ? Math.min(max, calculateMinimumZoom(bounds, options.targetCrs()))
+                : options.minZoom();
         return new ZoomRange(min, max);
     }
 
-    private int calculateMinimumZoom(ReferencedEnvelope bounds) {
+    private int calculateMinimumZoom(ReferencedEnvelope bounds,
+            ImageryTileOptions.TargetCrs targetCrs) {
         double minimumExtent = Math.min(bounds.getWidth(), bounds.getHeight());
-        double worldWidth = WEB_MERCATOR_LIMIT * 2;
+        double levelZeroSpan = worldHeight(targetCrs);
         for (int zoom = 0; zoom < ImageryTileOptions.MAX_ZOOM; zoom++) {
             double visiblePixels = minimumExtent * ImageryTileOptions.TILE_SIZE
-                    * (1L << zoom) / worldWidth;
+                    * (1L << zoom) / levelZeroSpan;
             if (visiblePixels >= MIN_VISIBLE_PIXELS) {
                 return zoom;
             }
@@ -337,45 +346,87 @@ public class GeoTiffTileGenerator {
         return ImageryTileOptions.MAX_ZOOM;
     }
 
-    private long countTiles(ReferencedEnvelope bounds, ZoomRange zooms) {
+    private long countTiles(ReferencedEnvelope bounds, ZoomRange zooms,
+            ImageryTileOptions.TargetCrs targetCrs) {
         long count = 0;
         for (int zoom = zooms.min(); zoom <= zooms.max(); zoom++) {
-            TileRange range = tileRange(bounds, zoom);
+            TileRange range = tileRange(bounds, zoom, targetCrs);
             count = Math.addExact(count, (long) (range.maxX() - range.minX() + 1)
                     * (range.maxY() - range.minY() + 1));
         }
         return count;
     }
 
-    private TileRange tileRange(ReferencedEnvelope bounds, int zoom) {
-        int dimension = 1 << zoom;
-        int minX = clampTile((int) Math.floor((bounds.getMinX() + WEB_MERCATOR_LIMIT)
-                / (2 * WEB_MERCATOR_LIMIT) * dimension), dimension);
-        int maxX = clampTile((int) Math.floor((Math.nextDown(bounds.getMaxX())
-                + WEB_MERCATOR_LIMIT) / (2 * WEB_MERCATOR_LIMIT) * dimension), dimension);
-        int minY = clampTile((int) Math.floor((WEB_MERCATOR_LIMIT
-                - Math.nextDown(bounds.getMaxY())) / (2 * WEB_MERCATOR_LIMIT) * dimension), dimension);
-        int maxY = clampTile((int) Math.floor((WEB_MERCATOR_LIMIT - bounds.getMinY())
-                / (2 * WEB_MERCATOR_LIMIT) * dimension), dimension);
+    private TileRange tileRange(ReferencedEnvelope bounds, int zoom,
+            ImageryTileOptions.TargetCrs targetCrs) {
+        int matrixWidth = targetCrs.matrixWidth(zoom);
+        int matrixHeight = targetCrs.matrixHeight(zoom);
+        double minWorldX = worldMinX(targetCrs);
+        double maxWorldY = worldMaxY(targetCrs);
+        int minX = clampTile((int) Math.floor((bounds.getMinX() - minWorldX)
+                / worldWidth(targetCrs) * matrixWidth), matrixWidth);
+        int maxX = clampTile((int) Math.floor((Math.nextDown(bounds.getMaxX()) - minWorldX)
+                / worldWidth(targetCrs) * matrixWidth), matrixWidth);
+        int minY = clampTile((int) Math.floor((maxWorldY
+                - Math.nextDown(bounds.getMaxY()))
+                / worldHeight(targetCrs) * matrixHeight), matrixHeight);
+        int maxY = clampTile((int) Math.floor((maxWorldY - bounds.getMinY())
+                / worldHeight(targetCrs) * matrixHeight), matrixHeight);
         return new TileRange(minX, maxX, minY, maxY);
     }
 
-    private ReferencedEnvelope tileEnvelope(int zoom, int x, int y) {
-        double size = (2 * WEB_MERCATOR_LIMIT) / (1 << zoom);
-        double minX = -WEB_MERCATOR_LIMIT + x * size;
-        double maxY = WEB_MERCATOR_LIMIT - y * size;
-        return new ReferencedEnvelope(minX, minX + size, maxY - size, maxY, WEB_MERCATOR);
+    private ReferencedEnvelope tileEnvelope(int zoom, int x, int y,
+            ImageryTileOptions.TargetCrs targetCrs) {
+        double tileWidth = worldWidth(targetCrs) / targetCrs.matrixWidth(zoom);
+        double tileHeight = worldHeight(targetCrs) / targetCrs.matrixHeight(zoom);
+        double minX = worldMinX(targetCrs) + x * tileWidth;
+        double maxY = worldMaxY(targetCrs) - y * tileHeight;
+        return new ReferencedEnvelope(minX, minX + tileWidth,
+                maxY - tileHeight, maxY, coordinateReferenceSystem(targetCrs));
     }
 
-    private ReferencedEnvelope clampMercator(ReferencedEnvelope bounds) {
-        double minX = Math.max(-WEB_MERCATOR_LIMIT, bounds.getMinX());
-        double maxX = Math.min(WEB_MERCATOR_LIMIT, bounds.getMaxX());
-        double minY = Math.max(-WEB_MERCATOR_LIMIT, bounds.getMinY());
-        double maxY = Math.min(WEB_MERCATOR_LIMIT, bounds.getMaxY());
+    private ReferencedEnvelope clampTarget(ReferencedEnvelope bounds,
+            ImageryTileOptions.TargetCrs targetCrs) {
+        double minX = Math.max(worldMinX(targetCrs), bounds.getMinX());
+        double maxX = Math.min(worldMaxX(targetCrs), bounds.getMaxX());
+        double minY = Math.max(worldMinY(targetCrs), bounds.getMinY());
+        double maxY = Math.min(worldMaxY(targetCrs), bounds.getMaxY());
         if (minX >= maxX || minY >= maxY) {
-            throw new IllegalArgumentException("GeoTIFF 范围不在 Web Mercator 可切片区域内");
+            throw new IllegalArgumentException("GeoTIFF 范围不在目标坐标系可切片区域内");
         }
-        return new ReferencedEnvelope(minX, maxX, minY, maxY, WEB_MERCATOR);
+        return new ReferencedEnvelope(minX, maxX, minY, maxY,
+                coordinateReferenceSystem(targetCrs));
+    }
+
+    private CoordinateReferenceSystem coordinateReferenceSystem(
+            ImageryTileOptions.TargetCrs targetCrs) {
+        return targetCrs == ImageryTileOptions.TargetCrs.EPSG_4326 ? WGS84 : WEB_MERCATOR;
+    }
+
+    private double worldMinX(ImageryTileOptions.TargetCrs targetCrs) {
+        return targetCrs == ImageryTileOptions.TargetCrs.EPSG_4326
+                ? -180d : -WEB_MERCATOR_LIMIT;
+    }
+
+    private double worldMaxX(ImageryTileOptions.TargetCrs targetCrs) {
+        return -worldMinX(targetCrs);
+    }
+
+    private double worldMinY(ImageryTileOptions.TargetCrs targetCrs) {
+        return targetCrs == ImageryTileOptions.TargetCrs.EPSG_4326
+                ? -90d : -WEB_MERCATOR_LIMIT;
+    }
+
+    private double worldMaxY(ImageryTileOptions.TargetCrs targetCrs) {
+        return -worldMinY(targetCrs);
+    }
+
+    private double worldWidth(ImageryTileOptions.TargetCrs targetCrs) {
+        return worldMaxX(targetCrs) - worldMinX(targetCrs);
+    }
+
+    private double worldHeight(ImageryTileOptions.TargetCrs targetCrs) {
+        return worldMaxY(targetCrs) - worldMinY(targetCrs);
     }
 
     private void validateSourceCrs(CoordinateReferenceSystem sourceCrs) {

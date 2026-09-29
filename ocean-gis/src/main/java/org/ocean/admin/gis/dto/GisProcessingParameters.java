@@ -1,18 +1,41 @@
 package org.ocean.admin.gis.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
+import org.ocean.admin.gis.processing.GisProcessingType;
 
-/** 切片任务的输出参数。 */
-public record GisProcessingParameters(
-        @NotBlank @Schema(description = "目标坐标系", example = "EPSG:4326") String targetCrs,
-        @NotBlank @Schema(description = "瓦片切分剖面", example = "GEODETIC") String tileProfile,
-        @NotBlank @Schema(description = "输出格式", example = "QUANTIZED_MESH") String outputFormat,
-        @Min(0) @Max(22) @Schema(description = "影像最小层级；为空时根据影像范围自动计算") Integer minZoom,
-        @Min(0) @Max(22) @Schema(description = "影像最大层级；为空时按源分辨率计算") Integer maxZoom,
-        @Schema(description = "影像重采样算法", allowableValues = {"NEAREST", "BILINEAR"})
-        String resampling,
-        @Schema(description = "PNG 是否保留透明背景") Boolean transparent) {
+/** 不同 GIS 切片引擎参数的公共契约。 */
+@Schema(oneOf = {TerrainProcessingParameters.class, ImageryProcessingParameters.class,
+        GisProcessingParameters.VectorProcessingParameters.class})
+public sealed interface GisProcessingParameters
+        permits TerrainProcessingParameters, ImageryProcessingParameters,
+        GisProcessingParameters.VectorProcessingParameters {
+
+    GisProcessingType processingType();
+
+    String targetCrs();
+
+    String tileProfile();
+
+    String outputFormat();
+
+    default Integer minZoom() {
+        return null;
+    }
+
+    default Integer maxZoom() {
+        return null;
+    }
+
+    /** 尚未实现的矢量引擎保留原有参数结构，避免影响现有请求模型。 */
+    record VectorProcessingParameters(
+            String targetCrs,
+            String tileProfile,
+            String outputFormat) implements GisProcessingParameters {
+
+        @Override
+        public GisProcessingType processingType() {
+            return GisProcessingType.VECTOR;
+        }
+    }
+
 }

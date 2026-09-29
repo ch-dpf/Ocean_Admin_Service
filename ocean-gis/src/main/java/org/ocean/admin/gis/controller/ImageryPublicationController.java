@@ -25,7 +25,7 @@ import java.util.List;
 /** 影像瓦片服务发布管理接口。 */
 @RestController
 @RequestMapping("/api/gis/imagery-publications")
-@Tag(name = "GIS影像发布", description = "发布、查询和停用 XYZ 影像瓦片服务")
+@Tag(name = "GIS影像发布", description = "发布、查询和停用 XYZ/TMS 影像瓦片服务")
 @RequiredArgsConstructor
 public class ImageryPublicationController {
 
