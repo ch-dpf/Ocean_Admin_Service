@@ -15,7 +15,7 @@ public class GisProcessingTaskSummaryVO {
     @Schema(description = "处理类型：TERRAIN、IMAGERY、VECTOR")
     private String processingType;
 
-    @Schema(description = "输入来源：UPLOAD、WORKSPACE、MANAGED_FILE")
+    @Schema(description = "数据接入方式：文件上传、工作空间、已管理文件")
     private String sourceType;
 
     private Integer priority;

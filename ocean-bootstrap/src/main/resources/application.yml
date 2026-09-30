@@ -85,12 +85,17 @@ knife4j:
 
 gis:
   upload:
-    base-path: ${GIS_UPLOAD_BASE_PATH:uploads/gis}
+    base-path: ${GIS_UPLOAD_BASE_PATH:gis/uploads}
     session-ttl: ${GIS_UPLOAD_SESSION_TTL:2h}
   processing:
-    base-path: ${GIS_PROCESSING_BASE_PATH:processed/gis}
+    base-path: ${GIS_PROCESSING_BASE_PATH:gis/processing}
+    imagery-cache-path: ${GIS_IMAGERY_CACHE_PATH:imagery/cache}
+    imagery-optimization-enabled: ${GIS_IMAGERY_OPTIMIZATION_ENABLED:true}
+    imagery-optimization-min-file-size: ${GIS_IMAGERY_OPTIMIZATION_MIN_FILE_SIZE:536870912}
+    imagery-optimization-min-pixels: ${GIS_IMAGERY_OPTIMIZATION_MIN_PIXELS:100000000}
+    imagery-overview-min-size: ${GIS_IMAGERY_OVERVIEW_MIN_SIZE:512}
     workspaces:
-      default: ${GIS_PROCESSING_WORKSPACE_DEFAULT:workspace/gis}
+      default: ${GIS_PROCESSING_WORKSPACE_DEFAULT:gis/workspaces/default}
   publication:
     # 对外返回的服务地址；经反向代理部署时配置为浏览器可访问的域名。
     public-base-url: ${GIS_PUBLIC_BASE_URL:http://192.168.14.65:8090}

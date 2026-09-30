@@ -201,7 +201,8 @@ public class GisProcessingTaskRecordService {
         result.setTaskNo(task.getTaskNo());
         result.setTaskName(task.getTaskName());
         result.setProcessingType(task.getProcessingType());
-        result.setSourceType(task.getSourceType());
+        result.setSourceType(
+                GisInputSourceType.valueOf(task.getSourceType()).displayName());
         result.setPriority(task.getPriority());
         result.setTotalCount(task.getTotalCount());
         result.setCompletedCount(task.getCompletedCount());

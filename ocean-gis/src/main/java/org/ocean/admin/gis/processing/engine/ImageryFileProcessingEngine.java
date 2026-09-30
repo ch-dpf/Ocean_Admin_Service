@@ -3,6 +3,7 @@ package org.ocean.admin.gis.processing.engine;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
 import org.ocean.admin.gis.dto.ImageryProcessingParameters;
 import org.ocean.admin.gis.imagery.GeoTiffTileGenerator;
+import org.ocean.admin.gis.imagery.GeoTiffPreprocessor;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
 import org.ocean.admin.gis.processing.GisProcessingProgress;
 import org.ocean.admin.gis.processing.GisProcessingType;
@@ -14,14 +15,17 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.function.Consumer;
 
-/** 将通用 GIS 任务适配为纯 Java GeoTIFF 静态影像切片。 */
+/** GeoTIFF 静态影像切片。 */
 public class ImageryFileProcessingEngine implements GisFileProcessingEngine {
 
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("tif", "tiff");
     private final GeoTiffTileGenerator tileGenerator;
+    private final GeoTiffPreprocessor preprocessor;
 
-    public ImageryFileProcessingEngine(GeoTiffTileGenerator tileGenerator) {
+    public ImageryFileProcessingEngine(GeoTiffTileGenerator tileGenerator,
+            GeoTiffPreprocessor preprocessor) {
         this.tileGenerator = tileGenerator;
+        this.preprocessor = preprocessor;
     }
 
     @Override
@@ -47,7 +51,11 @@ public class ImageryFileProcessingEngine implements GisFileProcessingEngine {
         if (!(parameters instanceof ImageryProcessingParameters imageryParameters)) {
             throw new IllegalArgumentException("影像切片任务参数类型不正确");
         }
-        tileGenerator.generate(inputPaths.get(0), workspace.outputPath(),
-                ImageryTileOptions.from(imageryParameters), progressListener);
+        Path source = inputPaths.get(0);
+        ImageryTileOptions options = ImageryTileOptions.from(imageryParameters);
+        GeoTiffPreprocessor.PreparedRaster prepared = preprocessor.prepare(
+                source, options, progressListener);
+        tileGenerator.generate(prepared.path(), source, workspace.outputPath(),
+                options, progressListener);
     }
 }

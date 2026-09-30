@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -87,7 +88,7 @@ public class FileUploadUtil {
 
     /** 直接写入数据集正式目录，写入完成前使用 .part 后缀隔离半成品。 */
     public GisStoredFile store(
-            String dataSetCode,
+            Long dataSetId,
             String taskNo,
             MultipartFile file,
             LongConsumer progressListener) {
@@ -95,9 +96,7 @@ public class FileUploadUtil {
         String originalName = safeOriginalName(file.getOriginalFilename());
         String extension = extensionOf(originalName);
         String storageName = UUID.randomUUID().toString().replace("-", "") + "." + extension;
-        String storageKey = "datasets/" + pathResolver.safeSegment(dataSetCode)
-                + "/" + pathResolver.safeSegment(taskNo)
-                + "/" + storageName;
+        String storageKey = dataSetStorageKey(dataSetId, storageName);
         Path target = resolveKey(storageKey);
         Path partial = target.resolveSibling(target.getFileName() + ".part");
 
@@ -121,35 +120,6 @@ public class FileUploadUtil {
             deleteQuietly(partial);
             deleteQuietly(target);
             throw new IllegalStateException("文件存储失败: " + originalName, ex);
-        }
-    }
-
-    /** 将暂存文件移动到数据集正式目录。 */
-    public GisStoredFile commit(String dataSetCode, String taskNo, TempFile stagedFile) {
-        String storageKey = "datasets/" + pathResolver.safeSegment(dataSetCode)
-                + "/" + pathResolver.safeSegment(taskNo)
-                + "/" + pathResolver.safeSegment(stagedFile.getStorageName());
-        Path source = resolveKey(stagedFile.getStagingKey());
-        Path target = resolveKey(storageKey);
-        try {
-            if (!Files.isRegularFile(source)) {
-                throw new IllegalStateException("暂存文件不存在: " + stagedFile.getStagingKey());
-            }
-            Files.createDirectories(target.getParent());
-            try {
-                Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ex) {
-                Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-            }
-            return GisStoredFile.builder()
-                    .storageName(stagedFile.getStorageName())
-                    .storageKey(storageKey)
-                    .storageType("LOCAL")
-                    .sizeBytes(stagedFile.getSizeBytes())
-                    .sha256(stagedFile.getSha256())
-                    .build();
-        } catch (IOException ex) {
-            throw new IllegalStateException("文件转正失败: " + stagedFile.getOriginalName(), ex);
         }
     }
 
@@ -187,6 +157,24 @@ public class FileUploadUtil {
 
     public void deleteStored(String storageKey) {
         delete(resolveKey(storageKey));
+    }
+
+    /** 删除数据集目录，但仅在目录为空时执行。 */
+    public void deleteEmptyDataSetDirectory(Long dataSetId) {
+        Path directory = resolveKey(dataSetDirectoryKey(dataSetId));
+        if (!Files.exists(directory)) {
+            return;
+        }
+        if (!Files.isDirectory(directory)) {
+            throw new IllegalStateException("数据集存储路径不是目录: " + directory);
+        }
+        try {
+            Files.delete(directory);
+        } catch (DirectoryNotEmptyException ignored) {
+            // 数据集仍有文件时保留目录。
+        } catch (IOException ex) {
+            throw new IllegalStateException("清理数据集空目录失败: " + directory, ex);
+        }
     }
 
     /** 解析已入库的本地文件，并阻止存储根目录之外的路径穿越。 */
@@ -234,6 +222,18 @@ public class FileUploadUtil {
 
     private Path resolveKey(String key) {
         return pathResolver.resolveKey(key);
+    }
+
+    private String dataSetStorageKey(Long dataSetId, String storageName) {
+        return dataSetDirectoryKey(dataSetId) + "/"
+                + pathResolver.safeSegment(storageName);
+    }
+
+    private String dataSetDirectoryKey(Long dataSetId) {
+        if (dataSetId == null || dataSetId <= 0) {
+            throw new IllegalArgumentException("数据集ID必须大于0");
+        }
+        return "datasets/" + pathResolver.safeSegment(String.valueOf(dataSetId));
     }
 
     private String copyWithDigest(

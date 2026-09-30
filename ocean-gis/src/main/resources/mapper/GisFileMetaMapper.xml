@@ -83,4 +83,10 @@
           AND deleted = 1
     </delete>
 
+    <select id="countAllByDataSetId" resultType="long">
+        SELECT COUNT(*)
+        FROM ocean_gis.gis_file_meta
+        WHERE data_set_id = #{dataSetId}
+    </select>
+
 </mapper>

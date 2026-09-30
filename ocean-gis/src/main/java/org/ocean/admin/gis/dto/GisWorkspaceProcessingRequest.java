@@ -10,8 +10,11 @@ import tools.jackson.databind.JsonNode;
 public record GisWorkspaceProcessingRequest(
         @NotNull GisProcessingType processingType,
         @NotBlank @Schema(description = "任务名称") String taskName,
-        @NotBlank @Schema(description = "配置的工作空间编码") String workspaceCode,
-        @NotBlank @Schema(description = "工作空间根目录下的相对文件或目录路径") String relativePath,
+        @Schema(description = "配置的工作空间编码，未传或空白时使用 default", defaultValue = "default")
+        String workspaceCode,
+        @Schema(description = "工作空间根目录下的相对文件或目录路径，未传或空白时使用根目录",
+                defaultValue = ".")
+        String relativePath,
         @NotNull
         @Schema(oneOf = {TerrainProcessingParameters.class, ImageryProcessingParameters.class,
                 GisProcessingParameters.VectorProcessingParameters.class})

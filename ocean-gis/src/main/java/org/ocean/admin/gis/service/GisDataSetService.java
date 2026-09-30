@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
+import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.vo.GisDataSetVO;
@@ -28,6 +30,8 @@ import java.util.UUID;
 public class GisDataSetService {
 
     private final GisDataSetMapper gisDataSetMapper;
+    private final GisFileMetaMapper gisFileMetaMapper;
+    private final FileUploadUtil fileUploadUtil;
 
     public void incrementFileCount(Long dataSetId, long increment) {
         if (increment <= 0) {
@@ -155,9 +159,13 @@ public class GisDataSetService {
         if (gisDataSetMapper.selectById(id) == null) {
             throw new IllegalArgumentException("数据集不存在或已删除: " + id);
         }
+        if (gisFileMetaMapper.countAllByDataSetId(id) > 0) {
+            throw new IllegalStateException("数据集下仍存在文件，请先彻底删除全部文件");
+        }
         if (gisDataSetMapper.deleteById(id) != 1) {
             throw new IllegalStateException("数据集删除失败: " + id);
         }
+        fileUploadUtil.deleteEmptyDataSetDirectory(id);
         log.info("删除 GIS 数据集成功: id={}", id);
     }
 

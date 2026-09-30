@@ -197,7 +197,7 @@ public class FileUploadService {
                 validateFileCategory(dataSet, file);
                 String currentFileName = meta.getOriginalName();
                 storedFile = fileUploadUtil.store(
-                        dataSet.getDataSetCode(), taskId, file, copiedBytes ->
+                        dataSet.getId(), taskId, file, copiedBytes ->
                         reportStorageProgress(
                                 record.getRecordNo(),
                                 completedBytesBeforeFile + copiedBytes,

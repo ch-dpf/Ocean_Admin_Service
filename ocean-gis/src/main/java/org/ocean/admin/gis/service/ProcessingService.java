@@ -38,6 +38,8 @@ import java.util.List;
 public class ProcessingService {
     private static final int MAX_FILES = 100;
     private static final long MAX_TOTAL_SIZE = 5L * 1024 * 1024 * 1024;
+    private static final String DEFAULT_WORKSPACE_CODE = "default";
+    private static final String DEFAULT_WORKSPACE_RELATIVE_PATH = ".";
 
     private final GisProcessingStorageService storageService;
     private final GisFileProcessingEngineRegistry engineRegistry;
@@ -60,7 +62,8 @@ public class ProcessingService {
         return submit(new GisSubmitProcessingCommand(GisInputSourceType.WORKSPACE,
                 request.processingType(), request.taskName(),
                 readParameters(request.processingType(), request.parameters()), null,
-                request.workspaceCode(), request.relativePath(), null));
+                defaultIfBlank(request.workspaceCode(), DEFAULT_WORKSPACE_CODE),
+                defaultIfBlank(request.relativePath(), DEFAULT_WORKSPACE_RELATIVE_PATH), null));
     }
 
     public GisBatchProcessingTaskVO submitManaged(GisManagedProcessingRequest request) {
@@ -108,6 +111,10 @@ public class ProcessingService {
             parameters.set(currentName, parameters.get(legacyName));
         }
         parameters.remove(legacyName);
+    }
+
+    private static String defaultIfBlank(String value, String defaultValue) {
+        return value == null || value.isBlank() ? defaultValue : value;
     }
 
     private GisBatchProcessingTaskVO submit(GisSubmitProcessingCommand command) {

@@ -136,6 +136,7 @@ public class GisFileMetaService {
         if (storageKey != null) {
             fileUploadUtil.deleteStored(storageKey);
         }
+        fileUploadUtil.deleteEmptyDataSetDirectory(deletedMeta.getDataSetId());
         log.info("彻底删除回收站 GIS 文件成功: id={}, storageKey={}", id, storageKey);
     }
 
@@ -174,6 +175,10 @@ public class GisFileMetaService {
     public GisFileMetaVO updateFileMeta(GisFileMetaVO reqVO) {
         validateRequest(reqVO, true);
         GisFileMeta existing = getRequired(reqVO.getId());
+        if ("READY".equals(existing.getUploadStatus())
+                && !existing.getDataSetId().equals(reqVO.getDataSetId())) {
+            throw new IllegalArgumentException("已上传成功的文件不允许变更所属数据集");
+        }
         ensureDataSetExists(reqVO.getDataSetId());
 
         String storageType = normalizeUpper(reqVO.getStorageType());

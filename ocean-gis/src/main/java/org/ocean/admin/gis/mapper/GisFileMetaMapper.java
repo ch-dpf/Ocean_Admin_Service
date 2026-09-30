@@ -42,4 +42,7 @@ public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
 
     /** 物理删除回收站中的元数据。 */
     int permanentlyDeleteById(@Param("id") Long id);
+
+    /** 统计数据集中的全部文件元数据，包含回收站记录。 */
+    long countAllByDataSetId(@Param("dataSetId") Long dataSetId);
 }

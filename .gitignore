@@ -7,6 +7,7 @@ logs/
 .env
 .cursor/
 **/src/test/
-uploads/
-processed/
+/gis/uploads/
+/gis/processing/
+/gis/workspaces/
 ocean-gis/tools/mago/mago-3d-terrainer-1.14.2-release.jar

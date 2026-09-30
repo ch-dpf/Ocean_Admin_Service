@@ -1,6 +1,8 @@
 package org.ocean.admin.gis.processing.config;
 
 import org.ocean.admin.gis.imagery.GeoTiffTileGenerator;
+import org.ocean.admin.gis.imagery.GeoTiffOverviewBuilder;
+import org.ocean.admin.gis.imagery.GeoTiffPreprocessor;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.ImageryFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.TerrainFileProcessingEngine;
@@ -20,9 +22,20 @@ public class GisFileProcessingEngineConfiguration {
     }
 
     @Bean
+    public GeoTiffOverviewBuilder geoTiffOverviewBuilder() {
+        return new GeoTiffOverviewBuilder();
+    }
+
+    @Bean
+    public GeoTiffPreprocessor geoTiffPreprocessor(
+            GisProcessingProperties properties, GeoTiffOverviewBuilder overviewBuilder) {
+        return new GeoTiffPreprocessor(properties, overviewBuilder);
+    }
+
+    @Bean
     public GisFileProcessingEngine imageryFileProcessingEngine(
-            GeoTiffTileGenerator tileGenerator) {
-        return new ImageryFileProcessingEngine(tileGenerator);
+            GeoTiffTileGenerator tileGenerator, GeoTiffPreprocessor preprocessor) {
+        return new ImageryFileProcessingEngine(tileGenerator, preprocessor);
     }
 
     @Bean
