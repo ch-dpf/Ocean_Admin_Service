@@ -18,6 +18,9 @@ import javax.imageio.stream.ImageOutputStream;
 import java.awt.image.RenderedImage;
 import java.awt.image.SampleModel;
 import java.awt.image.DataBuffer;
+import java.awt.image.BufferedImage;
+import java.awt.image.ColorModel;
+import java.awt.image.WritableRaster;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -73,7 +76,7 @@ public class GeoTiffOverviewBuilder {
                         if (coverage == null) {
                             throw new IOException("GeoTIFF overview 读取结果为空: " + size);
                         }
-                        RenderedImage image = coverage.getRenderedImage();
+                        BufferedImage image = materialize(coverage.getRenderedImage());
                         writer.writeToSequence(new IIOImage(image, null, null),
                                 writeParameters(writer, image, forceBigTiff));
                     } finally {
@@ -201,6 +204,18 @@ public class GeoTiffOverviewBuilder {
             enableBigTiff(parameters);
         }
         return parameters;
+    }
+
+    private BufferedImage materialize(RenderedImage source) throws IOException {
+        ColorModel colorModel = source.getColorModel();
+        if (colorModel == null) {
+            throw new IOException("GeoTIFF overview 缺少颜色模型");
+        }
+        WritableRaster raster = colorModel.createCompatibleWritableRaster(
+                source.getWidth(), source.getHeight());
+        source.copyData(raster);
+        return new BufferedImage(colorModel, raster,
+                colorModel.isAlphaPremultiplied(), null);
     }
 
     private long estimatedUncompressedSize(GeoTiffReader reader, List<OverviewSize> levels)

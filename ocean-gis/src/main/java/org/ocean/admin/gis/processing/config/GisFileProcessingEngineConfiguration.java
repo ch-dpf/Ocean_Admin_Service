@@ -3,6 +3,7 @@ package org.ocean.admin.gis.processing.config;
 import org.ocean.admin.gis.imagery.GeoTiffTileGenerator;
 import org.ocean.admin.gis.imagery.GeoTiffOverviewBuilder;
 import org.ocean.admin.gis.imagery.GeoTiffPreprocessor;
+import org.ocean.admin.gis.imagery.ImageryPipeline;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.ImageryFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.TerrainFileProcessingEngine;
@@ -33,9 +34,14 @@ public class GisFileProcessingEngineConfiguration {
     }
 
     @Bean
-    public GisFileProcessingEngine imageryFileProcessingEngine(
+    public ImageryPipeline imageryPipeline(
             GeoTiffTileGenerator tileGenerator, GeoTiffPreprocessor preprocessor) {
-        return new ImageryFileProcessingEngine(tileGenerator, preprocessor);
+        return new ImageryPipeline(preprocessor, tileGenerator);
+    }
+
+    @Bean
+    public GisFileProcessingEngine imageryFileProcessingEngine(ImageryPipeline imageryPipeline) {
+        return new ImageryFileProcessingEngine(imageryPipeline);
     }
 
     @Bean

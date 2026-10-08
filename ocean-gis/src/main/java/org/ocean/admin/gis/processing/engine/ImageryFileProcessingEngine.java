@@ -2,8 +2,7 @@ package org.ocean.admin.gis.processing.engine;
 
 import org.ocean.admin.gis.dto.GisProcessingParameters;
 import org.ocean.admin.gis.dto.ImageryProcessingParameters;
-import org.ocean.admin.gis.imagery.GeoTiffTileGenerator;
-import org.ocean.admin.gis.imagery.GeoTiffPreprocessor;
+import org.ocean.admin.gis.imagery.ImageryPipeline;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
 import org.ocean.admin.gis.processing.GisProcessingProgress;
 import org.ocean.admin.gis.processing.GisProcessingType;
@@ -19,13 +18,10 @@ import java.util.function.Consumer;
 public class ImageryFileProcessingEngine implements GisFileProcessingEngine {
 
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("tif", "tiff");
-    private final GeoTiffTileGenerator tileGenerator;
-    private final GeoTiffPreprocessor preprocessor;
+    private final ImageryPipeline imageryPipeline;
 
-    public ImageryFileProcessingEngine(GeoTiffTileGenerator tileGenerator,
-            GeoTiffPreprocessor preprocessor) {
-        this.tileGenerator = tileGenerator;
-        this.preprocessor = preprocessor;
+    public ImageryFileProcessingEngine(ImageryPipeline imageryPipeline) {
+        this.imageryPipeline = imageryPipeline;
     }
 
     @Override
@@ -53,9 +49,6 @@ public class ImageryFileProcessingEngine implements GisFileProcessingEngine {
         }
         Path source = inputPaths.get(0);
         ImageryTileOptions options = ImageryTileOptions.from(imageryParameters);
-        GeoTiffPreprocessor.PreparedRaster prepared = preprocessor.prepare(
-                source, options, progressListener);
-        tileGenerator.generate(prepared.path(), source, workspace.outputPath(),
-                options, progressListener);
+        imageryPipeline.execute(source, workspace, options, progressListener);
     }
 }

@@ -22,9 +22,7 @@ public class GisProcessingProperties {
     private String imageryCachePath = "imagery/cache";
     private boolean imageryOptimizationEnabled = true;
     @Positive
-    private long imageryOptimizationMinFileSize = 512L * 1024 * 1024;
-    @Positive
-    private long imageryOptimizationMinPixels = 100_000_000L;
+    private long imageryPreprocessingMaxWindowPixels = 16_777_216L;
     @Positive
     private int imageryOverviewMinSize = 512;
     private Map<String, String> workspaces = new LinkedHashMap<>();
