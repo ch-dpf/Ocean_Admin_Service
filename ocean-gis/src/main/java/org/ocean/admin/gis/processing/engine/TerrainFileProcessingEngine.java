@@ -2,7 +2,7 @@ package org.ocean.admin.gis.processing.engine;
 
 import org.ocean.admin.gis.dto.GisProcessingParameters;
 import org.ocean.admin.gis.dto.TerrainProcessingParameters;
-import org.ocean.admin.gis.processing.GisProcessingProgress;
+import org.ocean.admin.gis.progress.TaskProgressModel;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.terrain.engine.TerrainEngine;
@@ -44,7 +44,7 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
     @Override
     public void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
             GisProcessingParameters parameters,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         terrainEngine.generate(
                 new TerrainGenerationRequest(inputPaths, workspace.outputPath(),
                         workspace.tempPath(), workspace.logPath(), options(parameters)),
@@ -54,7 +54,7 @@ public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
     @Override
     public void processFolder(Path inputFolder, GisProcessingWorkspace workspace,
             GisProcessingParameters parameters,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         terrainEngine.generate(
                 new TerrainGenerationRequest(
                         java.util.List.of(inputFolder),

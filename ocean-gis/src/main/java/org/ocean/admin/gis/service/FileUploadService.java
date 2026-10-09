@@ -11,6 +11,7 @@ import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileOptRecord;
 import org.ocean.admin.gis.entity.GisFileOptRecordItem;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
+import org.ocean.admin.gis.progress.TaskProgressModel;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.kernel.audit.CurrentOperator;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -114,7 +115,8 @@ public class FileUploadService {
             asyncTaskService.registerTask(
                     taskId, "Gis文件批量导入", totalCount, "GIS_IMPORT");
             asyncTaskService.updateProgress(
-                    taskId, 0, "waiting_upload", "等待上传文件");
+                    taskId, TaskProgressModel.percentage(
+                            0, "waiting_upload", "等待上传文件"));
         } catch (RuntimeException ex) {
             if (sessionCreated) {
                 try {
@@ -186,7 +188,8 @@ public class FileUploadService {
         long processedBytes = 0L;
         int[] lastStorageProgress = {0};
         asyncTaskService.updateProgress(
-                taskId, 0, "storing", "开始存储文件");
+                taskId, TaskProgressModel.percentage(
+                        0, "storing", "开始存储文件"));
 
         for (int index = 0; index < files.size(); index++) {
             MultipartFile file = files.get(index);
@@ -251,14 +254,13 @@ public class FileUploadService {
                     "READY".equals(meta.getUploadStatus()) ? "SUCCESS" : "FAILED");
             recordItems.add(recordItem);
             processedBytes += file == null ? 0L : Math.max(0L, file.getSize());
-            asyncTaskService.updateProgressCounts(
-                    taskId,
+            asyncTaskService.updateProgress(taskId, TaskProgressModel.counts(
                     completedCount,
                     failedCount,
                     storageProgressForBytes(processedBytes, totalBytes),
                     "storing",
                     "文件处理完成：" + (completedCount + failedCount) + "/" + files.size()
-                            + "，当前文件：" + meta.getOriginalName());
+                            + "，当前文件：" + meta.getOriginalName()));
         }
 
         try {
@@ -284,9 +286,9 @@ public class FileUploadService {
             throw ex;
         }
 
-        asyncTaskService.updateProgressCounts(
-                taskId, completedCount, failedCount, STORAGE_PROGRESS_END,
-                "stored", "文件存储和元数据建档完成");
+        asyncTaskService.updateProgress(taskId, TaskProgressModel.counts(
+                completedCount, failedCount, STORAGE_PROGRESS_END,
+                "stored", "文件存储和元数据建档完成"));
         asyncTaskService.finalizeTaskResult(
                 taskId,
                 failedCount == 0
@@ -457,12 +459,10 @@ public class FileUploadService {
         }
         lastProgress[0] = progress;
         asyncTaskService.updateProgress(
-                taskId,
-                progress,
-                "storing",
+                taskId, TaskProgressModel.percentage(progress, "storing",
                 "正在存储文件：" + fileName + "（"
                         + formatBytes(Math.min(stagedBytes, totalBytes)) + "/"
-                        + formatBytes(totalBytes) + "）");
+                        + formatBytes(totalBytes) + "）"));
     }
 
     private int storageProgressForBytes(long stagedBytes, long totalBytes) {

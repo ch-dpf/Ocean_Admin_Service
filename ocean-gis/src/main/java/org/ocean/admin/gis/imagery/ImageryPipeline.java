@@ -1,7 +1,7 @@
 package org.ocean.admin.gis.imagery;
 
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.processing.GisProcessingProgress;
+import org.ocean.admin.gis.progress.TaskProgressModel;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 
 import java.nio.file.Path;
@@ -22,7 +22,7 @@ public class ImageryPipeline {
 
     public void execute(Path source, GisProcessingWorkspace workspace,
             ImageryTileOptions options,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         long pipelineStartedAt = System.nanoTime();
         PipelinePhase phase = PipelinePhase.PREPROCESSING;
         boolean successful = false;
@@ -48,7 +48,7 @@ public class ImageryPipeline {
 
     private GeoTiffPreprocessor.PreparedRaster preprocessRaster(
             Path source, ImageryTileOptions options,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         long startedAt = System.nanoTime();
         log.info("[Imagery][Pipeline] 开始预处理阶段，源文件: {}", source);
         GeoTiffPreprocessor.PreparedRaster prepared = preprocessor.prepare(
@@ -61,7 +61,7 @@ public class ImageryPipeline {
 
     private void runTilingProcess(GeoTiffPreprocessor.PreparedRaster prepared,
             Path source, GisProcessingWorkspace workspace, ImageryTileOptions options,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         long startedAt = System.nanoTime();
         log.info("[Imagery][Pipeline] 开始切片阶段，处理分块数: {}, 输出目录: {}",
                 prepared.parts().size(), workspace.outputPath());

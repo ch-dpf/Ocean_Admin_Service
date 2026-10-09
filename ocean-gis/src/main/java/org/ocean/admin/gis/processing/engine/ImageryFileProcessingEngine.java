@@ -4,7 +4,7 @@ import org.ocean.admin.gis.dto.GisProcessingParameters;
 import org.ocean.admin.gis.dto.ImageryProcessingParameters;
 import org.ocean.admin.gis.imagery.ImageryPipeline;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
-import org.ocean.admin.gis.processing.GisProcessingProgress;
+import org.ocean.admin.gis.progress.TaskProgressModel;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 
@@ -40,7 +40,7 @@ public class ImageryFileProcessingEngine implements GisFileProcessingEngine {
 
     @Override
     public void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
-            GisProcessingParameters parameters, Consumer<GisProcessingProgress> progressListener) {
+            GisProcessingParameters parameters, Consumer<TaskProgressModel> progressListener) {
         if (inputPaths == null || inputPaths.size() != 1) {
             throw new IllegalArgumentException("首期影像切片每个任务仅支持一个 GeoTIFF");
         }

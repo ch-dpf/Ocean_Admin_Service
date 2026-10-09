@@ -2,7 +2,7 @@ package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisProcessingTask;
-import org.ocean.admin.gis.processing.GisProcessingProgress;
+import org.ocean.admin.gis.progress.TaskProgressModel;
 import org.springframework.stereotype.Service;
 
 import java.util.function.Function;
@@ -27,11 +27,12 @@ public class GisProcessingTaskLifecycleService {
 
     public void start(Long taskId, String taskNo, int percent, String message) {
         taskService.markRunning(taskId);
-        progressService.updateProgress(taskNo, percent, "processing", message);
+        progressService.updateProgress(
+                taskNo, TaskProgressModel.percentage(percent, "processing", message));
     }
 
-    public void reportProgress(String taskNo, GisProcessingProgress progress) {
-        progressService.updateProcessingProgress(taskNo, progress);
+    public void reportProgress(String taskNo, TaskProgressModel progress) {
+        progressService.updateProgress(taskNo, progress);
     }
 
     public void recordResult(Long taskId, String taskNo, boolean success) {
@@ -40,7 +41,7 @@ public class GisProcessingTaskLifecycleService {
         } else {
             taskService.incrementFailed(taskId);
         }
-        progressService.updateProgress(taskNo, success);
+        progressService.updateProgress(taskNo, TaskProgressModel.itemResult(success));
     }
 
     public GisProcessingTask finish(Long taskId, String taskNo,

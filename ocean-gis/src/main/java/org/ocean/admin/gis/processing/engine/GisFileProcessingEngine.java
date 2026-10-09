@@ -1,6 +1,6 @@
 package org.ocean.admin.gis.processing.engine;
 
-import org.ocean.admin.gis.processing.GisProcessingProgress;
+import org.ocean.admin.gis.progress.TaskProgressModel;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
@@ -18,13 +18,13 @@ public interface GisFileProcessingEngine {
 
     /** 处理多个输入文件并生成一个统一瓦片集。 */
     default void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         throw new UnsupportedOperationException(type().displayName() + "引擎不支持文件列表处理");
     }
 
     /** 使用任务参数处理多个输入文件。 */
     default void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
-            GisProcessingParameters parameters, Consumer<GisProcessingProgress> progressListener) {
+            GisProcessingParameters parameters, Consumer<TaskProgressModel> progressListener) {
         process(inputPaths, workspace, progressListener);
     }
 
@@ -32,14 +32,14 @@ public interface GisFileProcessingEngine {
     default void processFolder(
             Path inputFolder,
             GisProcessingWorkspace workspace,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         throw new UnsupportedOperationException(type().displayName() + "引擎不支持目录输入");
     }
 
     /** 使用任务参数处理目录输入。 */
     default void processFolder(Path inputFolder, GisProcessingWorkspace workspace,
             GisProcessingParameters parameters,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         processFolder(inputFolder, workspace, progressListener);
     }
 }

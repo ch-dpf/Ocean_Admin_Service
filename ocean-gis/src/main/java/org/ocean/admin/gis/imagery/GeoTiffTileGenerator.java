@@ -18,7 +18,7 @@ import org.geotools.referencing.CRS;
 import org.geotools.renderer.lite.RendererUtilities;
 import org.geotools.renderer.lite.gridcoverage2d.GridCoverageRenderer;
 import org.geotools.styling.StyleBuilder;
-import org.ocean.admin.gis.processing.GisProcessingProgress;
+import org.ocean.admin.gis.progress.TaskProgressModel;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -66,12 +66,12 @@ public class GeoTiffTileGenerator {
     }
 
     public void generate(Path input, Path output, ImageryTileOptions options,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         generate(input, input, output, options, progressListener);
     }
 
     public void generate(Path input, Path metadataSource, Path output, ImageryTileOptions options,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         Path source = input.toAbsolutePath().normalize();
         GeoTiffReader reader = null;
         try {
@@ -94,9 +94,9 @@ public class GeoTiffTileGenerator {
 
     public void generate(GeoTiffPreprocessor.PreparedRaster prepared, Path metadataSource,
             Path output, ImageryTileOptions options,
-            Consumer<GisProcessingProgress> progressListener) {
+            Consumer<TaskProgressModel> progressListener) {
         long startedAt = System.nanoTime();
-        progressListener.accept(GisProcessingProgress.indeterminate(
+        progressListener.accept(TaskProgressModel.indeterminate(
                 "analyzing", "正在分析影像范围和切片层级"));
         Path originalSource = metadataSource.toAbsolutePath().normalize();
         Path target = output.toAbsolutePath().normalize();
@@ -136,7 +136,7 @@ public class GeoTiffTileGenerator {
                     rasterSource.width(), rasterSource.height(), rasterSource.bounds(),
                     targetBounds, zooms.min(), zooms.max(), tileCount,
                     elapsedMillis(analyzingStartedAt));
-            progressListener.accept(GisProcessingProgress.determinate(
+            progressListener.accept(TaskProgressModel.workload(
                     "generating", 0, tileCount,
                     "影像切片工作量已确定，共" + tileCount + "张瓦片"));
 
@@ -180,7 +180,7 @@ public class GeoTiffTileGenerator {
                                 >= PROGRESS_REPORT_INTERVAL_NANOS) {
                             lastReportedPercent = currentPercent;
                             lastReportNanos = currentNanos;
-                            progressListener.accept(GisProcessingProgress.determinate(
+                            progressListener.accept(TaskProgressModel.workload(
                                     "generating", completed, tileCount,
                                     "正在生成影像瓦片："
                                             + completed + "/" + tileCount + "张"));
@@ -197,7 +197,7 @@ public class GeoTiffTileGenerator {
                         zoom, completed - zoomCompletedBefore, completed, tileCount,
                         elapsedMillis(zoomStartedAt));
             }
-            progressListener.accept(GisProcessingProgress.determinate(
+            progressListener.accept(TaskProgressModel.workload(
                     "finalizing", completed, tileCount, "正在写入影像切片元数据"));
             long metadataStartedAt = System.nanoTime();
             log.info("[Imagery][Tile] 开始写入切片元数据，输出目录: {}", target);

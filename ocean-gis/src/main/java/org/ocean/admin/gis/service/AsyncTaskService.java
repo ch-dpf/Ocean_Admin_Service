@@ -1,7 +1,7 @@
 package org.ocean.admin.gis.service;
 
 import org.ocean.admin.gis.dto.TaskProgressMessage;
-import org.ocean.admin.gis.processing.GisProcessingProgress;
+import org.ocean.admin.gis.progress.TaskProgressModel;
 import org.ocean.admin.gis.websocket.TaskWebSocketHandler;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -28,7 +28,7 @@ import java.util.stream.Collectors;
 public class AsyncTaskService {
 
     private static final String TASK_REDIS_KEY_PREFIX = "ocean-admin:async-task:";
-    private static final Duration TASK_REDIS_TTL = Duration.ofHours(24);
+    private static final Duration RUNNING_TASK_REDIS_TTL = Duration.ofHours(6);
 
     // 存储所有正在进行的任务
     private final Map<String, TaskInfo> taskMap = new ConcurrentHashMap<>();
@@ -45,6 +45,9 @@ public class AsyncTaskService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 从Redis恢复任务
+     */
     @PostConstruct
     public void restoreTasksFromRedis() {
         if (redisTemplate == null) {
@@ -65,9 +68,6 @@ public class AsyncTaskService {
                 TaskInfo info = objectMapper.readValue(raw, TaskInfo.class);
                 if (info.getTaskId() == null || info.getTaskId().isBlank()) {
                     continue;
-                }
-                if (info.getProgressMode() == null || info.getProgressMode().isBlank()) {
-                    info.setProgressMode(GisProcessingProgress.ProgressMode.DETERMINATE.name());
                 }
                 taskMap.put(info.getTaskId(), info);
                 restored++;
@@ -103,7 +103,7 @@ public class AsyncTaskService {
         if (completedCount < 0 || failedCount < 0 || completedCount + failedCount > totalCount) {
             throw new IllegalArgumentException("任务初始计数不合法");
         }
-        initializeTask(taskId, taskName, totalCount, taskType, null, null, completedCount, failedCount);
+        initializeTask(taskId, taskName, totalCount, taskType, completedCount, failedCount);
         return taskId;
     }
 
@@ -111,8 +111,6 @@ public class AsyncTaskService {
                                 String taskName,
                                 int totalCount,
                                 String taskType,
-                                String fileType,
-                                Long fileId,
                                 int completedCount,
                                 int failedCount) {
         TaskInfo taskInfo = new TaskInfo();
@@ -124,55 +122,15 @@ public class AsyncTaskService {
         taskInfo.setStatus("running");
         taskInfo.setStartTime(LocalDateTime.now());
         taskInfo.setTaskType(taskType != null ? taskType : "GENERAL");
-        taskInfo.setFileType(fileType != null ? fileType.toUpperCase() : null);
-        taskInfo.setFileId(fileId);
         taskInfo.setStage("queued");
         taskInfo.setMessage("任务已创建");
         taskInfo.setManualProgress(null);
-        taskInfo.setProgressMode(GisProcessingProgress.ProgressMode.INDETERMINATE.name());
+        taskInfo.setProgressMode(TaskProgressModel.ProgressMode.INDETERMINATE.name());
 
         taskMap.put(taskId, taskInfo);
         persistTask(taskInfo);
         log.info("创建任务: taskId={}, taskName={}, totalCount={}", taskId, taskName, totalCount);
         
-    }
-
-    /**
-     * 按百分比更新任务进度（用于长任务实时上报）
-     */
-    public void updateTaskProgress(String taskId,
-                                   int progress,
-                                   String stage,
-                                   String message,
-                                   String status,
-                                   boolean done) {
-        TaskInfo taskInfo = taskMap.get(taskId);
-        if (taskInfo == null) {
-            return;
-        }
-
-        int normalizedProgress = Math.max(0, Math.min(100, progress));
-        taskInfo.setManualProgress(normalizedProgress);
-        if (stage != null) {
-            taskInfo.setStage(stage);
-        }
-        if (message != null) {
-            taskInfo.setMessage(message);
-        }
-        if (status != null && !status.isEmpty()) {
-            taskInfo.setStatus(status);
-        }
-
-        if (done) {
-            taskInfo.setCompletedCount(taskInfo.getTotalCount());
-            taskInfo.setFailedCount(0);
-            taskInfo.setManualProgress(100);
-            taskInfo.setProgressMode(GisProcessingProgress.ProgressMode.DETERMINATE.name());
-            taskInfo.setStatus("completed");
-            taskInfo.setEndTime(LocalDateTime.now());
-        }
-
-        pushProgress(taskId);
     }
 
     /**
@@ -184,8 +142,12 @@ public class AsyncTaskService {
             return;
         }
         synchronized (taskInfo) {
+            if (taskInfo.getCompletedCount() + taskInfo.getFailedCount()
+                    != taskInfo.getTotalCount()) {
+                throw new IllegalStateException("任务仍有未处理项，不能进入终态");
+            }
             taskInfo.setManualProgress(100);
-            taskInfo.setProgressMode(GisProcessingProgress.ProgressMode.DETERMINATE.name());
+            taskInfo.setProgressMode(TaskProgressModel.ProgressMode.DETERMINATE.name());
             taskInfo.setStage("completed");
             taskInfo.setMessage(message != null && !message.isBlank() ? message : "任务结束");
             if (taskInfo.getFailedCount() == 0) {
@@ -199,7 +161,7 @@ public class AsyncTaskService {
             }
             taskInfo.setEndTime(LocalDateTime.now());
         }
-        pushProgress(taskId);
+        pushTerminalProgress(taskId);
     }
 
     /** 将任务标记为整体失败。 */
@@ -222,95 +184,11 @@ public class AsyncTaskService {
             taskInfo.setMessage(message != null && !message.isBlank() ? message : "任务失败");
             taskInfo.setEndTime(LocalDateTime.now());
         }
-        pushProgress(taskId);
+        pushTerminalProgress(taskId);
     }
 
-    /**
-     * 更新任务进度
-     */
-    public void updateProgress(String taskId, boolean success) {
-        TaskInfo taskInfo = taskMap.get(taskId);
-        if (taskInfo != null) {
-            synchronized (taskInfo) {
-                if (isTerminal(taskInfo.getStatus())) {
-                    return;
-                }
-                if (!taskInfo.isProcessingProgressManaged()) {
-                    taskInfo.setManualProgress(null);
-                }
-                if (success) {
-                    taskInfo.setCompletedCount(taskInfo.getCompletedCount() + 1);
-                } else {
-                    taskInfo.setFailedCount(taskInfo.getFailedCount() + 1);
-                }
-            }
-            pushProgress(taskId);
-            log.debug("📤 推送任务进度: taskId={}, status={}, progress={}%", taskId, taskInfo.getStatus(), taskInfo.getProgress());
-        }
-    }
-
-    public void updateProgressCounts(
-            String taskId,
-            int completedCount,
-            int failedCount,
-            int progress,
-            String stage,
-            String message) {
-        TaskInfo taskInfo = taskMap.get(taskId);
-        if (taskInfo == null) {
-            return;
-        }
-        synchronized (taskInfo) {
-            if (isTerminal(taskInfo.getStatus())) {
-                return;
-            }
-            if (completedCount < 0 || failedCount < 0
-                    || completedCount + failedCount > taskInfo.getTotalCount()) {
-                throw new IllegalArgumentException("任务进度计数不合法");
-            }
-            taskInfo.setCompletedCount(completedCount);
-            taskInfo.setFailedCount(failedCount);
-            taskInfo.setManualProgress(Math.max(0, Math.min(100, progress)));
-            taskInfo.setStage(stage);
-            taskInfo.setMessage(message);
-            taskInfo.setStatus("running");
-        }
-        pushProgress(taskId);
-    }
-
-    /**
-     * 手动更新任务进度
-     */
-    public void updateProgress(String taskId, int progress, String stage, String message) {
-        TaskInfo taskInfo = taskMap.get(taskId);
-        if (taskInfo == null) {
-            return;
-        }
-
-        // 如果任务已经完成，不再更新和推送
-        if (isTerminal(taskInfo.getStatus())) {
-            return;
-        }
-
-        int safeProgress = Math.max(taskInfo.getProgress(), Math.max(0, Math.min(100, progress)));
-
-        taskInfo.setManualProgress(safeProgress);
-        taskInfo.setProgressMode(GisProcessingProgress.ProgressMode.DETERMINATE.name());
-        taskInfo.setStage(stage);
-        taskInfo.setMessage(message);
-
-        if (!"running".equals(taskInfo.getStatus())) {
-            taskInfo.setStatus("running");
-        }
-
-        pushProgress(taskId);
-
-        log.debug("推送任务进度: taskId={}, stage={}, progress={}%, message={}",
-                taskId, stage, taskInfo.getProgress(), message);
-    }
-
-    /** 合并切片引擎的结构化工作量，保证百分比不回退。 */
-    public void updateProcessingProgress(String taskId, GisProcessingProgress progress) {
+    /** 接收文件上传与 GIS 处理引擎共用的进度更新。 */
+    public void updateProgress(String taskId, TaskProgressModel progress) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo == null || progress == null) {
             return;
@@ -319,19 +197,66 @@ public class AsyncTaskService {
             if (isTerminal(taskInfo.getStatus())) {
                 return;
             }
-            taskInfo.setStage(progress.phase());
-            taskInfo.setMessage(progress.message());
-            taskInfo.setProgressMode(progress.mode().name());
-            taskInfo.setProcessingProgressManaged(true);
-            if (progress.mode() == GisProcessingProgress.ProgressMode.DETERMINATE) {
-                taskInfo.setCompletedUnits(progress.completedUnits());
-                taskInfo.setTotalUnits(progress.totalUnits());
-                taskInfo.setManualProgress(Math.max(
-                        taskInfo.getProgress(), progress.processingPercent()));
+            switch (progress.updateType()) {
+                case PERCENTAGE -> applyPercentage(taskInfo, progress);
+                case COUNTS -> applyCounts(taskInfo, progress);
+                case ITEM_RESULT -> applyItemResult(taskInfo, progress);
+                case WORKLOAD -> applyWorkload(taskInfo, progress);
             }
             taskInfo.setStatus("running");
         }
         pushProgress(taskId);
+        log.debug("推送任务进度: taskId={}, stage={}, progress={}%, message={}", taskId,
+                taskInfo.getStage(), taskInfo.getProgress(), taskInfo.getMessage());
+    }
+
+    private void applyPercentage(TaskInfo taskInfo, TaskProgressModel progress) {
+        taskInfo.setManualProgress(Math.max(taskInfo.getProgress(), progress.progress()));
+        taskInfo.setProgressMode(TaskProgressModel.ProgressMode.DETERMINATE.name());
+        taskInfo.setStage(progress.stage());
+        taskInfo.setMessage(progress.message());
+    }
+
+    private void applyCounts(TaskInfo taskInfo, TaskProgressModel progress) {
+        if (progress.completedCount() + progress.failedCount() > taskInfo.getTotalCount()) {
+            throw new IllegalArgumentException("任务进度计数不合法");
+        }
+        taskInfo.setCompletedCount(progress.completedCount());
+        taskInfo.setFailedCount(progress.failedCount());
+        taskInfo.setManualProgress(progress.progress());
+        taskInfo.setProgressMode(TaskProgressModel.ProgressMode.DETERMINATE.name());
+        taskInfo.setStage(progress.stage());
+        taskInfo.setMessage(progress.message());
+    }
+
+    private void applyItemResult(TaskInfo taskInfo, TaskProgressModel progress) {
+        int completedCount = taskInfo.getCompletedCount() + (progress.success() ? 1 : 0);
+        int failedCount = taskInfo.getFailedCount() + (progress.success() ? 0 : 1);
+        if (completedCount + failedCount > taskInfo.getTotalCount()) {
+            throw new IllegalStateException("任务处理结果数量超过任务总数");
+        }
+        taskInfo.setCompletedCount(completedCount);
+        taskInfo.setFailedCount(failedCount);
+        if (!taskInfo.isProcessingProgressManaged()) {
+            taskInfo.setManualProgress(null);
+        }
+        taskInfo.setProgressMode(TaskProgressModel.ProgressMode.DETERMINATE.name());
+    }
+
+    private void applyWorkload(TaskInfo taskInfo, TaskProgressModel progress) {
+        taskInfo.setStage(progress.stage());
+        taskInfo.setMessage(progress.message());
+        taskInfo.setProgressMode(progress.progressMode().name());
+        taskInfo.setProcessingProgressManaged(true);
+        if (progress.progressMode() == TaskProgressModel.ProgressMode.DETERMINATE) {
+            taskInfo.setCompletedUnits(progress.completedUnits());
+            taskInfo.setTotalUnits(progress.totalUnits());
+            taskInfo.setManualProgress(Math.max(
+                    taskInfo.getProgress(), progress.processingPercent()));
+        } else {
+            taskInfo.setCompletedUnits(null);
+            taskInfo.setTotalUnits(null);
+        }
     }
 
     /**
@@ -342,12 +267,23 @@ public class AsyncTaskService {
     }
 
     private void pushProgress(String taskId, String eventType) {
+        pushProgress(taskId, eventType, true);
+    }
+
+    private void pushTerminalProgress(String taskId) {
+        pushProgress(taskId, "task_update", false);
+        deleteTaskFromRedis(taskId);
+    }
+
+    private void pushProgress(String taskId, String eventType, boolean persist) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo != null) {
             TaskProgressMessage message = new TaskProgressMessage();
             synchronized (taskInfo) {
                 taskInfo.setVersion(taskInfo.getVersion() + 1);
-                persistTask(taskInfo);
+                if (persist) {
+                    persistTask(taskInfo);
+                }
                 message.setEventType(eventType == null || eventType.isBlank() ? "task_update" : eventType);
                 message.setTaskId(taskInfo.getTaskId());
                 message.setTaskName(taskInfo.getTaskName());
@@ -420,7 +356,7 @@ public class AsyncTaskService {
         try {
             String key = TASK_REDIS_KEY_PREFIX + taskInfo.getTaskId();
             String json = objectMapper.writeValueAsString(taskInfo);
-            redisTemplate.opsForValue().set(key, json, TASK_REDIS_TTL);
+            redisTemplate.opsForValue().set(key, json, RUNNING_TASK_REDIS_TTL);
         } catch (Exception e) {
             log.debug("任务进度写入Redis失败: taskId={}, error={}", taskInfo.getTaskId(), e.getMessage());
         }

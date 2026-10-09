@@ -162,6 +162,9 @@ public class GisProcessingTaskRecordService {
     @Transactional(rollbackFor = Exception.class)
     public GisProcessingTask finish(Long taskId) {
         GisProcessingTask task = getRequired(taskId);
+        if (task.getCompletedCount() + task.getFailedCount() != task.getTotalCount()) {
+            throw new IllegalStateException("GIS处理任务仍有未处理项，不能进入终态: " + taskId);
+        }
         String status = task.getFailedCount() == 0 ? "COMPLETED"
                 : task.getCompletedCount() == 0 ? "FAILED" : "PARTIAL_FAILED";
         int updated = taskMapper.update(null,
