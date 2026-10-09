@@ -120,8 +120,7 @@ public class ProcessingService {
     private GisBatchProcessingTaskVO submit(GisSubmitProcessingCommand command) {
         validateCommand(command);
         GisFileProcessingEngine engine = engineRegistry.require(command.processingType());
-        String taskNo = GisProcessingTaskFactory.generateTaskNo(
-                "GIS_" + command.processingType().name() + "_PROCESS");
+        String taskNo = GisProcessingTaskFactory.generateTaskNo(command.processingType());
         GisProcessingWorkspace workspace = storageService.taskWorkspace(
                 command.processingType(), taskNo);
         GisProcessingInputResolver resolver = inputResolverRegistry.require(command.sourceType());

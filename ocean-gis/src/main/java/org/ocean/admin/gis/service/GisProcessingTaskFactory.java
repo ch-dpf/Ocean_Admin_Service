@@ -2,6 +2,7 @@ package org.ocean.admin.gis.service;
 
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import org.ocean.admin.gis.entity.GisProcessingTask;
+import org.ocean.admin.gis.processing.GisProcessingType;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -35,14 +36,18 @@ public final class GisProcessingTaskFactory {
         return task;
     }
 
-    public static String generateTaskNo(String prefix) {
-        return generateTaskNo(prefix, LocalDateTime.now());
+    public static String generateTaskNo(GisProcessingType type) {
+        return generateTaskNo(type, LocalDateTime.now());
     }
 
-    public static String generateTaskNo(String prefix, LocalDateTime timestamp) {
-        if (prefix == null || !prefix.matches("GIS_[A-Z0-9_]+")) {
-            throw new IllegalArgumentException("非法 GIS 任务编号前缀");
+    public static String generateTaskNo(GisProcessingType type, LocalDateTime timestamp) {
+        if (type == null) {
+            throw new IllegalArgumentException("GIS 处理类型不能为空");
         }
+        if (timestamp == null) {
+            throw new IllegalArgumentException("GIS 任务时间戳不能为空");
+        }
+        String prefix = type.name().toLowerCase(Locale.ROOT);
         return prefix + "_" + timestamp.format(TIMESTAMP) + "_"
                 + UUID.randomUUID().toString().replace("-", "")
                 .substring(0, 12).toUpperCase(Locale.ROOT);
