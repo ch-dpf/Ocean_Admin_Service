@@ -16,7 +16,6 @@ public record ImageryTileOptions(
 
     public static final int TILE_SIZE = 256;
     public static final int MAX_ZOOM = 22;
-    public static final long MAX_TILE_COUNT = 100_000;
 
     public enum OutputFormat {
         PNG("png", "image/png"),

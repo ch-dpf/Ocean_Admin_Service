@@ -58,7 +58,7 @@ import java.util.stream.Stream;
 @Slf4j
 public class GeoTiffPreprocessor {
 
-    private static final String CACHE_VERSION = "v6-direct-window-materialized";
+    private static final String CACHE_VERSION = "v8-target-derived-read-window";
     private static final String COMPLETE_MARKER = "complete.marker";
     private static final int TIFF_TILE_SIZE = 256;
     private static final int MAX_ZOOM = ImageryTileOptions.MAX_ZOOM;
@@ -94,6 +94,7 @@ public class GeoTiffPreprocessor {
         GeoTiffReader reader = null;
         try {
             reader = new GeoTiffReader(source.toFile());
+            // 检查源栅格信息
             RasterInspection inspection = inspect(source, reader, options);
             log.info("[Imagery][Preprocess] 影像检查完成，尺寸: {}x{}，波段: {}，内部块: {}x{}，"
                             + "已有概览: {}，需要重投影: {}",
@@ -101,6 +102,7 @@ public class GeoTiffPreprocessor {
                     inspection.blockWidth(), inspection.blockHeight(),
                     inspection.hasOverviews(), inspection.reprojectionRequired());
             if (!enabled) {
+                // 如果未启用，则直接返回源栅格信息
                 return PreparedRaster.direct(source, inspection.sourceBounds(),
                         inspection.width(), inspection.height());
             }
@@ -126,6 +128,7 @@ public class GeoTiffPreprocessor {
         }
     }
 
+//    核心方法：持有文件锁的情况下，安全地生成或复用影像分块优化缓存，并提供了进度反馈和异常清理
     private PreparedRaster prepareLocked(Path source, GeoTiffReader reader,
             RasterInspection inspection, ImageryTileOptions options,
             Consumer<GisProcessingProgress> progressListener, String key,
@@ -289,13 +292,39 @@ public class GeoTiffPreprocessor {
         if (colorModel == null) {
             throw new IOException("重投影影像缺少颜色模型");
         }
-        WritableRaster raster = colorModel.createCompatibleWritableRaster(
+        WritableRaster canonicalRaster = colorModel.createCompatibleWritableRaster(
                 source.getWidth(), source.getHeight());
-        source.copyData(raster);
-        BufferedImage image = new BufferedImage(colorModel, raster,
+        WritableRaster sourceAlignedRaster = canonicalRaster.createWritableTranslatedChild(
+                source.getMinX(), source.getMinY());
+        source.copyData(sourceAlignedRaster);
+        BufferedImage image = new BufferedImage(colorModel, canonicalRaster,
                 colorModel.isAlphaPremultiplied(), null);
+        GridGeometry2D canonicalGeometry = coverage.getGridGeometry().toCanonical();
+        validateCanonicalGrid(source, image, canonicalGeometry);
         return new GridCoverageFactory().create(coverage.getName(), image,
-                coverage.getGridGeometry(), coverage.getSampleDimensions(), null, null);
+                canonicalGeometry, coverage.getSampleDimensions(), null, null);
+    }
+
+    private void validateCanonicalGrid(RenderedImage source, BufferedImage image,
+            GridGeometry2D geometry) throws IOException {
+        GridEnvelope2D range = geometry.getGridRange2D();
+        if (image.getMinX() != range.x || image.getMinY() != range.y
+                || image.getWidth() != range.width || image.getHeight() != range.height) {
+            throw new IOException("重投影影像规范化后网格不一致，源图像范围: "
+                    + imageRange(source) + "，规范化图像范围: " + imageRange(image)
+                    + "，规范化网格范围: " + gridRange(range));
+        }
+    }
+
+    private String imageRange(RenderedImage image) {
+        return "[x=" + image.getMinX() + ".." + (image.getMinX() + image.getWidth())
+                + ", y=" + image.getMinY() + ".." + (image.getMinY() + image.getHeight())
+                + ")";
+    }
+
+    private String gridRange(GridEnvelope2D range) {
+        return "[x=" + range.x + ".." + (range.x + range.width)
+                + ", y=" + range.y + ".." + (range.y + range.height) + ")";
     }
 
     private ReadPlan createReadPlan(RasterInspection inspection,
@@ -334,7 +363,6 @@ public class GeoTiffPreprocessor {
                 GridEnvelope2D core = new GridEnvelope2D(x, y,
                         Math.min(windowWidth, width - x),
                         Math.min(windowHeight, height - y));
-                GridEnvelope2D read = expand(core, interpolationRadius, width, height);
                 ReferencedEnvelope coreEnvelope = gridEnvelope(
                         inspection.sourceGrid(), core, inspection.sourceCrs());
                 ReferencedEnvelope transformed = clampTarget(
@@ -342,6 +370,8 @@ public class GeoTiffPreprocessor {
                         options.targetCrs());
                 GridGeometry2D partGrid = alignedPartGrid(globalTargetGrid, transformed,
                         inspection.targetCrs());
+                GridEnvelope2D read = sourceReadWindow(inspection, core, partGrid,
+                        interpolationRadius);
                 seeds.add(new ReadWindowSeed(core, read, partGrid,
                         new ReferencedEnvelope(partGrid.getEnvelope2D())));
             }
@@ -353,6 +383,26 @@ public class GeoTiffPreprocessor {
                     seed.targetGrid(), seed.targetBounds(), index, seeds.size()));
         }
         return new ReadPlan(globalTargetGrid, List.copyOf(windows));
+    }
+
+    private GridEnvelope2D sourceReadWindow(RasterInspection inspection,
+            GridEnvelope2D sourceCore, GridGeometry2D targetGrid,
+            int interpolationRadius) throws Exception {
+        ReferencedEnvelope requiredSourceBounds = new ReferencedEnvelope(
+                targetGrid.getEnvelope2D()).transform(inspection.sourceCrs(), true);
+        GridEnvelope2D requiredSourceGrid = inspection.sourceGrid()
+                .worldToGrid(requiredSourceBounds);
+
+        int minX = Math.min(sourceCore.x, requiredSourceGrid.x);
+        int minY = Math.min(sourceCore.y, requiredSourceGrid.y);
+        int maxX = Math.max(sourceCore.x + sourceCore.width,
+                requiredSourceGrid.x + requiredSourceGrid.width);
+        int maxY = Math.max(sourceCore.y + sourceCore.height,
+                requiredSourceGrid.y + requiredSourceGrid.height);
+        GridEnvelope2D required = new GridEnvelope2D(
+                minX, minY, maxX - minX, maxY - minY);
+        return expand(required, interpolationRadius,
+                inspection.width(), inspection.height());
     }
 
     private GridGeometry2D alignedPartGrid(GridGeometry2D global,
@@ -564,6 +614,14 @@ public class GeoTiffPreprocessor {
                 ? WGS84 : WEB_MERCATOR;
     }
 
+    /**
+     * 为栅格瓦片缓存生成一个唯一且稳定的缓存键
+     * @param source 源栅格文件路径
+     * @param inspection 对源文件进行检查后得到的信息
+     * @param options 瓦片生成选项
+     * @return 缓存键
+     * @throws IOException io异常
+     */
     private String cacheKey(Path source, RasterInspection inspection,
             ImageryTileOptions options) throws IOException {
         String value = CACHE_VERSION + '|' + source + '|' + inspection.fileSize() + '|'
@@ -730,6 +788,14 @@ public class GeoTiffPreprocessor {
             }
         }
 
+        /**
+         * 将单个源栅格文件（Path source）直接映射到指定的地理范围（ReferencedEnvelope bounds）和像素尺寸（width, height）
+         * @param source 源栅格文件
+         * @param bounds 地理范围
+         * @param width 像素尺寸宽度
+         * @param height 像素尺寸高度
+         * @return 构造好的栅格信息
+         */
         public static PreparedRaster direct(Path source, ReferencedEnvelope bounds,
                 int width, int height) {
             return new PreparedRaster(List.of(new PreparedPart(

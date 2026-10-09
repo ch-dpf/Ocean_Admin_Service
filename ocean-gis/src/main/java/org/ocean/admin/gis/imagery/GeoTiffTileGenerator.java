@@ -55,9 +55,14 @@ public class GeoTiffTileGenerator {
     private static final CoordinateReferenceSystem WGS84 = decode("EPSG:4326");
 
     private final ObjectMapper objectMapper;
+    private final long maxTileCount;
 
-    public GeoTiffTileGenerator(ObjectMapper objectMapper) {
+    public GeoTiffTileGenerator(ObjectMapper objectMapper, long maxTileCount) {
         this.objectMapper = objectMapper;
+        if (maxTileCount <= 0) {
+            throw new IllegalArgumentException("影像单任务瓦片上限必须大于0");
+        }
+        this.maxTileCount = maxTileCount;
     }
 
     public void generate(Path input, Path output, ImageryTileOptions options,
@@ -121,9 +126,10 @@ public class GeoTiffTileGenerator {
             ReferencedEnvelope geographicBounds = rasterSource.bounds().transform(WGS84, true);
             ZoomRange zooms = resolveZooms(rasterSource, targetBounds, options);
             long tileCount = countTiles(targetBounds, zooms, options.targetCrs());
-            if (tileCount > ImageryTileOptions.MAX_TILE_COUNT) {
+            if (tileCount > maxTileCount) {
                 throw new IllegalArgumentException("预计生成瓦片" + tileCount
-                        + "张，超过单任务上限" + ImageryTileOptions.MAX_TILE_COUNT + "张");
+                        + "张，超过单任务上限" + maxTileCount
+                        + "张；可降低maxZoom或调整GIS_IMAGERY_MAX_TILE_COUNT");
             }
             log.info("[Imagery][Tile] 影像分析完成，尺寸: {}x{}，源范围: {}，目标范围: {}，"
                             + "层级: {}-{}，预计瓦片: {}，耗时: {} ms",

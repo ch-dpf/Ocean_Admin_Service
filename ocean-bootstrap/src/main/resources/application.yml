@@ -92,6 +92,7 @@ gis:
     imagery-cache-path: ${GIS_IMAGERY_CACHE_PATH:imagery/cache}
     imagery-optimization-enabled: ${GIS_IMAGERY_OPTIMIZATION_ENABLED:true}
     imagery-preprocessing-max-window-pixels: ${GIS_IMAGERY_PREPROCESSING_MAX_WINDOW_PIXELS:16777216}
+    imagery-max-tile-count: ${GIS_IMAGERY_MAX_TILE_COUNT:200000}
     imagery-overview-min-size: ${GIS_IMAGERY_OVERVIEW_MIN_SIZE:512}
     workspaces:
       default: ${GIS_PROCESSING_WORKSPACE_DEFAULT:gis/workspaces/default}

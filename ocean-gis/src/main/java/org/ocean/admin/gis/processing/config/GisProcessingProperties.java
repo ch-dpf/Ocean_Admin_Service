@@ -20,9 +20,12 @@ public class GisProcessingProperties {
     private String basePath = "gis/processing";
     @NotBlank
     private String imageryCachePath = "imagery/cache";
+    // 是否启用图像优化
     private boolean imageryOptimizationEnabled = true;
     @Positive
     private long imageryPreprocessingMaxWindowPixels = 16_777_216L;
+    @Positive
+    private long imageryMaxTileCount = 200_000L;
     @Positive
     private int imageryOverviewMinSize = 512;
     private Map<String, String> workspaces = new LinkedHashMap<>();

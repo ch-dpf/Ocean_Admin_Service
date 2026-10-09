@@ -18,8 +18,9 @@ import tools.jackson.databind.ObjectMapper;
 public class GisFileProcessingEngineConfiguration {
 
     @Bean
-    public GeoTiffTileGenerator geoTiffTileGenerator(ObjectMapper objectMapper) {
-        return new GeoTiffTileGenerator(objectMapper);
+    public GeoTiffTileGenerator geoTiffTileGenerator(
+            ObjectMapper objectMapper, GisProcessingProperties properties) {
+        return new GeoTiffTileGenerator(objectMapper, properties.getImageryMaxTileCount());
     }
 
     @Bean
