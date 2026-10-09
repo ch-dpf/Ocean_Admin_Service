@@ -1,6 +1,6 @@
 package org.ocean.admin.gis.terrain.engine.mago;
 
-import org.ocean.admin.gis.progress.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressModel;
 import org.ocean.admin.gis.terrain.engine.TerrainProgressListener;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

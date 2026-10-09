@@ -18,7 +18,7 @@ import org.geotools.referencing.CRS;
 import org.geotools.renderer.lite.RendererUtilities;
 import org.geotools.renderer.lite.gridcoverage2d.GridCoverageRenderer;
 import org.geotools.styling.StyleBuilder;
-import org.ocean.admin.gis.progress.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressModel;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;

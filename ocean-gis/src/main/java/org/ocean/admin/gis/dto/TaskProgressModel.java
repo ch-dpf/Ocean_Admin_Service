@@ -1,4 +1,4 @@
-package org.ocean.admin.gis.progress;
+package org.ocean.admin.gis.dto;
 
 /** 任务进度模型 */
 public record TaskProgressModel(

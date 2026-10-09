@@ -1,7 +1,7 @@
 package org.ocean.admin.gis.service;
 
 import org.ocean.admin.gis.dto.TaskProgressMessage;
-import org.ocean.admin.gis.progress.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressModel;
 import org.ocean.admin.gis.websocket.TaskWebSocketHandler;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;

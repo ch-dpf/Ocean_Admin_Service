@@ -4,7 +4,7 @@ import org.ocean.admin.gis.dto.GisProcessingParameters;
 import org.ocean.admin.gis.dto.ImageryProcessingParameters;
 import org.ocean.admin.gis.imagery.ImageryPipeline;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
-import org.ocean.admin.gis.progress.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressModel;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 

@@ -8,7 +8,7 @@ import org.geotools.coverage.grid.GridGeometry2D;
 import org.geotools.coverage.grid.io.AbstractGridFormat;
 import org.geotools.coverage.grid.io.OverviewPolicy;
 import org.geotools.gce.geotiff.GeoTiffReader;
-import org.ocean.admin.gis.progress.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressModel;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;

@@ -1,7 +1,7 @@
 package org.ocean.admin.gis.imagery;
 
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.progress.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressModel;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 
 import java.nio.file.Path;

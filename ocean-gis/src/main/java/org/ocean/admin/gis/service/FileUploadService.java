@@ -11,7 +11,7 @@ import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileOptRecord;
 import org.ocean.admin.gis.entity.GisFileOptRecordItem;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
-import org.ocean.admin.gis.progress.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressModel;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.kernel.audit.CurrentOperator;
 import org.springframework.data.redis.core.StringRedisTemplate;

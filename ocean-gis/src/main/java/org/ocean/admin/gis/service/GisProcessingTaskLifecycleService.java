@@ -2,7 +2,7 @@ package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisProcessingTask;
-import org.ocean.admin.gis.progress.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressModel;
 import org.springframework.stereotype.Service;
 
 import java.util.function.Function;
