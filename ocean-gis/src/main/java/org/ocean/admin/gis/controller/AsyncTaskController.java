@@ -39,21 +39,6 @@ public class AsyncTaskController {
     }
 
     /**
-     * 获取所有任务（包括已完成）
-     */
-    @GetMapping("/all")
-    @Operation(summary = "获取所有任务", description = "获取所有异步任务列表，包括已完成的")
-    public ResponseResult<List<TaskInfo>> getAllTasks() {
-        try {
-            List<TaskInfo> tasks = asyncTaskService.getAllTasks();
-            return ResponseResult.success(tasks);
-        } catch (Exception e) {
-            log.error("获取所有任务失败: {}", e.getMessage(), e);
-            return ResponseResult.error("获取任务列表失败: " + e.getMessage());
-        }
-    }
-
-    /**
      * 获取任务详情
      */
     @GetMapping("/{taskId}")
@@ -71,15 +56,13 @@ public class AsyncTaskController {
         }
     }
 
-    /**
-     * 清理已完成的任务
-     */
+    /** 手动清理异常存在的实时任务。 */
     @PostMapping("/cleanup")
-    @Operation(summary = "清理已完成任务", description = "清理1小时前已完成的任务记录")
-    public ResponseResult<String> cleanupCompletedTasks() {
+    @Operation(summary = "清理异常存在的实时任务", description = "清理超过6小时未更新的实时任务状态")
+    public ResponseResult<String> cleanupZombieTasks() {
         try {
-            asyncTaskService.cleanupCompletedTasks();
-            return ResponseResult.success("清理完成");
+            int cleanedCount = asyncTaskService.cleanupZombieTasks();
+            return ResponseResult.success("清理完成，共清理" + cleanedCount + "个僵尸任务");
         } catch (Exception e) {
             log.error("清理任务失败: {}", e.getMessage(), e);
             return ResponseResult.error("清理失败: " + e.getMessage());

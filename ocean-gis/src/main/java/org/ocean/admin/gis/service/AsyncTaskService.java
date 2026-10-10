@@ -32,10 +32,10 @@ import java.util.stream.Collectors;
 public class AsyncTaskService {
 
     private static final String TASK_REDIS_KEY_PREFIX = "ocean-admin:async-task:";
-    private static final Duration RUNNING_TASK_REDIS_TTL = Duration.ofHours(6);
+    private static final Duration RUNNING_TASK_INACTIVE_TIMEOUT = Duration.ofHours(6);
 
     // 存储所有正在进行的任务
-    private final Map<String, TaskState> taskMap = new ConcurrentHashMap<>();
+    private final Map<String, TaskState> activeTaskMap = new ConcurrentHashMap<>();
 
     private final TaskWebSocketHandler webSocketHandler;
     private final StringRedisTemplate redisTemplate;
@@ -71,7 +71,7 @@ public class AsyncTaskService {
                         continue;
                     }
                     TaskInfo info = objectMapper.readValue(raw, TaskInfo.class);
-                    taskMap.put(info.taskId(), TaskState.restore(info));
+                    activeTaskMap.put(info.taskId(), TaskState.restore(info));
                     restored++;
                 } catch (Exception e) {
                     log.warn("跳过无法恢复的异步任务快照: key={}, error={}",
@@ -117,7 +117,7 @@ public class AsyncTaskService {
                 total,
                 resultUnit);
         TaskInfo initialSnapshot = taskState.snapshot();
-        taskMap.put(taskId, taskState);
+        activeTaskMap.put(taskId, taskState);
         persistTask(initialSnapshot);
         log.info("创建任务: taskId={}, taskName={}, total={}", taskId, taskName, total);
     }
@@ -131,13 +131,13 @@ public class AsyncTaskService {
      * 如果有任务处理成功但存在失败任务，则标记为部分失败。
      */
     public void finalizeTaskResult(String taskId, String message) {
-        TaskState taskState = taskMap.get(taskId);
+        TaskState taskState = activeTaskMap.get(taskId);
         if (taskState == null) {
             return;
         }
         TaskInfo published;
         synchronized (taskState) {
-            if (taskState.status.isTerminal()) {
+            if (activeTaskMap.get(taskId) != taskState || taskState.status.isTerminal()) {
                 return;
             }
             if (taskState.result.processed() != taskState.result.total()) {
@@ -160,6 +160,7 @@ public class AsyncTaskService {
             published = taskState.snapshot();
         }
         broadcastProgress(published, "task_update");
+        activeTaskMap.remove(taskId, taskState);
         deleteTaskFromRedis(taskId);
     }
 
@@ -168,13 +169,13 @@ public class AsyncTaskService {
      * 将任务标记为整体失败。
      */
     public void finalizeTaskFailure(String taskId, String message) {
-        TaskState taskState = taskMap.get(taskId);
+        TaskState taskState = activeTaskMap.get(taskId);
         if (taskState == null) {
             return;
         }
         TaskInfo published;
         synchronized (taskState) {
-            if (taskState.status.isTerminal()) {
+            if (activeTaskMap.get(taskId) != taskState || taskState.status.isTerminal()) {
                 return;
             }
             taskState.result = taskState.result.failRemaining();
@@ -187,18 +188,21 @@ public class AsyncTaskService {
             published = taskState.snapshot();
         }
         broadcastProgress(published, "task_update");
+        activeTaskMap.remove(taskId, taskState);
         deleteTaskFromRedis(taskId);
     }
 
-    /** 原子应用一次或多次任务状态更新，并只发布一个新版本。 */
+    /*
+     * 更新任务进度
+     */
     public void updateProgress(String taskId, TaskProgressUpdate... updates) {
-        TaskState taskState = taskMap.get(taskId);
+        TaskState taskState = activeTaskMap.get(taskId);
         if (taskState == null || updates == null || updates.length == 0) {
             return;
         }
         TaskInfo published;
         synchronized (taskState) {
-            if (taskState.status.isTerminal()) {
+            if (activeTaskMap.get(taskId) != taskState || taskState.status.isTerminal()) {
                 return;
             }
             for (TaskProgressUpdate update : updates) {
@@ -236,19 +240,9 @@ public class AsyncTaskService {
      * 获取所有运行中的任务
      */
     public List<TaskInfo> getRunningTasks() {
-        return taskMap.values().stream()
+        return activeTaskMap.values().stream()
                 .map(this::snapshot)
                 .filter(task -> task.status() == TaskStatus.RUNNING)
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * 获取所有任务（包括已完成）
-     */
-    public List<TaskInfo> getAllTasks() {
-        return taskMap.values().stream()
-                .map(this::snapshot)
-                .sorted((t1, t2) -> t2.startTime().compareTo(t1.startTime()))
                 .collect(Collectors.toList());
     }
 
@@ -256,32 +250,50 @@ public class AsyncTaskService {
      * 获取任务详情
      */
     public TaskInfo getTaskInfo(String taskId) {
-        TaskState taskState = taskMap.get(taskId);
+        TaskState taskState = activeTaskMap.get(taskId);
         return taskState == null ? null : snapshot(taskState);
     }
 
     /**
-     * 清理已完成的任务
+     * 手动清理超过活跃超时时间仍未更新的异常存在的实时任务
      */
-    public void cleanupCompletedTasks() {
-        taskMap.entrySet().removeIf(entry -> {
-            boolean completed;
-            synchronized (entry.getValue()) {
-                completed = entry.getValue().status.isTerminal();
+    public int cleanupZombieTasks() {
+        LocalDateTime inactiveBefore = LocalDateTime.now()
+                .minus(RUNNING_TASK_INACTIVE_TIMEOUT);
+        int cleanedCount = 0;
+        for (Map.Entry<String, TaskState> entry : activeTaskMap.entrySet()) {
+            TaskState taskState = entry.getValue();
+            boolean removed = false;
+            synchronized (taskState) {
+                if (!taskState.status.isTerminal()
+                        && taskState.lastActivityTime.isBefore(inactiveBefore)) {
+                    removed = activeTaskMap.remove(entry.getKey(), taskState);
+                }
             }
-            if (completed) {
+            if (removed) {
                 deleteTaskFromRedis(entry.getKey());
+                cleanedCount++;
             }
-            return completed;
-        });
+        }
+        log.info("手动清理异常存在的实时任务完成: cleanedCount={}", cleanedCount);
+        return cleanedCount;
     }
 
+    /**
+     * 获取任务快照
+     * @param taskState 任务状态
+     * @return 任务快照
+     */
     private TaskInfo snapshot(TaskState taskState) {
         synchronized (taskState) {
             return taskState.snapshot();
         }
     }
 
+    /**
+     * 任务快照写入Redis
+     * @param taskInfo 任务快照
+     */
     private void persistTask(TaskInfo taskInfo) {
         if (redisTemplate == null || taskInfo == null) {
             return;
@@ -289,13 +301,17 @@ public class AsyncTaskService {
         try {
             String key = TASK_REDIS_KEY_PREFIX + taskInfo.taskId();
             String json = objectMapper.writeValueAsString(taskInfo);
-            redisTemplate.opsForValue().set(key, json, RUNNING_TASK_REDIS_TTL);
+            redisTemplate.opsForValue().set(key, json, RUNNING_TASK_INACTIVE_TIMEOUT);
         } catch (Exception e) {
             log.debug("任务进度写入Redis失败: taskId={}, error={}",
                     taskInfo.taskId(), e.getMessage());
         }
     }
 
+    /**
+     * 从Redis中删除任务快照
+     * @param taskId 任务编号
+     */
     private void deleteTaskFromRedis(String taskId) {
         if (redisTemplate == null || taskId == null || taskId.isBlank()) {
             return;
@@ -318,6 +334,7 @@ public class AsyncTaskService {
         private TaskResult result;   // 任务结果
         private TaskStage currentStage;   // 当前阶段
         private LocalDateTime endTime;   // 结束时间
+        private LocalDateTime lastActivityTime;   // 最后活跃时间
         private long version;   // 版本号
 
         private TaskState(
@@ -340,9 +357,19 @@ public class AsyncTaskService {
             this.currentStage = currentStage;
             this.startTime = startTime;
             this.endTime = endTime;
+            this.lastActivityTime = LocalDateTime.now();
             this.version = version;
         }
 
+        /**
+         * 创建任务状态
+         * @param taskId 任务编号
+         * @param taskName 任务名称
+         * @param taskType 任务类型
+         * @param total 总数
+         * @param resultUnit 结果单位
+         * @return 任务状态
+         */
         private static TaskState create(
                 String taskId,
                 String taskName,
@@ -362,6 +389,11 @@ public class AsyncTaskService {
                     0);
         }
 
+        /**
+         * 从任务信息创建任务状态
+         * @param info 任务信息
+         * @return 任务状态
+         */
         private static TaskState restore(TaskInfo info) {
             return new TaskState(
                     info.taskId(),
@@ -376,6 +408,10 @@ public class AsyncTaskService {
                     info.version());
         }
 
+        /**
+         * 应用任务进度更新
+         * @param updates 任务进度更新
+         */
         private void apply(TaskProgressUpdate... updates) {
             TaskStage nextStage = currentStage;
             Integer nextOverallPercent = overallPercent;
@@ -397,8 +433,13 @@ public class AsyncTaskService {
             currentStage = nextStage;
             overallPercent = nextOverallPercent;
             result = nextResult;
+            lastActivityTime = LocalDateTime.now();
         }
 
+        /**
+         * 创建任务快照
+         * @return 任务快照
+         */
         private TaskInfo snapshot() {
             return new TaskInfo(
                     taskId,
