@@ -134,7 +134,12 @@ public class AsyncTaskService {
     }
 
     /**
+     * 任务按正常流程处理完毕
      * 根据已累计的成功、失败数量结束任务。
+     *
+     * 如果所有任务都处理成功，则标记为完成。
+     * 如果没有任务处理成功，则标记为失败。
+     * 如果有任务处理成功但存在失败任务，则标记为部分失败。
      */
     public void finalizeTaskResult(String taskId, String message) {
         TaskInfo taskInfo = taskMap.get(taskId);
@@ -164,7 +169,10 @@ public class AsyncTaskService {
         pushTerminalProgress(taskId);
     }
 
-    /** 将任务标记为整体失败。 */
+    /**
+     * 任务因系统异常、入库失败、引擎失败等原因被迫整体终止
+     * 将任务标记为整体失败。
+     */
     public void finalizeTaskFailure(String taskId, String message) {
         TaskInfo taskInfo = taskMap.get(taskId);
         if (taskInfo == null) {
@@ -293,8 +301,6 @@ public class AsyncTaskService {
                 message.setStatus(taskInfo.getStatus());
                 message.setProgress(taskInfo.getProgress());
                 message.setTaskType(taskInfo.getTaskType());
-                message.setFileType(taskInfo.getFileType());
-                message.setFileId(taskInfo.getFileId());
                 message.setStage(taskInfo.getStage());
                 message.setMessage(taskInfo.getMessage());
                 message.setProgressMode(taskInfo.getProgressMode());
@@ -384,28 +390,28 @@ public class AsyncTaskService {
      */
     @Data
     public static class TaskInfo {
-        private String taskId;
-        private String taskName;
-        private int totalCount;
-        private int completedCount;
-        private int failedCount;
-        private String status; // running, completed
-        private LocalDateTime startTime;
-        private LocalDateTime endTime;
-        private String taskType;
-        private String fileType;
-        private Long fileId;
-        private String stage;
-        private String message;
-        private Integer manualProgress;
-        private String progressMode;
-        private Long completedUnits;
-        private Long totalUnits;
-        private long version;
-        private boolean processingProgressManaged;
+        private String taskId; // 任务id
+        private String taskName; // 任务名称
+        private int totalCount; // 总数量
+        private int completedCount; // 完成数量
+        private int failedCount; // 失败数量
+        private String status; // 状态 running, completed, partial_failed, failed
+        private LocalDateTime startTime; // 开始时间
+        private LocalDateTime endTime; // 结束时间
+        private String taskType; // 任务类型
+        private String stage; // 当前阶段
+        private String message; // 消息
+        private Integer manualProgress; // 手工进度
+        private String progressMode; // 进度模式
+        private Long completedUnits; // 完成单位
+        private Long totalUnits; // 总单位
+        private long version; // 版本号
+        private boolean processingProgressManaged; // 进度管理由系统处理
 
         /**
          * 获取进度百分比
+         * 如果手动进度不为空，则返回手动进度
+         * 否则返回根据完成和失败数量计算的进度百分比，总进度为100%
          */
         public int getProgress() {
             if (manualProgress != null) {

@@ -3,8 +3,6 @@ package org.ocean.admin.gis.dto;
 import lombok.Data;
 
 /**
- * 类的功能描述
- *
  * @author DeepOcean
  * @since 2026-09-16
  */
@@ -18,9 +16,7 @@ public class TaskProgressMessage {
     private int failedCount;        // 失败数
     private String status;          // running, completed
     private int progress;           // 进度百分比 0-100
-    private String taskType;        // 任务类型（如 TIF）
-    private String fileType;        // 文件类型（LF/HF）
-    private Long fileId;            // 关联文件ID
+    private String taskType;        // 任务类型（如 上传、下载、地形处理、影像处理、矢量处理等）
     private String stage;           // 当前阶段
     private String message;         // 阶段说明
     private String progressMode;    // DETERMINATE / INDETERMINATE
