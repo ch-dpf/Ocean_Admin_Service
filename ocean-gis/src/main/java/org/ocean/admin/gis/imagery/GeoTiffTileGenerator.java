@@ -18,7 +18,8 @@ import org.geotools.referencing.CRS;
 import org.geotools.renderer.lite.RendererUtilities;
 import org.geotools.renderer.lite.gridcoverage2d.GridCoverageRenderer;
 import org.geotools.styling.StyleBuilder;
-import org.ocean.admin.gis.dto.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressUnit;
+import org.ocean.admin.gis.dto.TaskStage;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -66,12 +67,12 @@ public class GeoTiffTileGenerator {
     }
 
     public void generate(Path input, Path output, ImageryTileOptions options,
-            Consumer<TaskProgressModel> progressListener) {
+            Consumer<TaskStage> progressListener) {
         generate(input, input, output, options, progressListener);
     }
 
     public void generate(Path input, Path metadataSource, Path output, ImageryTileOptions options,
-            Consumer<TaskProgressModel> progressListener) {
+            Consumer<TaskStage> progressListener) {
         Path source = input.toAbsolutePath().normalize();
         GeoTiffReader reader = null;
         try {
@@ -94,9 +95,9 @@ public class GeoTiffTileGenerator {
 
     public void generate(GeoTiffPreprocessor.PreparedRaster prepared, Path metadataSource,
             Path output, ImageryTileOptions options,
-            Consumer<TaskProgressModel> progressListener) {
+            Consumer<TaskStage> progressListener) {
         long startedAt = System.nanoTime();
-        progressListener.accept(TaskProgressModel.indeterminate(
+        progressListener.accept(TaskStage.indeterminate(
                 "analyzing", "正在分析影像范围和切片层级"));
         Path originalSource = metadataSource.toAbsolutePath().normalize();
         Path target = output.toAbsolutePath().normalize();
@@ -136,9 +137,12 @@ public class GeoTiffTileGenerator {
                     rasterSource.width(), rasterSource.height(), rasterSource.bounds(),
                     targetBounds, zooms.min(), zooms.max(), tileCount,
                     elapsedMillis(analyzingStartedAt));
-            progressListener.accept(TaskProgressModel.workload(
-                    "generating", 0, tileCount,
-                    "影像切片工作量已确定，共" + tileCount + "张瓦片"));
+            progressListener.accept(TaskStage.determinate(
+                    "generating",
+                    "影像切片工作量已确定，共" + tileCount + "张瓦片",
+                    0,
+                    tileCount,
+                    TaskProgressUnit.TILE));
 
             RasterSymbolizer symbolizer = new StyleBuilder().createRasterSymbolizer();
             Interpolation interpolation = interpolation(options.resampling());
@@ -180,10 +184,13 @@ public class GeoTiffTileGenerator {
                                 >= PROGRESS_REPORT_INTERVAL_NANOS) {
                             lastReportedPercent = currentPercent;
                             lastReportNanos = currentNanos;
-                            progressListener.accept(TaskProgressModel.workload(
-                                    "generating", completed, tileCount,
+                            progressListener.accept(TaskStage.determinate(
+                                    "generating",
                                     "正在生成影像瓦片："
-                                            + completed + "/" + tileCount + "张"));
+                                            + completed + "/" + tileCount + "张",
+                                    completed,
+                                    tileCount,
+                                    TaskProgressUnit.TILE));
                         }
                         if (currentPercent >= lastLoggedPercent + 5
                                 || completed == tileCount) {
@@ -197,8 +204,12 @@ public class GeoTiffTileGenerator {
                         zoom, completed - zoomCompletedBefore, completed, tileCount,
                         elapsedMillis(zoomStartedAt));
             }
-            progressListener.accept(TaskProgressModel.workload(
-                    "finalizing", completed, tileCount, "正在写入影像切片元数据"));
+            progressListener.accept(TaskStage.determinate(
+                    "finalizing",
+                    "正在写入影像切片元数据",
+                    completed,
+                    tileCount,
+                    TaskProgressUnit.TILE));
             long metadataStartedAt = System.nanoTime();
             log.info("[Imagery][Tile] 开始写入切片元数据，输出目录: {}", target);
             writeMetadata(target, originalSource, geographicBounds, zooms, options, tileCount);

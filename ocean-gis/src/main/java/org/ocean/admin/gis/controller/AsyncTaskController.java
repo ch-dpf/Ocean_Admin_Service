@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.ocean.admin.gis.dto.TaskInfo;
 import org.ocean.admin.gis.service.AsyncTaskService;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.web.bind.annotation.*;
@@ -27,9 +28,9 @@ public class AsyncTaskController {
      */
     @GetMapping("/running")
     @Operation(summary = "获取运行中的任务", description = "获取当前正在执行的异步任务列表")
-    public ResponseResult<List<AsyncTaskService.TaskInfo>> getRunningTasks() {
+    public ResponseResult<List<TaskInfo>> getRunningTasks() {
         try {
-            List<AsyncTaskService.TaskInfo> tasks = asyncTaskService.getRunningTasks();
+            List<TaskInfo> tasks = asyncTaskService.getRunningTasks();
             return ResponseResult.success(tasks);
         } catch (Exception e) {
             log.error("获取运行中任务失败: {}", e.getMessage(), e);
@@ -42,9 +43,9 @@ public class AsyncTaskController {
      */
     @GetMapping("/all")
     @Operation(summary = "获取所有任务", description = "获取所有异步任务列表，包括已完成的")
-    public ResponseResult<List<AsyncTaskService.TaskInfo>> getAllTasks() {
+    public ResponseResult<List<TaskInfo>> getAllTasks() {
         try {
-            List<AsyncTaskService.TaskInfo> tasks = asyncTaskService.getAllTasks();
+            List<TaskInfo> tasks = asyncTaskService.getAllTasks();
             return ResponseResult.success(tasks);
         } catch (Exception e) {
             log.error("获取所有任务失败: {}", e.getMessage(), e);
@@ -57,9 +58,9 @@ public class AsyncTaskController {
      */
     @GetMapping("/{taskId}")
     @Operation(summary = "获取任务详情", description = "根据任务ID获取详细信息")
-    public ResponseResult<AsyncTaskService.TaskInfo> getTaskInfo(@PathVariable String taskId) {
+    public ResponseResult<TaskInfo> getTaskInfo(@PathVariable String taskId) {
         try {
-            AsyncTaskService.TaskInfo taskInfo = asyncTaskService.getTaskInfo(taskId);
+            TaskInfo taskInfo = asyncTaskService.getTaskInfo(taskId);
             if (taskInfo == null) {
                 return ResponseResult.error("任务不存在");
             }

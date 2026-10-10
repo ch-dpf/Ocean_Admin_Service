@@ -19,7 +19,8 @@ import org.geotools.gce.geotiff.GeoTiffWriteParams;
 import org.geotools.gce.geotiff.GeoTiffWriter;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.referencing.CRS;
-import org.ocean.admin.gis.dto.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressUnit;
+import org.ocean.admin.gis.dto.TaskStage;
 import org.ocean.admin.gis.processing.config.GisProcessingProperties;
 
 import javax.imageio.ImageIO;
@@ -88,7 +89,7 @@ public class GeoTiffPreprocessor {
     }
 
     public PreparedRaster prepare(Path input, ImageryTileOptions options,
-            Consumer<TaskProgressModel> progressListener) {
+            Consumer<TaskStage> progressListener) {
         long startedAt = System.nanoTime();
         Path source = input.toAbsolutePath().normalize();
         GeoTiffReader reader = null;
@@ -131,7 +132,7 @@ public class GeoTiffPreprocessor {
 //    核心方法：持有文件锁的情况下，安全地生成或复用影像分块优化缓存，并提供了进度反馈和异常清理
     private PreparedRaster prepareLocked(Path source, GeoTiffReader reader,
             RasterInspection inspection, ImageryTileOptions options,
-            Consumer<TaskProgressModel> progressListener, String key,
+            Consumer<TaskStage> progressListener, String key,
             long startedAt) throws Exception {
         Path cacheDirectory = cacheRoot.resolve(key);
         Files.createDirectories(cacheDirectory);
@@ -142,7 +143,7 @@ public class GeoTiffPreprocessor {
                 FileLock ignored = lockChannel.lock()) {
             PreparedRaster cached = loadValidCache(cacheDirectory, inspection);
             if (cached != null) {
-                progressListener.accept(TaskProgressModel.indeterminate(
+                progressListener.accept(TaskStage.indeterminate(
                         "preparing", "已复用影像分块优化缓存"));
                 log.info("[Imagery][Preprocess] 命中分块缓存，分块数: {}，耗时: {} ms",
                         cached.parts().size(), elapsedMillis(startedAt));
@@ -155,9 +156,12 @@ public class GeoTiffPreprocessor {
             Files.createDirectories(generationDirectory);
 
             ReadPlan plan = createReadPlan(inspection, options);
-            progressListener.accept(TaskProgressModel.workload(
-                    "preparing", 0, plan.windows().size(),
-                    "影像预处理工作量已确定，共" + plan.windows().size() + "个分块"));
+            progressListener.accept(TaskStage.determinate(
+                    "preparing",
+                    "影像预处理工作量已确定，共" + plan.windows().size() + "个分块",
+                    0,
+                    plan.windows().size(),
+                    TaskProgressUnit.BLOCK));
             log.info("[Imagery][Preprocess] 开始有界分块处理，分块数: {}，最大窗口像素: {}，"
                             + "全局目标尺寸: {}x{}",
                     plan.windows().size(), maxWindowPixels,
@@ -171,10 +175,13 @@ public class GeoTiffPreprocessor {
                     PreparedPart part = preparePart(windowReader, inspection, options,
                             generationDirectory, window);
                     parts.add(part);
-                    progressListener.accept(TaskProgressModel.workload(
-                            "preparing", window.sequence() + 1L, plan.windows().size(),
+                    progressListener.accept(TaskStage.determinate(
+                            "preparing",
                             "正在标准化影像分块：" + (window.sequence() + 1)
-                                    + "/" + plan.windows().size()));
+                                    + "/" + plan.windows().size(),
+                            window.sequence() + 1L,
+                            plan.windows().size(),
+                            TaskProgressUnit.BLOCK));
                 }
             }
 

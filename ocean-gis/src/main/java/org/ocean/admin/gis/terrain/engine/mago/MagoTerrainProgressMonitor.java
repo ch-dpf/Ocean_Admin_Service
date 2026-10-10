@@ -1,6 +1,7 @@
 package org.ocean.admin.gis.terrain.engine.mago;
 
-import org.ocean.admin.gis.dto.TaskProgressModel;
+import org.ocean.admin.gis.dto.TaskProgressUnit;
+import org.ocean.admin.gis.dto.TaskStage;
 import org.ocean.admin.gis.terrain.engine.TerrainProgressListener;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -256,9 +257,9 @@ final class MagoTerrainProgressMonitor implements AutoCloseable {
             return;
         }
         long completed = Math.min(completedFiles.size(), totalTiles);
-        TaskProgressModel progress = TaskProgressModel.workload(
-                newPhase, completed, totalTiles, message);
-        int percent = progress.processingPercent();
+        TaskStage progress = TaskStage.determinate(
+                newPhase, message, completed, totalTiles, TaskProgressUnit.TILE);
+        int percent = progress.percent();
         if (percent == lastPercent && newPhase.equals(lastPublishedPhase)) {
             return;
         }
@@ -273,14 +274,14 @@ final class MagoTerrainProgressMonitor implements AutoCloseable {
             return;
         }
         lastPublishedPhase = newPhase;
-        emit(TaskProgressModel.indeterminate(newPhase, message));
+        emit(TaskStage.indeterminate(newPhase, message));
     }
 
     private String progressMessage() {
         return "正在生成地形瓦片：" + completedFiles.size() + "/" + totalTiles + "张";
     }
 
-    private void emit(TaskProgressModel progress) {
+    private void emit(TaskStage progress) {
         try {
             listener.onProgress(progress);
         } catch (RuntimeException ignored) {

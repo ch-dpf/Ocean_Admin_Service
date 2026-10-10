@@ -58,7 +58,7 @@ public class ProcessingWorker {
                     tileSet.getOutputKey());
             GisFileProcessingEngine engine = engineRegistry.require(processingType);
 
-            taskLifecycle.start(taskId, taskNo, 0, "开始执行切片引擎");
+            taskLifecycle.start(taskId, taskNo, "开始执行切片引擎");
             inputMapper.updateTaskStatus(taskId, "RUNNING", null);
             if (inputs.size() == 1 && "DIRECTORY".equals(inputs.get(0).getInputKind())) {
                 engine.processFolder(paths.get(0), workspace, parameters,
