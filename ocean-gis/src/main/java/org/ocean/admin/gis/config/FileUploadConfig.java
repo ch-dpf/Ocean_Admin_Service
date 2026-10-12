@@ -20,7 +20,7 @@ public class FileUploadConfig {
     private String basePath = "gis/uploads";
 
     @NotNull
-    private DataSize maxFileSize = DataSize.ofGigabytes(10);
+    private DataSize maxFileSize = DataSize.ofGigabytes(25);
 
     @NotNull
     private DataSize maxBatchSize = DataSize.ofGigabytes(100);

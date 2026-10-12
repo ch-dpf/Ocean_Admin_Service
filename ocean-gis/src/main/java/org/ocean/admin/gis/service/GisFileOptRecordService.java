@@ -2,7 +2,6 @@ package org.ocean.admin.gis.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
-import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisFileMeta;
@@ -456,7 +455,7 @@ public class GisFileOptRecordService {
     public GisFileOptRecord createDownloadRecord(GisFileMeta fileMeta, Long operatorId) {
         LocalDateTime now = LocalDateTime.now();
         GisFileOptRecord record = new GisFileOptRecord();
-        record.setRecordNo("GIS_EXPORT_" + IdWorker.getIdStr());
+        record.setRecordNo(GisTaskNoGenerator.generateDownloadTaskNo());
         record.setOperationType("EXPORT");
         record.setDataSetId(fileMeta.getDataSetId());
         record.setTotalCount(1);

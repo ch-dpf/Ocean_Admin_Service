@@ -311,7 +311,8 @@ public class FileUploadService {
             throw new IllegalArgumentException("单批次文件数量不能超过" + MAX_FILES_PER_BATCH);
         }
         if (command.fileSize() > uploadConfig.getMaxFileSize().toBytes()) {
-            throw new IllegalArgumentException("单文件不能超过10GB");
+            throw new IllegalArgumentException(
+                    "单文件不能超过" + formatByteSize(uploadConfig.getMaxFileSize().toBytes()));
         }
         if (command.totalSize() > uploadConfig.getMaxBatchSize().toBytes()) {
             throw new IllegalArgumentException("单批次文件总大小不能超过100GB");

@@ -8,7 +8,7 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/** 统一生成和校验 GIS 异步任务编号。 */
+/** 统一生成和校验 GIS 业务任务及操作记录编号。 */
 public final class GisTaskNoGenerator {
     private static final DateTimeFormatter TIMESTAMP =
             DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
@@ -20,6 +20,10 @@ public final class GisTaskNoGenerator {
 
     public static String generateUploadTaskNo() {
         return generate("upload", LocalDateTime.now());
+    }
+
+    public static String generateDownloadTaskNo() {
+        return generate("download", LocalDateTime.now());
     }
 
     public static String generateProcessingTaskNo(GisProcessingType type) {

@@ -3,6 +3,7 @@ package org.ocean.admin.gis.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -237,23 +238,28 @@ public class GisFileMetaService {
     }
 
     /**
-     * 下载已入库文件的原始内容。
+     * 下载已入库文件的原始内容，支持单区间 Range 与 HEAD 请求。
      *
-     * <p>文件内容直接写入响应流，下载记录在写出成功后单独登记：响应提交后无法回滚，
-     * 登记失败只记错误日志，不把已经完成的下载改判为失败。</p>
+     * <p>文件范围优先交给 Tomcat sendfile，连接器不支持时由应用流式写出。
+     * 下载记录表示传输已交付；登记失败只记错误日志，不中断已经开始的传输。</p>
      */
-    public void downloadFile(Long id, HttpServletResponse response) {
+    public void downloadFile(
+            Long id,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         GisFileMeta meta = getRequired(id);
         ensureDownloadable(meta);
-        long sizeBytes = fileDownloadUtil.writeToResponse(
-                meta.getStorageKey(), meta.getOriginalName(), response);
-        try {
-            gisFileOptRecordService.createDownloadRecord(meta, currentOperatorId());
-        } catch (RuntimeException recordFailure) {
-            log.error("下载记录登记失败: fileMetaId={}", id, recordFailure);
+        FileDownloadUtil.DownloadResult result = fileDownloadUtil.writeToResponse(
+                meta.getStorageKey(), meta.getOriginalName(), request, response);
+        if (result.transferAccepted()) {
+            try {
+                gisFileOptRecordService.createDownloadRecord(meta, currentOperatorId());
+            } catch (RuntimeException recordFailure) {
+                log.error("下载记录登记失败: fileMetaId={}", id, recordFailure);
+            }
+            log.info("GIS 文件下载已交付: id={}, originalName={}, sizeBytes={}, transferMode={}",
+                    id, meta.getOriginalName(), result.contentLength(), result.transferMode());
         }
-        log.info("下载 GIS 文件成功: id={}, originalName={}, sizeBytes={}",
-                id, meta.getOriginalName(), sizeBytes);
     }
 
     /** 供文件处理编排读取完整的已入库元数据。 */

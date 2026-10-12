@@ -3,6 +3,7 @@ package org.ocean.admin.gis.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -107,13 +108,15 @@ public class GisFileMetaController {
     }
 
     @GetMapping("/{id}/download")
-    @Operation(summary = "下载文件数据", description = "下载已入库文件的原始内容")
+    @Operation(summary = "下载文件数据",
+            description = "下载已入库文件的原始内容，支持单区间 Range 断点续传与 HEAD 探测")
     @OperationLog(module = "GIS_FILE_META", type = OperationType.EXPORT, description = "下载GIS文件数据")
     public void downloadFile(
             @Parameter(description = "文件元数据ID", required = true)
             @PathVariable Long id,
+            HttpServletRequest request,
             HttpServletResponse response) {
-        gisFileMetaService.downloadFile(id, response);
+        gisFileMetaService.downloadFile(id, request, response);
     }
 
 }
