@@ -34,7 +34,7 @@ public class GisProcessingTaskService {
             GisProcessingWorkspace workspace, List<GisProcessingInput> inputs) {
         LocalDateTime now = LocalDateTime.now();
         String parametersJson = writeParameters(command);
-        GisProcessingTask task = GisProcessingTaskFactory.queued(
+        GisProcessingTask task = GisProcessingTaskFactory.createQueued(
                 taskNo, command.taskName().trim(), inputs.size(), "QUEUED");
         task.setProcessingType(command.processingType().name());
         task.setSourceType(command.sourceType().name());

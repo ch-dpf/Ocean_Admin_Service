@@ -86,7 +86,6 @@ knife4j:
 gis:
   upload:
     base-path: ${GIS_UPLOAD_BASE_PATH:gis/uploads}
-    session-ttl: ${GIS_UPLOAD_SESSION_TTL:2h}
   processing:
     base-path: ${GIS_PROCESSING_BASE_PATH:gis/processing}
     imagery-cache-path: ${GIS_IMAGERY_CACHE_PATH:imagery/cache}

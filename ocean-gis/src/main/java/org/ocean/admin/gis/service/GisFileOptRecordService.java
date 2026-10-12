@@ -1,5 +1,6 @@
 package org.ocean.admin.gis.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -51,7 +52,7 @@ public class GisFileOptRecordService {
             LocalDateTime createTimeEnd) {
         long currentPage = current == null || current < 1 ? 1L : current;
         long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
-        String normalizedRecordNo = normalizeUpper(recordNo);
+        String normalizedRecordNo = trimToNull(recordNo);
         String normalizedRecordStatus = normalizeUpper(recordStatus);
         String normalizedOriginalName = trimToNull(originalName);
         String normalizedExtension = normalizeLower(extension);
@@ -73,7 +74,7 @@ public class GisFileOptRecordService {
     }
 
     public GisFileOptRecordVO getImportRecordDetail(String recordNo) {
-        String normalizedRecordNo = normalizeUpper(recordNo);
+        String normalizedRecordNo = trimToNull(recordNo);
         if (normalizedRecordNo == null || normalizedRecordNo.length() > 64) {
             throw new IllegalArgumentException("导入记录编号不合法");
         }
@@ -93,9 +94,9 @@ public class GisFileOptRecordService {
     private final GisFileOptRecordItemMapper recordItemMapper;
     private final GisDataSetMapper dataSetMapper;
 
-    /** 上传会话校验通过后创建正式导入记录，确保文件元数据能够引用它。 */
+    /** 创建等待文件提交的正式导入记录。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileOptRecord createImportRecord(
+    public GisFileOptRecord createPendingImportRecord(
             String recordNo,
             Long dataSetId,
             int totalCount,
@@ -108,11 +109,10 @@ public class GisFileOptRecordService {
         record.setTotalCount(totalCount);
         record.setCompletedCount(0);
         record.setFailedCount(0);
-        record.setRecordStatus("RUNNING");
-        record.setCurrentStage("STORING");
+        record.setRecordStatus("QUEUED");
+        record.setCurrentStage("WAITING_UPLOAD");
         record.setOperatorId(operatorId);
         record.setVersion(0L);
-        record.setStartTime(now);
         record.setCreateTime(now);
         record.setUpdateTime(now);
         record.setDeleted(0);
@@ -120,6 +120,61 @@ public class GisFileOptRecordService {
             throw new IllegalStateException("导入记录创建失败");
         }
         return record;
+    }
+
+    public GisFileOptRecord getRequiredImportRecord(String recordNo) {
+        GisFileOptRecord record = recordMapper.selectOne(
+                new LambdaQueryWrapper<GisFileOptRecord>()
+                        .eq(GisFileOptRecord::getRecordNo, recordNo)
+                        .eq(GisFileOptRecord::getOperationType, "IMPORT"));
+        if (record == null) {
+            throw new IllegalArgumentException("导入任务不存在: " + recordNo);
+        }
+        return record;
+    }
+
+    /** 通过状态条件更新原子领取待上传记录，防止同一任务被重复提交。 */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public GisFileOptRecord claimImportRecord(GisFileOptRecord record) {
+        LocalDateTime now = LocalDateTime.now();
+        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
+                .eq("id", record.getId())
+                .eq("operation_type", "IMPORT")
+                .eq("record_status", "QUEUED")
+                .eq("current_stage", "WAITING_UPLOAD")
+                .eq("version", record.getVersion())
+                .set("record_status", "RUNNING")
+                .set("current_stage", "STORING")
+                .set("start_time", now)
+                .set("update_time", now)
+                .setSql("version = version + 1"));
+        if (updated != 1) {
+            throw new IllegalStateException("上传任务正在处理或已被消费: " + record.getRecordNo());
+        }
+        record.setRecordStatus("RUNNING");
+        record.setCurrentStage("STORING");
+        record.setStartTime(now);
+        record.setUpdateTime(now);
+        record.setVersion(record.getVersion() + 1);
+        return record;
+    }
+
+    /** 异步进度任务注册失败时，将尚未开始的导入记录收口为失败。 */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void markPendingImportFailed(GisFileOptRecord record, String errorMessage) {
+        LocalDateTime now = LocalDateTime.now();
+        recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
+                .eq("id", record.getId())
+                .eq("record_status", "QUEUED")
+                .eq("current_stage", "WAITING_UPLOAD")
+                .set("failed_count", record.getTotalCount())
+                .set("record_status", "FAILED")
+                .set("current_stage", "FAILED")
+                .set("error_message", abbreviate(errorMessage, 1000))
+                .set("start_time", now)
+                .set("finish_time", now)
+                .set("update_time", now)
+                .setSql("version = version + 1"));
     }
 
     /**
