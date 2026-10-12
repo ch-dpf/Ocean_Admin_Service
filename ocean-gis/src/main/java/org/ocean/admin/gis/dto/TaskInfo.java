@@ -6,6 +6,7 @@ import java.util.Objects;
 /** 可供查询、缓存和实时推送的不可变任务快照。 */
 public record TaskInfo(
         String taskId,  // 任务id
+        String correlationId, // 客户端请求关联标识
         String taskName,  // 任务名称
         String taskType,  // 任务类型
         TaskStatus status,  // 任务状态
@@ -19,6 +20,9 @@ public record TaskInfo(
     public TaskInfo {
         if (taskId == null || taskId.isBlank()) {
             throw new IllegalArgumentException("任务ID不能为空");
+        }
+        if (correlationId != null && (correlationId.isBlank() || correlationId.length() > 64)) {
+            throw new IllegalArgumentException("任务关联标识不合法");
         }
         if (taskName == null || taskName.isBlank()) {
             throw new IllegalArgumentException("任务名称不能为空");

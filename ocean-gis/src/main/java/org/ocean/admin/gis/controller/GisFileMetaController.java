@@ -6,19 +6,15 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.service.FileUploadService;
 import org.ocean.admin.gis.service.GisFileMetaService;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
-import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * GIS数据管理
@@ -33,7 +29,6 @@ import java.util.Map;
 public class GisFileMetaController {
 
     private final GisFileMetaService gisFileMetaService;
-    private final FileUploadService fileUploadService;
 
     @GetMapping("/page")
     @Operation(summary = "分页查询文件元数据")
@@ -119,29 +114,6 @@ public class GisFileMetaController {
             @PathVariable Long id,
             HttpServletResponse response) {
         gisFileMetaService.downloadFile(id, response);
-    }
-
-    @PostMapping("/import/task")
-    @Operation(summary = "创建GIS文件导入任务", description = "创建Redis上传会话并返回进度任务ID")
-    public ResponseResult<Map<String, Object>> createImportTask(
-            @Parameter(description = "数据集ID", required = true)
-            @RequestParam Long dataSetId,
-            @Parameter(description = "预计导入文件数量", required = true)
-            @RequestParam Integer totalCount) {
-        return ResponseResult.success(fileUploadService.importTaskRegistry(dataSetId, totalCount));
-    }
-
-    @PostMapping(value = "/import/batch/{taskId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "导入gis文件数据", description = "消费上传会话并同步存储GIS文件及元数据")
-    @OperationLog(module = "GIS_FILE_UPLOAD", type = OperationType.SUBMIT,
-            description = "批量上传GIS文件", recordResponse = true)
-    public ResponseResult<Map<String, Object>> importBatch(
-            @Parameter(description = "导入任务ID", required = true)
-            @PathVariable String taskId,
-            @Parameter(description = "文件列表", required = true)
-            @RequestPart("files") List<MultipartFile> files){
-        return ResponseResult.success(
-                fileUploadService.importBatch(taskId, files));
     }
 
 }

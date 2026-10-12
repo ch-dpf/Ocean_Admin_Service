@@ -86,6 +86,11 @@ knife4j:
 gis:
   upload:
     base-path: ${GIS_UPLOAD_BASE_PATH:gis/uploads}
+    max-file-size: ${GIS_UPLOAD_MAX_FILE_SIZE:10GB}
+    max-batch-size: ${GIS_UPLOAD_MAX_BATCH_SIZE:100GB}
+    max-chunk-size: ${GIS_UPLOAD_MAX_CHUNK_SIZE:128MB}
+    stream-buffer-size: ${GIS_UPLOAD_STREAM_BUFFER_SIZE:1MB}
+    min-free-space: ${GIS_UPLOAD_MIN_FREE_SPACE:20GB}
   processing:
     base-path: ${GIS_PROCESSING_BASE_PATH:gis/processing}
     imagery-cache-path: ${GIS_IMAGERY_CACHE_PATH:imagery/cache}

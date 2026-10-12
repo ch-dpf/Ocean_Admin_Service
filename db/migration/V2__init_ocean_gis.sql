@@ -48,11 +48,14 @@ CREATE INDEX idx_gis_data_set_create_time
 CREATE TABLE ocean_gis.gis_file_opt_record (
     id                  BIGINT        PRIMARY KEY,
     record_no           VARCHAR(64)   NOT NULL,
+    request_id          VARCHAR(64),
     operation_type      VARCHAR(16)   NOT NULL,
     data_set_id         BIGINT        NOT NULL,
     total_count         INTEGER       NOT NULL DEFAULT 0,
     completed_count     INTEGER       NOT NULL DEFAULT 0,
     failed_count        INTEGER       NOT NULL DEFAULT 0,
+    total_bytes         BIGINT        NOT NULL DEFAULT 0,
+    uploaded_bytes      BIGINT        NOT NULL DEFAULT 0,
     record_status       VARCHAR(20)   NOT NULL DEFAULT 'QUEUED',
     current_stage       VARCHAR(32),
     result_storage_key  VARCHAR(1000),
@@ -79,6 +82,12 @@ CREATE TABLE ocean_gis.gis_file_opt_record (
             AND failed_count >= 0
             AND completed_count + failed_count <= total_count
         ),
+    CONSTRAINT ck_gis_file_opt_record_bytes
+        CHECK (
+            total_bytes >= 0
+            AND uploaded_bytes >= 0
+            AND uploaded_bytes <= total_bytes
+        ),
     CONSTRAINT ck_gis_file_opt_record_version
         CHECK (version >= 0),
     CONSTRAINT ck_gis_file_opt_record_timing
@@ -98,8 +107,11 @@ CREATE TABLE ocean_gis.gis_file_opt_record (
 
 COMMENT ON TABLE ocean_gis.gis_file_opt_record IS 'GIS 文件导入导出记录';
 COMMENT ON COLUMN ocean_gis.gis_file_opt_record.record_no IS '对外暴露的稳定导入导出记录编号';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record.request_id IS '客户端上传批次幂等标识，仅导入任务使用';
 COMMENT ON COLUMN ocean_gis.gis_file_opt_record.operation_type IS '操作类型：IMPORT-导入，EXPORT-导出';
 COMMENT ON COLUMN ocean_gis.gis_file_opt_record.record_status IS '记录状态：QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record.total_bytes IS '批次声明的文件总字节数';
+COMMENT ON COLUMN ocean_gis.gis_file_opt_record.uploaded_bytes IS '已确认落盘的文件字节数';
 COMMENT ON COLUMN ocean_gis.gis_file_opt_record.result_storage_key IS '导出结果的相对存储路径或对象存储 Key';
 COMMENT ON COLUMN ocean_gis.gis_file_opt_record.version IS '状态版本号，用于进度快照与实时事件合并';
 
@@ -110,6 +122,10 @@ CREATE INDEX idx_gis_file_opt_record_data_set
 CREATE INDEX idx_gis_file_opt_record_status
     ON ocean_gis.gis_file_opt_record (record_status, create_time)
     WHERE deleted = 0;
+
+CREATE UNIQUE INDEX uk_gis_file_opt_record_request
+    ON ocean_gis.gis_file_opt_record (request_id)
+    WHERE deleted = 0 AND operation_type = 'IMPORT' AND request_id IS NOT NULL;
 
 
 -- =========================================================

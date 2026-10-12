@@ -19,6 +19,9 @@ public class GisFileOptRecord {
     /** 对外暴露的稳定记录编号。 */
     private String recordNo;
 
+    /** 客户端上传批次幂等标识。 */
+    private String requestId;
+
     /** IMPORT、EXPORT。 */
     private String operationType;
 
@@ -33,6 +36,12 @@ public class GisFileOptRecord {
 
     /** 失败工作项数量。 */
     private Integer failedCount;
+
+    /** 批次声明的文件总字节数。 */
+    private Long totalBytes;
+
+    /** 已确认落盘的文件字节数。 */
+    private Long uploadedBytes;
 
     /** QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED。 */
     private String recordStatus;

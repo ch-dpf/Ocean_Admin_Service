@@ -12,6 +12,7 @@ public class GisFileOptRecordVO {
 
     private Long id;
     private String recordNo;
+    private String requestId;
     private String operationType;
     private Long dataSetId;
     private String dataSetName;
@@ -19,6 +20,8 @@ public class GisFileOptRecordVO {
     private Integer totalCount;
     private Integer completedCount;
     private Integer failedCount;
+    private Long totalBytes;
+    private Long uploadedBytes;
 
     @Schema(description = "QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED 或 FAILED")
     private String recordStatus;

@@ -20,7 +20,7 @@ public class GisProcessingTaskLifecycleService {
             String progressType, Runnable workerDispatch, String failureMessage) {
         try {
             progressService.registerTask(
-                    taskNo, taskName, totalCount, progressType, TaskProgressUnit.INPUT);
+                    taskNo, null, taskName, totalCount, progressType, TaskProgressUnit.INPUT);
             workerDispatch.run();
         } catch (Exception ex) {
             fail(taskId, taskNo, failureMessage, ex);

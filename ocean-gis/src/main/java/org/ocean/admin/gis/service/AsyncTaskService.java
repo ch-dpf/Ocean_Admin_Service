@@ -91,6 +91,7 @@ public class AsyncTaskService {
      */
     public String registerTask(
             String taskId,
+            String correlationId,
             String taskName,
             long total,
             String taskType,
@@ -101,17 +102,19 @@ public class AsyncTaskService {
         if (total < 1) {
             throw new IllegalArgumentException("任务总数必须大于0");
         }
-        initializeTask(taskId, taskName, total, taskType, resultUnit);
+        initializeTask(taskId, correlationId, taskName, total, taskType, resultUnit);
         return taskId;
     }
 
     private void initializeTask(String taskId,
+                                String correlationId,
                                 String taskName,
                                 long total,
                                 String taskType,
                                 TaskProgressUnit resultUnit) {
         TaskState taskState = TaskState.create(
                 taskId,
+                correlationId,
                 taskName,
                 taskType != null && !taskType.isBlank() ? taskType : "GENERAL",
                 total,
@@ -326,6 +329,7 @@ public class AsyncTaskService {
     /** AsyncTaskService 唯一持有的可变任务状态。 */
     private static final class TaskState {
         private final String taskId;   // 任务编号
+        private final String correlationId;   // 客户端请求关联标识
         private final String taskName;   // 任务名称
         private final String taskType;   // 任务类型
         private final LocalDateTime startTime;   // 开始时间
@@ -339,6 +343,7 @@ public class AsyncTaskService {
 
         private TaskState(
                 String taskId,
+                String correlationId,
                 String taskName,
                 String taskType,
                 TaskStatus status,
@@ -349,6 +354,7 @@ public class AsyncTaskService {
                 LocalDateTime endTime,
                 long version) {
             this.taskId = taskId;
+            this.correlationId = correlationId;
             this.taskName = taskName;
             this.taskType = taskType;
             this.status = status;
@@ -372,12 +378,14 @@ public class AsyncTaskService {
          */
         private static TaskState create(
                 String taskId,
+                String correlationId,
                 String taskName,
                 String taskType,
                 long total,
                 TaskProgressUnit resultUnit) {
             return new TaskState(
                     taskId,
+                    correlationId,
                     taskName,
                     taskType,
                     TaskStatus.RUNNING,
@@ -397,6 +405,7 @@ public class AsyncTaskService {
         private static TaskState restore(TaskInfo info) {
             return new TaskState(
                     info.taskId(),
+                    info.correlationId(),
                     info.taskName(),
                     info.taskType(),
                     info.status(),
@@ -443,6 +452,7 @@ public class AsyncTaskService {
         private TaskInfo snapshot() {
             return new TaskInfo(
                     taskId,
+                    correlationId,
                     taskName,
                     taskType,
                     status,

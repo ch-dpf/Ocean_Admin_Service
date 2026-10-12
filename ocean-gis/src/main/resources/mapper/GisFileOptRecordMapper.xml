@@ -7,6 +7,7 @@
     <sql id="recordColumns">
         r.id,
         r.record_no,
+        r.request_id,
         r.operation_type,
         r.data_set_id,
         ds.data_set_name,
@@ -14,6 +15,8 @@
         r.total_count,
         r.completed_count,
         r.failed_count,
+        r.total_bytes,
+        r.uploaded_bytes,
         r.record_status,
         r.current_stage,
         r.result_storage_key,
@@ -21,6 +24,8 @@
         r.operator_id,
         r.version,
         CASE
+            WHEN r.record_status = 'RUNNING' AND r.total_bytes > 0
+                THEN CAST((r.uploaded_bytes * 100) / r.total_bytes AS INTEGER)
             WHEN r.total_count = 0 THEN 0
             ELSE CAST(((r.completed_count + r.failed_count) * 100) / r.total_count AS INTEGER)
         END AS progress,
