@@ -91,6 +91,9 @@ gis:
     max-chunk-size: ${GIS_UPLOAD_MAX_CHUNK_SIZE:128MB}
     stream-buffer-size: ${GIS_UPLOAD_STREAM_BUFFER_SIZE:1MB}
     min-free-space: ${GIS_UPLOAD_MIN_FREE_SPACE:20GB}
+    idle-timeout: ${GIS_UPLOAD_IDLE_TIMEOUT:6h}
+    cleanup-interval: ${GIS_UPLOAD_CLEANUP_INTERVAL:1h}
+    cleanup-batch-size: ${GIS_UPLOAD_CLEANUP_BATCH_SIZE:100}
   processing:
     base-path: ${GIS_PROCESSING_BASE_PATH:gis/processing}
     imagery-cache-path: ${GIS_IMAGERY_CACHE_PATH:imagery/cache}

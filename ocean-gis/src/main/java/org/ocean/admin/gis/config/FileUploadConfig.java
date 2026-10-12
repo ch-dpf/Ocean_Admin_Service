@@ -8,6 +8,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.unit.DataSize;
 import org.springframework.validation.annotation.Validated;
 
+import java.time.Duration;
+
 /** GIS 文件上传配置。 */
 @Data
 @Component
@@ -31,4 +33,12 @@ public class FileUploadConfig {
 
     @NotNull
     private DataSize minFreeSpace = DataSize.ofGigabytes(20);
+
+    @NotNull
+    private Duration idleTimeout = Duration.ofHours(6);
+
+    @NotNull
+    private Duration cleanupInterval = Duration.ofHours(1);
+
+    private int cleanupBatchSize = 100;
 }

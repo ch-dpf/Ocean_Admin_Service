@@ -14,10 +14,13 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.charset.StandardCharsets;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
@@ -342,6 +345,49 @@ public class FileUploadUtil {
         deleteQuietly(uploadPartialPath(taskNo, fileIndex));
     }
 
+    /** 正常批次结束后仅删除空暂存目录，目录非空时保留异常现场。 */
+    public void deleteEmptyBatchDirectory(String taskNo) {
+        Path directory = uploadBatchDirectory(taskNo);
+        try {
+            Files.deleteIfExists(directory);
+        } catch (DirectoryNotEmptyException ex) {
+            log.warn("上传批次结束后暂存目录仍包含文件，保留异常现场: taskNo={}, path={}",
+                    taskNo, directory);
+        } catch (IOException ex) {
+            log.warn("删除上传批次空暂存目录失败: taskNo={}, path={}", taskNo, directory, ex);
+        }
+    }
+
+    /** 上传批次超时后递归删除其专属暂存目录；失败时抛出异常供定时任务重试。 */
+    public void deleteBatchDirectory(String taskNo) {
+        Path directory = uploadBatchDirectory(taskNo);
+        if (!Files.exists(directory)) {
+            return;
+        }
+        try {
+            Files.walkFileTree(directory, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes)
+                        throws IOException {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path current, IOException error)
+                        throws IOException {
+                    if (error != null) {
+                        throw error;
+                    }
+                    Files.delete(current);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException ex) {
+            throw new IllegalStateException("清理上传批次暂存目录失败: " + taskNo, ex);
+        }
+    }
+
     /** 校验磁盘当前可用空间是否覆盖新批次预留量与安全余量。 */
     public void ensureFreeSpace(long requiredBytes) {
         if (requiredBytes < 0) {
@@ -446,8 +492,11 @@ public class FileUploadUtil {
     }
 
     private Path uploadPartialPath(String taskNo, int fileIndex) {
-        return resolveKey(".staging/" + pathResolver.safeSegment(taskNo)
-                + "/" + fileIndex + ".part");
+        return uploadBatchDirectory(taskNo).resolve(fileIndex + ".part");
+    }
+
+    private Path uploadBatchDirectory(String taskNo) {
+        return resolveKey(".staging/" + pathResolver.safeSegment(taskNo));
     }
 
     private String uploadStorageName(String taskNo, int fileIndex, String originalName) {

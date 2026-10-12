@@ -34,6 +34,7 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class GisFileOptRecordService {
+    private static final String UPLOAD_CLEANUP_PENDING = "UPLOAD_CLEANUP_PENDING";
     private static final Set<String> RECORD_STATUSES = Set.of(
             "QUEUED", "RUNNING", "COMPLETED", "PARTIAL_FAILED", "FAILED");
     private static final Set<String> UPLOAD_STATUSES = Set.of("PENDING", "READY", "FAILED");
@@ -193,6 +194,107 @@ public class GisFileOptRecordService {
             reserved = Math.addExact(reserved, remaining);
         }
         return reserved;
+    }
+
+    /** 查询超过空闲时间仍未推进的运行中上传批次。 */
+    public List<GisFileOptRecord> findExpiredUploadBatches(
+            LocalDateTime inactiveBefore,
+            int limit) {
+        if (inactiveBefore == null || limit < 1) {
+            throw new IllegalArgumentException("上传超时查询参数不合法");
+        }
+        return recordMapper.selectList(new LambdaQueryWrapper<GisFileOptRecord>()
+                .eq(GisFileOptRecord::getOperationType, "IMPORT")
+                .eq(GisFileOptRecord::getRecordStatus, "RUNNING")
+                .le(GisFileOptRecord::getUpdateTime, inactiveBefore)
+                .orderByAsc(GisFileOptRecord::getUpdateTime)
+                .last("LIMIT " + limit));
+    }
+
+    /** 查询上次未能完成暂存目录删除的上传批次。 */
+    public List<GisFileOptRecord> findCleanupPendingBatches(int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("上传清理批次数必须大于0");
+        }
+        return recordMapper.selectList(new LambdaQueryWrapper<GisFileOptRecord>()
+                .eq(GisFileOptRecord::getOperationType, "IMPORT")
+                .eq(GisFileOptRecord::getCurrentStage, UPLOAD_CLEANUP_PENDING)
+                .orderByAsc(GisFileOptRecord::getUpdateTime)
+                .last("LIMIT " + limit));
+    }
+
+    /**
+     * 以版本号和最后活动时间原子抢占过期批次，并把未完成文件计入失败数量。
+     *
+     * @return 抢占后的终态记录；批次已恢复活动或被其他清理线程处理时返回 null
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public GisFileOptRecord expireUploadBatch(
+            Long recordId,
+            Long expectedVersion,
+            LocalDateTime inactiveBefore) {
+        if (recordId == null || expectedVersion == null || inactiveBefore == null) {
+            throw new IllegalArgumentException("过期上传批次参数不能为空");
+        }
+        GisFileOptRecord record = recordMapper.selectById(recordId);
+        if (record == null || !"RUNNING".equals(record.getRecordStatus())) {
+            return null;
+        }
+        int completed = record.getCompletedCount();
+        int failed = record.getTotalCount() - completed;
+        String terminalStatus = completed == 0 ? "FAILED" : "PARTIAL_FAILED";
+        String errorMessage = "上传超过空闲时限未继续，系统已自动终止";
+        LocalDateTime now = LocalDateTime.now();
+        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
+                .eq("id", recordId)
+                .eq("operation_type", "IMPORT")
+                .eq("record_status", "RUNNING")
+                .eq("version", expectedVersion)
+                .le("update_time", inactiveBefore)
+                .set("failed_count", failed)
+                .set("record_status", terminalStatus)
+                .set("current_stage", UPLOAD_CLEANUP_PENDING)
+                .set("error_message", errorMessage)
+                .set("finish_time", now)
+                .set("update_time", now)
+                .setSql("version = version + 1"));
+        if (updated != 1) {
+            return null;
+        }
+        recordItemMapper.update(null, new UpdateWrapper<GisFileOptRecordItem>()
+                .eq("record_id", recordId)
+                .eq("operation_status", "RUNNING")
+                .set("operation_status", "FAILED")
+                .set("upload_status", "FAILED")
+                .set("cleanup_status", "PENDING")
+                .set("error_message", errorMessage)
+                .set("update_time", now));
+        return recordMapper.selectById(recordId);
+    }
+
+    /** 暂存资源删除成功后结束清理阶段；重复调用不会改变已收口记录。 */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public boolean completeUploadCleanup(Long recordId) {
+        if (recordId == null) {
+            throw new IllegalArgumentException("上传记录ID不能为空");
+        }
+        GisFileOptRecord record = recordMapper.selectById(recordId);
+        if (record == null || !UPLOAD_CLEANUP_PENDING.equals(record.getCurrentStage())) {
+            return false;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        recordItemMapper.update(null, new UpdateWrapper<GisFileOptRecordItem>()
+                .eq("record_id", recordId)
+                .eq("cleanup_status", "PENDING")
+                .set("cleanup_status", "COMPLETED")
+                .set("update_time", now));
+        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
+                .eq("id", recordId)
+                .eq("current_stage", UPLOAD_CLEANUP_PENDING)
+                .set("current_stage", record.getRecordStatus())
+                .set("update_time", now)
+                .setSql("version = version + 1"));
+        return updated == 1;
     }
 
     /** 每个请求块完成后仅写一次数据库进度；重复块不会导致累计翻倍。 */

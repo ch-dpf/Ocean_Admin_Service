@@ -3,6 +3,7 @@ package org.ocean.admin.gis.service;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.config.FileUploadConfig;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.dto.GisUploadChunkCommand;
@@ -41,12 +42,14 @@ import java.util.Set;
  *     <li>约束批次内文件顺序，处理重复块、断点续传和故障恢复；</li>
  *     <li>协调流式落盘、文件转正、元数据入库和数据集文件计数；</li>
  *     <li>维护 Redis 实时任务快照并推送 WebSocket 上传进度。</li>
+ *     <li>在批次终态清理空目录，并回收长时间无活动的暂存资源。</li>
  * </ul>
  *
  * <p>HTTP 请求头解析由 Controller 负责，具体文件 IO 由 {@link FileUploadUtil} 负责，
  * 数据库事务由 {@link GisFileOptRecordService} 负责。本服务不保存独立上传会话。</p>
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class FileUploadService {
 
@@ -441,12 +444,96 @@ public class FileUploadService {
 
     private void finishTaskIfDone(GisFileOptRecord record) {
         if (!"RUNNING".equals(record.getRecordStatus())) {
+            fileUploadUtil.deleteEmptyBatchDirectory(record.getRecordNo());
             asyncTaskService.finalizeTaskResult(
                     record.getRecordNo(),
                     record.getFailedCount() == 0
                             ? "全部文件上传完成"
                             : "上传结束，成功" + record.getCompletedCount()
                                     + "个，失败" + record.getFailedCount() + "个");
+        }
+    }
+
+    /**
+     * 回收超过空闲时限的上传批次，并重试上次未完成的暂存目录清理。
+     *
+     * @return 本轮完成清理收口的批次数量
+     */
+    public int cleanupExpiredBatches() {
+        if (uploadConfig.getIdleTimeout().isZero()
+                || uploadConfig.getIdleTimeout().isNegative()) {
+            throw new IllegalStateException("GIS上传空闲超时时间必须大于0");
+        }
+        int limit = uploadConfig.getCleanupBatchSize();
+        if (limit < 1) {
+            throw new IllegalStateException("GIS上传单轮清理批次数必须大于0");
+        }
+
+        LocalDateTime inactiveBefore = LocalDateTime.now().minus(uploadConfig.getIdleTimeout());
+        List<GisFileOptRecord> pending = gisFileOptRecordService.findCleanupPendingBatches(limit);
+        int cleanedCount = 0;
+        for (GisFileOptRecord record : pending) {
+            if (cleanupBatch(record, inactiveBefore)) {
+                cleanedCount++;
+            }
+        }
+
+        int remaining = limit - pending.size();
+        if (remaining < 1) {
+            return cleanedCount;
+        }
+        List<GisFileOptRecord> expired = gisFileOptRecordService.findExpiredUploadBatches(
+                inactiveBefore, remaining);
+        for (GisFileOptRecord record : expired) {
+            if (cleanupBatch(record, inactiveBefore)) {
+                cleanedCount++;
+            }
+        }
+        return cleanedCount;
+    }
+
+    private boolean cleanupBatch(GisFileOptRecord candidate, LocalDateTime inactiveBefore) {
+        String lockKey = candidate.getRequestId() == null
+                ? candidate.getRecordNo()
+                : candidate.getRequestId();
+        synchronized (requestLock(lockKey)) {
+            GisFileOptRecord record = candidate;
+            if ("RUNNING".equals(record.getRecordStatus())) {
+                record = gisFileOptRecordService.expireUploadBatch(
+                        record.getId(), record.getVersion(), inactiveBefore);
+                if (record == null) {
+                    return false;
+                }
+            }
+
+            boolean taskFinalized = finalizeExpiredProgressTask(record);
+            try {
+                fileUploadUtil.deleteBatchDirectory(record.getRecordNo());
+            } catch (RuntimeException ex) {
+                log.warn("清理过期上传暂存目录失败，将在下轮重试: taskNo={}",
+                        record.getRecordNo(), ex);
+                return false;
+            }
+            if (!taskFinalized) {
+                return false;
+            }
+            return gisFileOptRecordService.completeUploadCleanup(record.getId());
+        }
+    }
+
+    private boolean finalizeExpiredProgressTask(GisFileOptRecord record) {
+        try {
+            asyncTaskService.updateProgress(
+                    record.getRecordNo(),
+                    TaskProgressUpdate.resultChanged(
+                            record.getCompletedCount(), record.getFailedCount()));
+            asyncTaskService.finalizeTaskResult(
+                    record.getRecordNo(), "上传长时间无活动，系统已自动终止");
+            return true;
+        } catch (RuntimeException ex) {
+            log.warn("结束过期上传实时任务失败，将在下轮重试: taskNo={}",
+                    record.getRecordNo(), ex);
+            return false;
         }
     }
 
