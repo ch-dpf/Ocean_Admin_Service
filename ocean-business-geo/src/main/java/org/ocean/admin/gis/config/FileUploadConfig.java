@@ -10,7 +10,7 @@ import org.springframework.validation.annotation.Validated;
 
 import java.time.Duration;
 
-/** GIS 文件上传配置。 */
+/** 文件上传配置。 */
 @Data
 @Component
 @ConfigurationProperties(prefix = "gis.upload")

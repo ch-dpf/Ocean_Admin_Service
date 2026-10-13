@@ -39,7 +39,7 @@ public class ProcessingWorker {
     private final ProcessingTaskRecordService taskService;
     private final ObjectMapper objectMapper;
 
-    @Async("gisTaskExecutor")
+    @Async("taskExecutor")
     public void process(Long taskId) {
         GisProcessingTask task = taskService.getRequired(taskId);
         GisTileSet tileSet = tileSetMapper.selectByTaskId(taskId);
