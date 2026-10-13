@@ -22,7 +22,7 @@ classDiagram
         Integer maxZoom
         String status
     }
-    class GisPublicationService {
+    class PublicationService {
         +getPublicationPage(type, filters)
         +publish(tileSet, serviceCode)
         +getRequired(type, serviceCode)
@@ -41,11 +41,11 @@ classDiagram
     class GisPublicationMapper
     class GisProcessingStorageService
 
-    GisPublicationService --> GisPublicationMapper
+    PublicationService --> GisPublicationMapper
     GisPublicationMapper --> GisPublication
     GisPublication --> GisTileSet
-    TerrainPublicationService --> GisPublicationService
-    ImageryPublicationService --> GisPublicationService
+    TerrainPublicationService --> PublicationService
+    ImageryPublicationService --> PublicationService
     ImageryPublicationService --> GisProcessingStorageService
     ImageryPublicationController --> ImageryPublicationService
     ImageryResourceController --> ImageryPublicationService
@@ -58,7 +58,7 @@ sequenceDiagram
     actor User
     participant API as ImageryPublicationController
     participant TypeService as ImageryPublicationService
-    participant CommonService as GisPublicationService
+    participant CommonService as PublicationService
     participant FS as Tile Directory
     participant DB as PostgreSQL
 

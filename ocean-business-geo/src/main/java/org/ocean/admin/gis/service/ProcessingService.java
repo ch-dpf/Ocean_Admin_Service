@@ -44,9 +44,9 @@ public class ProcessingService {
     private final GisProcessingStorageService storageService;
     private final GisFileProcessingEngineRegistry engineRegistry;
     private final GisProcessingInputResolverRegistry inputResolverRegistry;
-    private final GisProcessingTaskService transactionService;
+    private final ProcessingTaskService transactionService;
     private final ProcessingWorker worker;
-    private final GisProcessingTaskLifecycleService taskLifecycle;
+    private final ProcessingTaskLifecycleService taskLifecycle;
     private final ObjectMapper objectMapper;
 
     public GisBatchProcessingTaskVO submitBatch(GisCreateProcessingTaskRequest request,
@@ -120,7 +120,7 @@ public class ProcessingService {
     private GisBatchProcessingTaskVO submit(GisSubmitProcessingCommand command) {
         validateCommand(command);
         GisFileProcessingEngine engine = engineRegistry.require(command.processingType());
-        String taskNo = GisTaskNoGenerator.generateProcessingTaskNo(command.processingType());
+        String taskNo = TaskNoGenerator.generateProcessingTaskNo(command.processingType());
         GisProcessingWorkspace workspace = storageService.taskWorkspace(
                 command.processingType(), taskNo);
         GisProcessingInputResolver resolver = inputResolverRegistry.require(command.sourceType());
@@ -128,7 +128,7 @@ public class ProcessingService {
         try {
             validateResolvedInputs(command, engine, prepared.inputs(),
                     resolver.resolveRuntime(prepared.inputs()));
-            GisProcessingTaskService.CreatedProcessingTask created = transactionService.create(
+            ProcessingTaskService.CreatedProcessingTask created = transactionService.create(
                     taskNo, command, workspace, prepared.inputs());
             taskLifecycle.dispatch(created.taskId(), taskNo, command.taskName().trim(),
                     prepared.inputs().size(), "GIS_" + command.processingType().name(),

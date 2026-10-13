@@ -28,8 +28,8 @@ public class TerrainPublicationService {
     private static final String PROCESSING_TYPE = "TERRAIN";
     private static final String TERRAIN_PREFIX = "terrain/";
 
-    private final GisPublicationService publicationService;
-    private final GisProcessingTaskRecordService taskService;
+    private final PublicationService publicationService;
+    private final ProcessingTaskRecordService taskService;
     private final GisProcessingStorageService processingStorageService;
     private final Map<String, Path> publishedRoots = new ConcurrentHashMap<>();
 
@@ -93,7 +93,7 @@ public class TerrainPublicationService {
 
     private Path loadPublishedRoot(String serviceCode) {
         GisPublication publication = publicationService.getRequired(PROCESSING_TYPE, serviceCode);
-        if (!GisPublicationService.PUBLISHED.equals(publication.getStatus())) {
+        if (!PublicationService.PUBLISHED.equals(publication.getStatus())) {
             throw new IllegalStateException("地形服务已停用");
         }
         return validateTiles(publicationService.getPublicationTileSet(publication).getOutputKey());

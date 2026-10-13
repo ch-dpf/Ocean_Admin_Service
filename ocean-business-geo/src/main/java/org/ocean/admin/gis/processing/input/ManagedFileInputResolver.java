@@ -7,7 +7,7 @@ import org.ocean.admin.gis.entity.GisProcessingInput;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.processing.GisInputSourceType;
 import org.ocean.admin.gis.processing.GisSubmitProcessingCommand;
-import org.ocean.admin.gis.service.GisFileMetaService;
+import org.ocean.admin.gis.service.FileMetaService;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.springframework.stereotype.Component;
 
@@ -20,7 +20,7 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 public class ManagedFileInputResolver implements GisProcessingInputResolver {
-    private final GisFileMetaService fileMetaService;
+    private final FileMetaService fileMetaService;
     private final GisDataSetMapper dataSetMapper;
     private final FileUploadUtil fileUploadUtil;
 

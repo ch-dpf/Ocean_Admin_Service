@@ -12,8 +12,8 @@ import java.util.function.Function;
 /** 协调持久化处理任务与实时进度的状态流转。 */
 @Service
 @RequiredArgsConstructor
-public class GisProcessingTaskLifecycleService {
-    private final GisProcessingTaskRecordService taskService;
+public class ProcessingTaskLifecycleService {
+    private final ProcessingTaskRecordService taskService;
     private final AsyncTaskService progressService;
 
     public void dispatch(Long taskId, String taskNo, String taskName, int totalCount,

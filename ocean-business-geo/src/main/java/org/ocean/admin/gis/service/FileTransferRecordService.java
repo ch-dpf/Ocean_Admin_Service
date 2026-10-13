@@ -32,7 +32,7 @@ import java.util.Set;
  */
 @Service
 @RequiredArgsConstructor
-public class GisFileTransferRecordService {
+public class FileTransferRecordService {
     private static final String UPLOAD_CLEANUP_PENDING = "UPLOAD_CLEANUP_PENDING";
     private static final Set<String> RECORD_STATUSES = Set.of(
             "QUEUED", "RUNNING", "COMPLETED", "PARTIAL_FAILED", "FAILED");
@@ -460,7 +460,7 @@ public class GisFileTransferRecordService {
     public GisFileTransferRecord createDownloadRecord(GisFileMeta fileMeta, Long operatorId) {
         LocalDateTime now = LocalDateTime.now();
         GisFileTransferRecord record = new GisFileTransferRecord();
-        record.setRecordNo(GisTaskNoGenerator.generateDownloadTaskNo());
+        record.setRecordNo(TaskNoGenerator.generateDownloadTaskNo());
         record.setOperationType("EXPORT");
         record.setDataSetId(fileMeta.getDataSetId());
         record.setTotalCount(1);

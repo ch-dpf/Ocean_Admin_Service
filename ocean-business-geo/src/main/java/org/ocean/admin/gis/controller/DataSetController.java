@@ -8,7 +8,7 @@ import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
-import org.ocean.admin.gis.service.GisDataSetService;
+import org.ocean.admin.gis.service.DataSetService;
 import org.ocean.admin.gis.vo.GisDataSetVO;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,9 +24,9 @@ import java.util.List;
 @RequestMapping("/api/gis/dataSet")
 @Tag(name = "GIS数据集管理", description = "GIS数据集管理接口")
 @RequiredArgsConstructor
-public class GisDataSetController {
+public class DataSetController {
 
-    private final GisDataSetService gisDataSetService;
+    private final DataSetService dataSetService;
 
     @GetMapping("/page")
     @Operation(summary = "获取数据集分页")
@@ -36,7 +36,7 @@ public class GisDataSetController {
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) String dataSetName) {
         return ResponseResult.success(
-                gisDataSetService.getDataSetPage(current, size, categoryId, dataSetName)
+                dataSetService.getDataSetPage(current, size, categoryId, dataSetName)
         );
     }
     @GetMapping("/query")
@@ -45,7 +45,7 @@ public class GisDataSetController {
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) String dataSetName) {
         return ResponseResult.success(
-                gisDataSetService.getDataSets(categoryId, dataSetName)
+                dataSetService.getDataSets(categoryId, dataSetName)
         );
     }
 
@@ -54,7 +54,7 @@ public class GisDataSetController {
     @OperationLog(module = "GIS_DATASET", type = OperationType.INSERT, description = "创建GIS数据集",
             recordResponse = true)
     public ResponseResult<GisDataSetVO> createDataset(@RequestBody GisDataSetVO reqVO) {
-        GisDataSetVO created = gisDataSetService.createDataset(reqVO);
+        GisDataSetVO created = dataSetService.createDataset(reqVO);
         return ResponseResult.success("创建成功", created);
     }
 
@@ -62,7 +62,7 @@ public class GisDataSetController {
     @Operation(summary = "更新数据集")
     @OperationLog(module = "GIS_DATASET", type = OperationType.UPDATE, description = "更新GIS数据集")
     public ResponseResult<String> updateDataset(@RequestBody GisDataSetVO reqVO) {
-        gisDataSetService.updateDataset(reqVO);
+        dataSetService.updateDataset(reqVO);
         return ResponseResult.success("更新成功");
     }
 
@@ -70,14 +70,14 @@ public class GisDataSetController {
     @Operation(summary = "删除数据集")
     @OperationLog(module = "GIS_DATASET", type = OperationType.DELETE, description = "删除GIS数据集")
     public ResponseResult<String> deleteDataset(@PathVariable Long id) {
-        gisDataSetService.deleteDataset(id);
+        dataSetService.deleteDataset(id);
         return ResponseResult.success("删除成功");
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "获取数据集详情")
     public ResponseResult<GisDataSetVO> getDataset(@PathVariable Long id) {
-        return ResponseResult.success(gisDataSetService.getDatasetDetail(id));
+        return ResponseResult.success(dataSetService.getDatasetDetail(id));
     }
 
 

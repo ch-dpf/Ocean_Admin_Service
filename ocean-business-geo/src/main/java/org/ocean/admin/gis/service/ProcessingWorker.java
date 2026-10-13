@@ -35,8 +35,8 @@ public class ProcessingWorker {
     private final GisProcessingInputResolverRegistry inputResolverRegistry;
     private final GisFileProcessingEngineRegistry engineRegistry;
     private final GisProcessingStorageService storageService;
-    private final GisProcessingTaskLifecycleService taskLifecycle;
-    private final GisProcessingTaskRecordService taskService;
+    private final ProcessingTaskLifecycleService taskLifecycle;
+    private final ProcessingTaskRecordService taskService;
     private final ObjectMapper objectMapper;
 
     @Async("gisTaskExecutor")

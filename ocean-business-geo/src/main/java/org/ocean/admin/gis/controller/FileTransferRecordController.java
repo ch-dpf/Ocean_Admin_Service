@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.service.GisFileTransferRecordService;
+import org.ocean.admin.gis.service.FileTransferRecordService;
 import org.ocean.admin.gis.vo.GisFileTransferRecordVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
@@ -25,9 +25,9 @@ import java.util.List;
 @RequestMapping("/api/gis/file-transfer-records")
 @Tag(name = "GIS文件传输记录", description = "原始文件批量上传、下载传输记录查询接口")
 @RequiredArgsConstructor
-public class GisFileTransferRecordController {
+public class FileTransferRecordController {
 
-    private final GisFileTransferRecordService gisFileTransferRecordService;
+    private final FileTransferRecordService fileTransferRecordService;
 
     @GetMapping
     @Operation(summary = "分页查询文件传输记录")
@@ -51,7 +51,7 @@ public class GisFileTransferRecordController {
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
             LocalDateTime createTimeEnd) {
-        return ResponseResult.success(gisFileTransferRecordService.getRecordPage(
+        return ResponseResult.success(fileTransferRecordService.getRecordPage(
                 current, size, dataSetId, categoryId, recordNo, operationType, recordStatus,
                 originalName, extension, uploadStatus, createTimeStart, createTimeEnd));
     }
@@ -61,6 +61,6 @@ public class GisFileTransferRecordController {
     public ResponseResult<GisFileTransferRecordVO> detail(
             @Parameter(description = "传输批次编号", required = true)
             @PathVariable String recordNo) {
-        return ResponseResult.success(gisFileTransferRecordService.getRecordDetail(recordNo));
+        return ResponseResult.success(fileTransferRecordService.getRecordDetail(recordNo));
     }
 }

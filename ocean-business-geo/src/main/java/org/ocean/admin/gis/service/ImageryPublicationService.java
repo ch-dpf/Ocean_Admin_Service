@@ -36,8 +36,8 @@ public class ImageryPublicationService {
             "^(\\d{1,2})/(\\d+)/(\\d+)\\.(png|jpg|jpeg)$",
             Pattern.CASE_INSENSITIVE);
 
-    private final GisPublicationService publicationService;
-    private final GisProcessingTaskRecordService taskService;
+    private final PublicationService publicationService;
+    private final ProcessingTaskRecordService taskService;
     private final GisProcessingStorageService processingStorageService;
     private final ObjectMapper objectMapper;
     private final Map<String, PublishedTiles> publishedTiles = new ConcurrentHashMap<>();
@@ -104,7 +104,7 @@ public class ImageryPublicationService {
 
     private PublishedTiles loadPublishedTiles(String serviceCode) {
         GisPublication publication = publicationService.getRequired(PROCESSING_TYPE, serviceCode);
-        if (!GisPublicationService.PUBLISHED.equals(publication.getStatus())) {
+        if (!PublicationService.PUBLISHED.equals(publication.getStatus())) {
             throw new IllegalStateException("影像服务已停用");
         }
         GisTileSet tileSet = publicationService.getPublicationTileSet(publication);

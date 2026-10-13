@@ -9,13 +9,13 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /** 统一生成和校验 GIS 业务任务及操作记录编号。 */
-public final class GisTaskNoGenerator {
+public final class TaskNoGenerator {
     private static final DateTimeFormatter TIMESTAMP =
             DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final Pattern UPLOAD_TASK_NO =
             Pattern.compile("upload_[0-9]{14}_[a-f0-9]{12}");
 
-    private GisTaskNoGenerator() {
+    private TaskNoGenerator() {
     }
 
     public static String generateUploadTaskNo() {

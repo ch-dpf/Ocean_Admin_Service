@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class GisFileMetaService {
+public class FileMetaService {
 
     private static final Set<String> STORAGE_TYPES = Set.of("LOCAL", "MINIO", "S3");
     private static final Set<String> UPLOAD_STATUSES = Set.of("PENDING", "READY", "FAILED");
@@ -42,8 +42,8 @@ public class GisFileMetaService {
     private final GisFileMetaMapper gisFileMetaMapper;
     private final GisFileTransferRecordItemMapper gisFileTransferRecordItemMapper;
     private final GisDataSetMapper gisDataSetMapper;
-    private final GisDataSetService gisDataSetService;
-    private final GisFileTransferRecordService gisFileTransferRecordService;
+    private final DataSetService dataSetService;
+    private final FileTransferRecordService fileTransferRecordService;
     private final FileDownloadUtil fileDownloadUtil;
     private final FileUploadUtil fileUploadUtil;
 
@@ -119,7 +119,7 @@ public class GisFileMetaService {
             throw new IllegalStateException("回收站文件恢复失败: " + id);
         }
         if ("READY".equals(deletedMeta.getUploadStatus())) {
-            gisDataSetService.incrementFileCount(deletedMeta.getDataSetId(), 1);
+            dataSetService.incrementFileCount(deletedMeta.getDataSetId(), 1);
         }
         log.info("恢复回收站 GIS 文件成功: id={}, dataSetId={}", id, deletedMeta.getDataSetId());
     }
@@ -165,7 +165,7 @@ public class GisFileMetaService {
             throw new IllegalStateException("文件元数据创建失败");
         }
         if ("READY".equals(meta.getUploadStatus())) {
-            gisDataSetService.incrementFileCount(meta.getDataSetId(), 1);
+            dataSetService.incrementFileCount(meta.getDataSetId(), 1);
         }
         log.info("创建 GIS 文件元数据成功: id={}, dataSetId={}, storageKey={}",
                 meta.getId(), meta.getDataSetId(), meta.getStorageKey());
@@ -228,7 +228,7 @@ public class GisFileMetaService {
             throw new IllegalStateException("文件元数据删除失败: " + id);
         }
         if ("READY".equals(existing.getUploadStatus())) {
-            gisDataSetService.decrementFileCount(existing.getDataSetId(), 1);
+            dataSetService.decrementFileCount(existing.getDataSetId(), 1);
         }
         log.info("删除 GIS 文件元数据成功: id={}", id);
     }
@@ -253,7 +253,7 @@ public class GisFileMetaService {
                 meta.getStorageKey(), meta.getOriginalName(), request, response);
         if (result.transferAccepted()) {
             try {
-                gisFileTransferRecordService.createDownloadRecord(meta, currentOperatorId());
+                fileTransferRecordService.createDownloadRecord(meta, currentOperatorId());
             } catch (RuntimeException recordFailure) {
                 log.error("下载记录登记失败: fileMetaId={}", id, recordFailure);
             }
@@ -394,10 +394,10 @@ public class GisFileMetaService {
         boolean isReady = "READY".equals(updated.getUploadStatus());
         boolean moved = !existing.getDataSetId().equals(updated.getDataSetId());
         if (wasReady && (!isReady || moved)) {
-            gisDataSetService.decrementFileCount(existing.getDataSetId(), 1);
+            dataSetService.decrementFileCount(existing.getDataSetId(), 1);
         }
         if (isReady && (!wasReady || moved)) {
-            gisDataSetService.incrementFileCount(updated.getDataSetId(), 1);
+            dataSetService.incrementFileCount(updated.getDataSetId(), 1);
         }
     }
 

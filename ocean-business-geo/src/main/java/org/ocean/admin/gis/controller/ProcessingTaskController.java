@@ -11,7 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
 import org.ocean.admin.gis.dto.GisManagedProcessingRequest;
 import org.ocean.admin.gis.dto.GisWorkspaceProcessingRequest;
-import org.ocean.admin.gis.service.GisProcessingTaskRecordService;
+import org.ocean.admin.gis.service.ProcessingTaskRecordService;
 import org.ocean.admin.gis.service.ProcessingService;
 import org.ocean.admin.gis.vo.GisBatchProcessingTaskVO;
 import org.ocean.admin.gis.vo.GisProcessingTaskDetailVO;
@@ -39,9 +39,9 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/gis/task")
 @RequiredArgsConstructor
-public class GisProcessingTaskController {
+public class ProcessingTaskController {
 
-    private final GisProcessingTaskRecordService taskService;
+    private final ProcessingTaskRecordService taskService;
     private final ProcessingService processingService;
 
     @GetMapping("/page")

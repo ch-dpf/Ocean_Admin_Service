@@ -33,7 +33,7 @@ import java.util.Set;
 /** GIS 处理任务的持久化查询及生命周期状态更新。 */
 @Service
 @RequiredArgsConstructor
-public class GisProcessingTaskRecordService {
+public class ProcessingTaskRecordService {
 
     private static final Set<String> TASK_STATUSES =
             Set.of("QUEUED", "RUNNING", "COMPLETED", "PARTIAL_FAILED", "FAILED");

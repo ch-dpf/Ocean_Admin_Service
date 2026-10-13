@@ -6,8 +6,8 @@ import org.ocean.admin.gis.entity.GisProcessingTask;
 import java.time.LocalDateTime;
 
 /** 初始化尚未运行的 GIS 处理任务。 */
-public final class GisProcessingTaskFactory {
-    private GisProcessingTaskFactory() {
+public final class ProcessingTaskFactory {
+    private ProcessingTaskFactory() {
     }
 
     public static GisProcessingTask createQueued(String taskNo, String taskName, long totalCount,

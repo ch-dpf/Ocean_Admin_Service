@@ -25,7 +25,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/gis/uploads")
 @RequiredArgsConstructor
-public class GisFileUploadController {
+public class FileUploadController {
 
     private final FileUploadService fileUploadService;
 

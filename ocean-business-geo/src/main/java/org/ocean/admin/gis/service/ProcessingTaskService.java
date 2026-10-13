@@ -23,8 +23,8 @@ import java.util.List;
 /** 在单一事务中创建任务、处理作业、输入快照和唯一瓦片集。 */
 @Service
 @RequiredArgsConstructor
-public class GisProcessingTaskService {
-    private final GisProcessingTaskRecordService taskService;
+public class ProcessingTaskService {
+    private final ProcessingTaskRecordService taskService;
     private final GisProcessingInputMapper inputMapper;
     private final GisTileSetMapper tileSetMapper;
     private final ObjectMapper objectMapper;
@@ -34,7 +34,7 @@ public class GisProcessingTaskService {
             GisProcessingWorkspace workspace, List<GisProcessingInput> inputs) {
         LocalDateTime now = LocalDateTime.now();
         String parametersJson = writeParameters(command);
-        GisProcessingTask task = GisProcessingTaskFactory.createQueued(
+        GisProcessingTask task = ProcessingTaskFactory.createQueued(
                 taskNo, command.taskName().trim(), inputs.size(), "QUEUED");
         task.setProcessingType(command.processingType().name());
         task.setSourceType(command.sourceType().name());

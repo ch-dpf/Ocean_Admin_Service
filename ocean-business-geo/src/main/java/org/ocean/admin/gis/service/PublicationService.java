@@ -25,7 +25,7 @@ import java.util.Set;
 /** 各类瓦片集共用的发布记录和状态管理。 */
 @Service
 @RequiredArgsConstructor
-public class GisPublicationService {
+public class PublicationService {
     public static final String PUBLISHED = "PUBLISHED";
     public static final String DISABLED = "DISABLED";
     private static final Set<String> STATUSES = Set.of(PUBLISHED, DISABLED);

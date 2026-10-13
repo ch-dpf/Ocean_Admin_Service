@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.service.GisPublicationService;
+import org.ocean.admin.gis.service.PublicationService;
 import org.ocean.admin.gis.vo.GisPublicationVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
@@ -24,8 +24,8 @@ import java.util.List;
 @RequestMapping("/api/gis/publications")
 @Tag(name = "GIS统一发布查询", description = "分页查看地形、影像和矢量发布记录")
 @RequiredArgsConstructor
-public class GisPublicationController {
-    private final GisPublicationService publicationService;
+public class PublicationController {
+    private final PublicationService publicationService;
 
     @GetMapping("/page")
     @Operation(summary = "分页查询所有GIS发布记录")

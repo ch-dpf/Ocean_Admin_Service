@@ -7,7 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.service.GisFileMetaService;
+import org.ocean.admin.gis.service.FileMetaService;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
@@ -27,9 +27,9 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/gis/filemeta")
 @RequiredArgsConstructor
-public class GisFileMetaController {
+public class FileMetaController {
 
-    private final GisFileMetaService gisFileMetaService;
+    private final FileMetaService fileMetaService;
 
     @GetMapping("/page")
     @Operation(summary = "分页查询文件元数据")
@@ -41,7 +41,7 @@ public class GisFileMetaController {
             @RequestParam(required = false) String originalName,
             @RequestParam(required = false) String extension,
             @RequestParam(required = false) String uploadStatus) {
-        return ResponseResult.success(gisFileMetaService.getFileMetaPage(
+        return ResponseResult.success(fileMetaService.getFileMetaPage(
                 current, size, dataSetId, categoryId, originalName, extension, uploadStatus));
     }
 
@@ -55,7 +55,7 @@ public class GisFileMetaController {
             @RequestParam(required = false) String originalName,
             @RequestParam(required = false) String extension,
             @RequestParam(required = false) String uploadStatus) {
-        return ResponseResult.success(gisFileMetaService.getDeletedFileMetaPage(
+        return ResponseResult.success(fileMetaService.getDeletedFileMetaPage(
                 current, size, dataSetId, categoryId, originalName, extension, uploadStatus));
     }
 
@@ -64,7 +64,7 @@ public class GisFileMetaController {
     @OperationLog(module = "GIS_FILE_META", type = OperationType.UPDATE,
             description = "恢复回收站GIS文件元数据")
     public ResponseResult<String> restoreDeletedFileMeta(@PathVariable Long id) {
-        gisFileMetaService.restoreDeletedFileMeta(id);
+        fileMetaService.restoreDeletedFileMeta(id);
         return ResponseResult.success("恢复成功");
     }
 
@@ -74,7 +74,7 @@ public class GisFileMetaController {
     @OperationLog(module = "GIS_FILE_META", type = OperationType.DELETE,
             description = "彻底删除回收站GIS文件")
     public ResponseResult<String> permanentlyDeleteFileMeta(@PathVariable Long id) {
-        gisFileMetaService.permanentlyDeleteFileMeta(id);
+        fileMetaService.permanentlyDeleteFileMeta(id);
         return ResponseResult.success("彻底删除成功");
     }
 
@@ -83,28 +83,28 @@ public class GisFileMetaController {
     @OperationLog(module = "GIS_FILE_META", type = OperationType.INSERT, description = "创建GIS文件元数据",
             recordResponse = true)
     public ResponseResult<GisFileMetaVO> createFileMeta(@Valid @RequestBody GisFileMetaVO reqVO) {
-        return ResponseResult.success("创建成功", gisFileMetaService.createFileMeta(reqVO));
+        return ResponseResult.success("创建成功", fileMetaService.createFileMeta(reqVO));
     }
 
     @PutMapping("/update")
     @Operation(summary = "更新文件元数据")
     @OperationLog(module = "GIS_FILE_META", type = OperationType.UPDATE, description = "更新GIS文件元数据")
     public ResponseResult<GisFileMetaVO> updateFileMeta(@Valid @RequestBody GisFileMetaVO reqVO) {
-        return ResponseResult.success("更新成功", gisFileMetaService.updateFileMeta(reqVO));
+        return ResponseResult.success("更新成功", fileMetaService.updateFileMeta(reqVO));
     }
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除文件元数据")
     @OperationLog(module = "GIS_FILE_META", type = OperationType.DELETE, description = "删除GIS文件元数据")
     public ResponseResult<String> deleteFileMeta(@PathVariable Long id) {
-        gisFileMetaService.deleteFileMeta(id);
+        fileMetaService.deleteFileMeta(id);
         return ResponseResult.success("删除成功");
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "获取文件元数据详情")
     public ResponseResult<GisFileMetaVO> getFileMeta(@PathVariable Long id) {
-        return ResponseResult.success(gisFileMetaService.getFileMetaDetail(id));
+        return ResponseResult.success(fileMetaService.getFileMetaDetail(id));
     }
 
     @GetMapping("/{id}/download")
@@ -116,7 +116,7 @@ public class GisFileMetaController {
             @PathVariable Long id,
             HttpServletRequest request,
             HttpServletResponse response) {
-        gisFileMetaService.downloadFile(id, request, response);
+        fileMetaService.downloadFile(id, request, response);
     }
 
 }
