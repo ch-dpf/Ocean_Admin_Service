@@ -66,7 +66,7 @@ public class DataSetService {
     }
 
 
-    public PageResult<List<GisDataSet>> getDataSetPage(
+    public PageResult<List<GisDataSetVO>> getDataSetPage(
             Integer current, Integer size, Long categoryId, String dataSetName) {
         long currentPage = current == null || current < 1 ? 1L : current;
         long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
@@ -81,16 +81,17 @@ public class DataSetService {
                 new Page<>(currentPage, pageSize),
                 queryWrapper
         );
-        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
+        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(),
+                page.getRecords().stream().map(this::toVO).toList());
     }
 
-    public List<GisDataSet> getDataSets(Long categoryId, String dataSetName) {
+    public List<GisDataSetVO> getDataSets(Long categoryId, String dataSetName) {
         String normalizedDataSetName = dataSetName == null ? "" : dataSetName.trim();
         LambdaQueryWrapper<GisDataSet> queryWrapper = new LambdaQueryWrapper<GisDataSet>()
                 .eq(categoryId != null, GisDataSet::getCategoryId, categoryId)
                 .like(!normalizedDataSetName.isEmpty() , GisDataSet::getDataSetName, normalizedDataSetName)
                 .orderByDesc(GisDataSet::getCreateTime);
-        return gisDataSetMapper.selectList(queryWrapper);
+        return gisDataSetMapper.selectList(queryWrapper).stream().map(this::toVO).toList();
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -213,6 +214,10 @@ public class DataSetService {
         result.setDataSetName(dataSet.getDataSetName());
         result.setCategoryId(dataSet.getCategoryId());
         result.setDescription(dataSet.getDescription());
+        result.setDataSetCode(dataSet.getDataSetCode());
+        result.setFileCount(dataSet.getFileCount());
+        result.setCreateTime(dataSet.getCreateTime());
+        result.setUpdateTime(dataSet.getUpdateTime());
         return result;
     }
 }

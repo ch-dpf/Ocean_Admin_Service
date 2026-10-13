@@ -1,12 +1,15 @@
 package org.ocean.admin.gis.service;
 
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.entity.GisProcessingInput;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisTileSet;
 import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
 import org.ocean.admin.gis.mapper.GisTileSetMapper;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
+import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisSubmitProcessingCommand;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,10 +37,10 @@ public class ProcessingTaskService {
             GisProcessingWorkspace workspace, List<GisProcessingInput> inputs) {
         LocalDateTime now = LocalDateTime.now();
         String parametersJson = writeParameters(command);
-        GisProcessingTask task = ProcessingTaskFactory.createQueued(
-                taskNo, command.taskName().trim(), inputs.size(), "QUEUED");
-        task.setProcessingType(command.processingType().name());
-        task.setSourceType(command.sourceType().name());
+        GisProcessingTask task = createQueuedTask(
+                taskNo, command.taskName().trim(), inputs.size(), now);
+        task.setProcessingType(command.processingType());
+        task.setSourceType(command.sourceType());
         task.setParametersJson(parametersJson);
         task.setParameterSchemaVersion(6);
         task.setRequestFingerprint(fingerprint(command, inputs, parametersJson));
@@ -54,7 +57,7 @@ public class ProcessingTaskService {
 
         GisTileSet tileSet = new GisTileSet();
         tileSet.setTaskId(task.getId());
-        tileSet.setTileType(command.processingType().name());
+        tileSet.setTileType(command.processingType());
         tileSet.setTileSetStatus("BUILDING");
         tileSet.setOutputKey(workspace.outputKey());
         tileSet.setTargetCrs(command.parameters().targetCrs());
@@ -63,13 +66,32 @@ public class ProcessingTaskService {
         tileSet.setMinZoom(command.parameters().minZoom());
         tileSet.setMaxZoom(command.parameters().maxZoom());
         tileSet.setManifestKey(workspace.outputKey() + "/tiles/"
-                + ("TERRAIN".equals(tileSet.getTileType()) ? "layer.json" : "manifest.json"));
+                + (command.processingType() == GisProcessingType.TERRAIN
+                        ? "layer.json" : "manifest.json"));
         tileSet.setCreateTime(now);
         tileSet.setUpdateTime(now);
         if (tileSetMapper.insert(tileSet) != 1) {
             throw new IllegalStateException("GIS瓦片集创建失败");
         }
         return new CreatedProcessingTask(task.getId(), tileSet.getId());
+    }
+
+    private GisProcessingTask createQueuedTask(
+            String taskNo, String taskName, long totalCount, LocalDateTime now) {
+        GisProcessingTask task = new GisProcessingTask();
+        task.setId(IdWorker.getId());
+        task.setTaskNo(taskNo);
+        task.setTaskName(taskName);
+        task.setPriority(0);
+        task.setTotalCount(totalCount);
+        task.setCompletedCount(0L);
+        task.setFailedCount(0L);
+        task.setTaskStatus(TaskStatus.QUEUED);
+        task.setCurrentStage(TaskStatus.QUEUED.name());
+        task.setCreateTime(now);
+        task.setUpdateTime(now);
+        task.setDeleted(0);
+        return task;
     }
 
     private String writeParameters(GisSubmitProcessingCommand command) {

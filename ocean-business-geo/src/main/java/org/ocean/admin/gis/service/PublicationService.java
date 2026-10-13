@@ -1,215 +1,106 @@
 package org.ocean.admin.gis.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisPublication;
 import org.ocean.admin.gis.entity.GisTileSet;
-import org.ocean.admin.gis.mapper.GisPublicationMapper;
-import org.ocean.admin.gis.mapper.GisFileMetaMapper;
-import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
-import org.ocean.admin.gis.mapper.GisTileSetMapper;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.vo.GisPublicationVO;
 import org.ocean.admin.kernel.common.PageResult;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.net.URI;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
+import java.util.Map;
 
-/** 各类瓦片集共用的发布记录和状态管理。 */
+/** GIS 服务发布、查询、停用和公开资源访问的统一业务门面。 */
 @Service
-@RequiredArgsConstructor
 public class PublicationService {
-    public static final String PUBLISHED = "PUBLISHED";
-    public static final String DISABLED = "DISABLED";
-    private static final Set<String> STATUSES = Set.of(PUBLISHED, DISABLED);
 
-    private final GisPublicationMapper publicationMapper;
-    private final GisTileSetMapper tileSetMapper;
-    private final GisProcessingInputMapper inputMapper;
-    private final GisFileMetaMapper fileMetaMapper;
+    private final PublicationRecordService recordService;
+    private final ProcessingTaskRecordService taskService;
+    private final Map<GisProcessingType, PublicationProtocol> protocols;
 
-    @Value("${gis.publication.public-base-url:http://localhost:8090}")
-    private String publicBaseUrl;
-
-    public PageResult<List<GisPublication>> getPublicationPage(
-            String processingType, Integer current, Integer size, String serviceCode,
-            String status, Long dataSetId, LocalDateTime publishTimeStart,
-            LocalDateTime publishTimeEnd) {
-        String type = normalizeProcessingType(processingType, true);
-        return queryPublicationPage(type, current, size, serviceCode, status, dataSetId,
-                publishTimeStart, publishTimeEnd);
+    public PublicationService(
+            PublicationRecordService recordService,
+            ProcessingTaskRecordService taskService,
+            List<PublicationProtocol> protocolList) {
+        this.recordService = recordService;
+        this.taskService = taskService;
+        EnumMap<GisProcessingType, PublicationProtocol> protocolMap =
+                new EnumMap<>(GisProcessingType.class);
+        for (PublicationProtocol protocol : protocolList) {
+            if (protocolMap.put(protocol.type(), protocol) != null) {
+                throw new IllegalStateException("发布协议重复注册: " + protocol.type());
+            }
+        }
+        requireRegisteredProtocol(protocolMap, GisProcessingType.IMAGERY);
+        requireRegisteredProtocol(protocolMap, GisProcessingType.TERRAIN);
+        this.protocols = Map.copyOf(protocolMap);
     }
 
-    public PageResult<List<GisPublicationVO>> getAllPublicationPage(
+    public PageResult<List<GisPublicationVO>> getPublicationPage(
             Integer current, Integer size, String processingType, String serviceCode,
             String status, Long dataSetId, LocalDateTime publishTimeStart,
             LocalDateTime publishTimeEnd) {
-        String type = normalizeProcessingType(processingType, false);
-        PageResult<List<GisPublication>> page = queryPublicationPage(type, current, size,
-                serviceCode, status, dataSetId, publishTimeStart, publishTimeEnd);
+        GisProcessingType type = normalizeProcessingType(processingType);
+        PageResult<List<GisPublication>> page = recordService.getPublicationPage(
+                type, current, size, serviceCode, status, dataSetId,
+                publishTimeStart, publishTimeEnd);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(),
-                page.getRecords().stream().map(this::toPublicationVO).toList());
+                page.getRecords().stream().map(this::toVO).toList());
     }
 
-    private PageResult<List<GisPublication>> queryPublicationPage(
-            String processingType, Integer current, Integer size, String serviceCode,
-            String status, Long dataSetId, LocalDateTime publishTimeStart,
-            LocalDateTime publishTimeEnd) {
-        long currentPage = current == null || current < 1 ? 1L : current;
-        long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
-        String normalizedCode = upperTrimToNull(serviceCode);
-        String normalizedStatus = upperTrimToNull(status);
-        if (normalizedStatus != null && !STATUSES.contains(normalizedStatus)) {
-            throw new IllegalArgumentException("发布状态只能为 PUBLISHED 或 DISABLED");
-        }
-        if (publishTimeStart != null && publishTimeEnd != null
-                && publishTimeStart.isAfter(publishTimeEnd)) {
-            throw new IllegalArgumentException("发布开始时间不能晚于发布结束时间");
-        }
-        LambdaQueryWrapper<GisPublication> query = new LambdaQueryWrapper<GisPublication>()
-                .like(normalizedCode != null, GisPublication::getServiceCode, normalizedCode)
-                .eq(normalizedStatus != null, GisPublication::getStatus, normalizedStatus)
-                .eq(dataSetId != null, GisPublication::getDataSetId, dataSetId)
-                .ge(publishTimeStart != null, GisPublication::getPublishTime, publishTimeStart)
-                .le(publishTimeEnd != null, GisPublication::getPublishTime, publishTimeEnd)
-                .orderByDesc(GisPublication::getPublishTime);
-        if (processingType != null) {
-            query.inSql(GisPublication::getTileSetId,
-                    "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = '"
-                            + processingType + "'");
-        }
-        Page<GisPublication> page = publicationMapper.selectPage(
-                new Page<>(currentPage, pageSize), query);
-        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(),
-                page.getRecords());
+    public GisPublicationVO publish(GisProcessingType processingType, Long sourceTaskId) {
+        PublicationProtocol protocol = requireProtocol(processingType);
+        GisProcessingTask task = taskService.getRequired(sourceTaskId);
+        GisTileSet tileSet = recordService.getRequiredTileSet(sourceTaskId, processingType);
+        PublicationProtocol.PublishedArtifact artifact =
+                protocol.validateForPublish(task, tileSet);
+        GisPublication existing = recordService.findBySourceTaskId(
+                processingType, sourceTaskId);
+        String serviceCode = existing == null
+                ? protocol.generateServiceCode()
+                : existing.getServiceCode();
+        GisPublication publication = recordService.publish(
+                tileSet, serviceCode, protocol.displayName());
+        protocol.activate(publication.getServiceCode(), artifact);
+        return toVO(publication);
     }
 
-    public GisPublication getRequired(String processingType, String serviceCode) {
-        String type = GisProcessingType.valueOf(processingType).name();
-        GisPublication publication = publicationMapper.selectOne(
-                new LambdaQueryWrapper<GisPublication>()
-                        .eq(GisPublication::getServiceCode, serviceCode)
-                        .inSql(GisPublication::getTileSetId,
-                                "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = '"
-                                        + type + "'"));
-        if (publication == null) {
-            throw new IllegalArgumentException(type + "发布服务不存在: " + serviceCode);
-        }
-        return publication;
+    public GisPublicationVO get(GisProcessingType processingType, String serviceCode) {
+        PublicationProtocol protocol = requireProtocol(processingType);
+        return toVO(recordService.getRequired(
+                processingType, protocol.normalizeServiceCode(serviceCode)));
     }
 
-    public GisPublication findBySourceTaskId(String processingType, Long sourceTaskId) {
-        GisTileSet tileSet = tileSetMapper.selectByTaskId(sourceTaskId);
-        if (tileSet == null || !processingType.equals(tileSet.getTileType())) {
-            return null;
-        }
-        return publicationMapper.selectOne(new LambdaQueryWrapper<GisPublication>()
-                .eq(GisPublication::getTileSetId, tileSet.getId()));
+    public GisPublicationVO disable(GisProcessingType processingType, String serviceCode) {
+        PublicationProtocol protocol = requireProtocol(processingType);
+        String normalizedCode = protocol.normalizeServiceCode(serviceCode);
+        GisPublication publication = recordService.disable(
+                processingType, normalizedCode, protocol.displayName());
+        protocol.deactivate(normalizedCode);
+        return toVO(publication);
     }
 
-    @Transactional(rollbackFor = Exception.class)
-    public GisPublication publish(GisTileSet tileSet, String initialServiceCode,
-            String displayName) {
-        GisPublication publication = publicationMapper.selectOne(
-                new LambdaQueryWrapper<GisPublication>()
-                        .eq(GisPublication::getTileSetId, tileSet.getId()));
-        if (publication != null && PUBLISHED.equals(publication.getStatus())) {
-            return publication;
-        }
-        LocalDateTime now = LocalDateTime.now();
-        if (publication == null) {
-            publication = new GisPublication();
-            publication.setServiceCode(initialServiceCode);
-            publication.setTileSetId(tileSet.getId());
-            publication.setDataSetId(commonDataSetId(tileSet.getTaskId()));
-            publication.setDeleted(0);
-        }
-        publication.setStatus(PUBLISHED);
-        publication.setPublishTime(now);
-        publication.setUpdateTime(now);
-        int affected = publication.getId() == null
-                ? publicationMapper.insert(publication)
-                : publicationMapper.updateById(publication);
-        if (affected != 1) {
-            throw new IllegalStateException(displayName + "发布记录保存失败");
-        }
-        return publication;
+    public Path resolvePublishedFile(
+            GisProcessingType processingType, String serviceCode, String relativePath) {
+        PublicationProtocol protocol = requireProtocol(processingType);
+        return protocol.resolvePublishedFile(
+                protocol.normalizeServiceCode(serviceCode), relativePath);
     }
 
-    @Transactional(rollbackFor = Exception.class)
-    public GisPublication disable(String processingType, String serviceCode, String displayName) {
-        GisPublication publication = getRequired(processingType, serviceCode);
-        if (!DISABLED.equals(publication.getStatus())) {
-            publication.setStatus(DISABLED);
-            publication.setUpdateTime(LocalDateTime.now());
-            if (publicationMapper.updateById(publication) != 1) {
-                throw new IllegalStateException(displayName + "停用失败: " + serviceCode);
-            }
-        }
-        return publication;
-    }
-
-    public GisTileSet getRequiredTileSet(Long taskId, String processingType) {
-        GisTileSet tileSet = tileSetMapper.selectByTaskId(taskId);
-        if (tileSet == null || !processingType.equals(tileSet.getTileType())) {
-            throw new IllegalArgumentException("任务没有对应类型的瓦片集: " + taskId);
-        }
-        return tileSet;
-    }
-
-    public GisTileSet getPublicationTileSet(GisPublication publication) {
-        GisTileSet tileSet = tileSetMapper.selectById(publication.getTileSetId());
-        if (tileSet == null) {
-            throw new IllegalStateException("发布记录关联的瓦片集不存在");
-        }
-        return tileSet;
-    }
-
-    public String buildPublicUrl(String relativePath) {
-        String base = publicBaseUrl == null ? "" : publicBaseUrl.trim();
-        URI uri;
-        try {
-            uri = URI.create(base);
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalStateException("gis.publication.public-base-url 配置无效", ex);
-        }
-        if (!("http".equalsIgnoreCase(uri.getScheme())
-                || "https".equalsIgnoreCase(uri.getScheme())) || uri.getHost() == null) {
-            throw new IllegalStateException("gis.publication.public-base-url 必须是 HTTP(S) 地址");
-        }
-        String normalizedBase = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
-        String normalizedPath = relativePath.startsWith("/") ? relativePath : "/" + relativePath;
-        return normalizedBase + normalizedPath;
-    }
-
-    private Long commonDataSetId(Long taskId) {
-        Long result = null;
-        for (var input : inputMapper.selectByTaskId(taskId)) {
-            if (input.getFileMetaId() == null) {
-                return null;
-            }
-            var fileMeta = fileMetaMapper.selectById(input.getFileMetaId());
-            if (fileMeta == null) {
-                return null;
-            }
-            if (result == null) {
-                result = fileMeta.getDataSetId();
-            } else if (!result.equals(fileMeta.getDataSetId())) {
-                return null;
-            }
-        }
-        return result;
-    }
-
-    private GisPublicationVO toPublicationVO(GisPublication publication) {
-        GisTileSet tileSet = getPublicationTileSet(publication);
+    private GisPublicationVO toVO(GisPublication publication) {
+        GisTileSet tileSet = recordService.getPublicationTileSet(publication);
+        PublicationProtocol protocol = protocols.get(tileSet.getTileType());
+        PublicationProtocol.PublicationAccess access = protocol == null
+                ? new PublicationProtocol.PublicationAccess(
+                        recordService.buildServiceRoot(
+                                tileSet.getTileType(), publication.getServiceCode()),
+                        null, null)
+                : protocol.buildAccess(publication, tileSet);
         return GisPublicationVO.builder()
                 .id(publication.getId())
                 .serviceCode(publication.getServiceCode())
@@ -224,41 +115,42 @@ public class PublicationService {
                 .outputFormat(tileSet.getOutputFormat())
                 .minZoom(tileSet.getMinZoom())
                 .maxZoom(tileSet.getMaxZoom())
-                .serviceUrl(buildPublicUrl(servicePath(tileSet.getTileType(),
-                        publication.getServiceCode())))
+                .serviceUrl(access.serviceUrl())
+                .descriptorUrl(access.descriptorUrl())
+                .tileUrlTemplate(access.tileUrlTemplate())
                 .publishTime(publication.getPublishTime())
                 .updateTime(publication.getUpdateTime())
                 .build();
     }
 
-    private String servicePath(String processingType, String serviceCode) {
-        return switch (GisProcessingType.valueOf(processingType)) {
-            case TERRAIN -> "/terrain/" + serviceCode + "/";
-            case IMAGERY -> "/imagery/" + serviceCode + "/";
-            case VECTOR -> "/vector/" + serviceCode + "/";
-        };
+    private PublicationProtocol requireProtocol(GisProcessingType processingType) {
+        if (processingType == null) {
+            throw new IllegalArgumentException("发布类型不能为空");
+        }
+        PublicationProtocol protocol = protocols.get(processingType);
+        if (protocol == null) {
+            throw new IllegalArgumentException("暂不支持该发布类型: " + processingType);
+        }
+        return protocol;
     }
 
-    private String normalizeProcessingType(String value, boolean required) {
-        String normalized = upperTrimToNull(value);
-        if (normalized == null) {
-            if (required) {
-                throw new IllegalArgumentException("发布类型不能为空");
-            }
+    private GisProcessingType normalizeProcessingType(String value) {
+        if (value == null || value.isBlank()) {
             return null;
         }
         try {
-            return GisProcessingType.valueOf(normalized).name();
+            return GisProcessingType.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException(
                     "发布类型只能为 TERRAIN、IMAGERY 或 VECTOR", ex);
         }
     }
 
-    private String upperTrimToNull(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
+    private static void requireRegisteredProtocol(
+            Map<GisProcessingType, PublicationProtocol> protocols,
+            GisProcessingType processingType) {
+        if (!protocols.containsKey(processingType)) {
+            throw new IllegalStateException("缺少发布协议: " + processingType);
         }
-        return value.trim().toUpperCase(Locale.ROOT);
     }
 }

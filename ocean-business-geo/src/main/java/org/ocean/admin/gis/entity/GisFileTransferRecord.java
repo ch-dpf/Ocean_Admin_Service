@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+import org.ocean.admin.gis.dto.TaskStatus;
 
 import java.time.LocalDateTime;
 
@@ -44,7 +45,7 @@ public class GisFileTransferRecord {
     private Long uploadedBytes;
 
     /** QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED。 */
-    private String recordStatus;
+    private TaskStatus recordStatus;
 
     /** 当前处理阶段。 */
     private String currentStage;

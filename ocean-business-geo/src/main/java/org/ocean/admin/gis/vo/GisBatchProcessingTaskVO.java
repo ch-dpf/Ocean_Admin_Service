@@ -2,6 +2,9 @@ package org.ocean.admin.gis.vo;
 
 import lombok.Builder;
 import lombok.Data;
+import org.ocean.admin.gis.dto.TaskStatus;
+import org.ocean.admin.gis.processing.GisInputSourceType;
+import org.ocean.admin.gis.processing.GisProcessingType;
 
 /** 多文件处理任务提交结果。 */
 @Data
@@ -10,9 +13,10 @@ public class GisBatchProcessingTaskVO {
     private Long taskId;
     private Long tileSetId;
     private String taskNo;
-    private String sourceType;
-    private String processingType;
+    private GisInputSourceType sourceType;
+    private String sourceTypeName;
+    private GisProcessingType processingType;
     private String outputKey;
-    private Integer totalCount;
-    private String status;
+    private Long totalCount;
+    private TaskStatus taskStatus;
 }

@@ -2,6 +2,7 @@ package org.ocean.admin.gis.vo;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
+import org.ocean.admin.gis.dto.TaskStatus;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -24,7 +25,7 @@ public class GisFileTransferRecordVO {
     private Long uploadedBytes;
 
     @Schema(description = "QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED 或 FAILED")
-    private String recordStatus;
+    private TaskStatus recordStatus;
 
     private String currentStage;
     private String resultStorageKey;
@@ -38,5 +39,26 @@ public class GisFileTransferRecordVO {
     private LocalDateTime updateTime;
 
     @Schema(description = "记录详情中的逐文件历史快照；分页列表不返回")
-    private List<GisFileMetaVO> files;
+    private List<FileItemVO> files;
+
+    /** 传输发生时的文件状态快照，不代表当前文件元数据。 */
+    public record FileItemVO(
+            Long recordItemId,
+            Long fileMetaId,
+            Integer sequenceNo,
+            String operationStatus,
+            String originalName,
+            String storageName,
+            String storageKey,
+            String storageType,
+            String extension,
+            Long sizeBytes,
+            String sha256,
+            Long uploadedBy,
+            String uploadStatus,
+            String cleanupStatus,
+            String errorMessage,
+            LocalDateTime createTime,
+            LocalDateTime updateTime) {
+    }
 }

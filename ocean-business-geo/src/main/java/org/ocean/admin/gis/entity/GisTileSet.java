@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+import org.ocean.admin.gis.processing.GisProcessingType;
 
 import java.time.LocalDateTime;
 
@@ -14,7 +15,7 @@ public class GisTileSet {
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private Long taskId;
-    private String tileType;
+    private GisProcessingType tileType;
     private String tileSetStatus;
     private String outputKey;
     private String targetCrs;

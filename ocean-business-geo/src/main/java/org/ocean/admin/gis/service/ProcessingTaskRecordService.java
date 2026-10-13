@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
 import org.ocean.admin.gis.dto.ImageryProcessingParameters;
+import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.dto.TerrainProcessingParameters;
 import org.ocean.admin.gis.entity.GisProcessingInput;
 import org.ocean.admin.gis.entity.GisProcessingTask;
@@ -28,15 +29,11 @@ import tools.jackson.databind.node.ObjectNode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /** GIS 处理任务的持久化查询及生命周期状态更新。 */
 @Service
 @RequiredArgsConstructor
 public class ProcessingTaskRecordService {
-
-    private static final Set<String> TASK_STATUSES =
-            Set.of("QUEUED", "RUNNING", "COMPLETED", "PARTIAL_FAILED", "FAILED");
 
     private final GisProcessingTaskMapper taskMapper;
     private final GisProcessingInputMapper inputMapper;
@@ -51,13 +48,9 @@ public class ProcessingTaskRecordService {
         long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
         String normalizedTaskNo = trimToNull(taskNo);
         String normalizedTaskName = trimToNull(taskName);
-        String normalizedProcessingType = normalizeProcessingType(processingType);
-        String normalizedSourceType = normalizeSourceType(sourceType);
-        String normalizedStatus = normalizeStatus(taskStatus);
-        if (normalizedStatus != null && !TASK_STATUSES.contains(normalizedStatus)) {
-            throw new IllegalArgumentException(
-                    "任务状态只能为 QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED 或 FAILED");
-        }
+        GisProcessingType normalizedProcessingType = normalizeProcessingType(processingType);
+        GisInputSourceType normalizedSourceType = normalizeSourceType(sourceType);
+        TaskStatus normalizedStatus = normalizeStatus(taskStatus);
         if (createTimeStart != null && createTimeEnd != null
                 && createTimeStart.isAfter(createTimeEnd)) {
             throw new IllegalArgumentException("创建开始时间不能晚于创建结束时间");
@@ -128,8 +121,8 @@ public class ProcessingTaskRecordService {
         int updated = taskMapper.update(null,
                 new LambdaUpdateWrapper<GisProcessingTask>()
                         .eq(GisProcessingTask::getId, taskId)
-                        .eq(GisProcessingTask::getTaskStatus, "QUEUED")
-                        .set(GisProcessingTask::getTaskStatus, "RUNNING")
+                        .eq(GisProcessingTask::getTaskStatus, TaskStatus.QUEUED)
+                        .set(GisProcessingTask::getTaskStatus, TaskStatus.RUNNING)
                         .set(GisProcessingTask::getCurrentStage, "PROCESSING")
                         .set(GisProcessingTask::getStartTime, LocalDateTime.now())
                         .set(GisProcessingTask::getUpdateTime, LocalDateTime.now()));
@@ -150,7 +143,7 @@ public class ProcessingTaskRecordService {
         int updated = taskMapper.update(null,
                 new LambdaUpdateWrapper<GisProcessingTask>()
                         .eq(GisProcessingTask::getId, taskId)
-                        .eq(GisProcessingTask::getTaskStatus, "RUNNING")
+                        .eq(GisProcessingTask::getTaskStatus, TaskStatus.RUNNING)
                         .setSql(countSql)
                         .set(GisProcessingTask::getUpdateTime, LocalDateTime.now()));
         if (updated != 1) {
@@ -165,12 +158,12 @@ public class ProcessingTaskRecordService {
         if (task.getCompletedCount() + task.getFailedCount() != task.getTotalCount()) {
             throw new IllegalStateException("GIS处理任务仍有未处理项，不能进入终态: " + taskId);
         }
-        String status = task.getFailedCount() == 0 ? "COMPLETED"
-                : task.getCompletedCount() == 0 ? "FAILED" : "PARTIAL_FAILED";
+        TaskStatus status = task.getFailedCount() == 0 ? TaskStatus.COMPLETED
+                : task.getCompletedCount() == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED;
         int updated = taskMapper.update(null,
                 new LambdaUpdateWrapper<GisProcessingTask>()
                         .eq(GisProcessingTask::getId, taskId)
-                        .eq(GisProcessingTask::getTaskStatus, "RUNNING")
+                        .eq(GisProcessingTask::getTaskStatus, TaskStatus.RUNNING)
                         .set(GisProcessingTask::getTaskStatus, status)
                         .set(GisProcessingTask::getCurrentStage, "FINISHED")
                         .set(GisProcessingTask::getFinishTime, LocalDateTime.now())
@@ -187,10 +180,10 @@ public class ProcessingTaskRecordService {
                 new LambdaUpdateWrapper<GisProcessingTask>()
                         .eq(GisProcessingTask::getId, taskId)
                         .notIn(GisProcessingTask::getTaskStatus,
-                                "COMPLETED", "PARTIAL_FAILED", "FAILED")
+                                TaskStatus.COMPLETED, TaskStatus.PARTIAL_FAILED, TaskStatus.FAILED)
                         .setSql("failed_count = GREATEST(failed_count, "
                                 + "total_count - completed_count)")
-                        .set(GisProcessingTask::getTaskStatus, "FAILED")
+                        .set(GisProcessingTask::getTaskStatus, TaskStatus.FAILED)
                         .set(GisProcessingTask::getCurrentStage, "FAILED")
                         .set(GisProcessingTask::getErrorMessage,
                                 abbreviate(errorMessage, 1000))
@@ -204,8 +197,8 @@ public class ProcessingTaskRecordService {
         result.setTaskNo(task.getTaskNo());
         result.setTaskName(task.getTaskName());
         result.setProcessingType(task.getProcessingType());
-        result.setSourceType(
-                GisInputSourceType.valueOf(task.getSourceType()).displayName());
+        result.setSourceType(task.getSourceType());
+        result.setSourceTypeName(task.getSourceType().displayName());
         result.setPriority(task.getPriority());
         result.setTotalCount(task.getTotalCount());
         result.setCompletedCount(task.getCompletedCount());
@@ -222,7 +215,7 @@ public class ProcessingTaskRecordService {
 
     public GisProcessingParameters readParameters(GisProcessingTask task) {
         try {
-            GisProcessingType type = GisProcessingType.valueOf(task.getProcessingType());
+            GisProcessingType type = task.getProcessingType();
             if (task.getParameterSchemaVersion() == null
                     || task.getParameterSchemaVersion() < 2) {
                 return readLegacyParameters(type, task.getParametersJson());
@@ -349,34 +342,43 @@ public class ProcessingTaskRecordService {
                 tileSet.getCreateTime(), tileSet.getUpdateTime());
     }
 
-    private String normalizeProcessingType(String value) {
+    private GisProcessingType normalizeProcessingType(String value) {
         String normalized = upperTrimToNull(value);
         if (normalized == null) {
             return null;
         }
         try {
-            return GisProcessingType.valueOf(normalized).name();
+            return GisProcessingType.valueOf(normalized);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException(
                     "处理类型只能为 TERRAIN、IMAGERY 或 VECTOR", ex);
         }
     }
 
-    private String normalizeSourceType(String value) {
+    private GisInputSourceType normalizeSourceType(String value) {
         String normalized = upperTrimToNull(value);
         if (normalized == null) {
             return null;
         }
         try {
-            return GisInputSourceType.valueOf(normalized).name();
+            return GisInputSourceType.valueOf(normalized);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException(
                     "输入来源只能为 UPLOAD、WORKSPACE 或 MANAGED_FILE", ex);
         }
     }
 
-    private String normalizeStatus(String value) {
-        return upperTrimToNull(value);
+    private TaskStatus normalizeStatus(String value) {
+        String normalized = upperTrimToNull(value);
+        if (normalized == null) {
+            return null;
+        }
+        try {
+            return TaskStatus.valueOf(normalized);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException(
+                    "任务状态只能为 QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED 或 FAILED", ex);
+        }
     }
 
     private String upperTrimToNull(String value) {

@@ -8,6 +8,7 @@ import org.ocean.admin.gis.config.FileUploadConfig;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.dto.GisUploadChunkCommand;
 import org.ocean.admin.gis.dto.TaskInfo;
+import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.dto.TaskProgressUnit;
 import org.ocean.admin.gis.dto.TaskProgressUpdate;
 import org.ocean.admin.gis.dto.TaskStage;
@@ -102,7 +103,7 @@ public class FileUploadService {
             validateBatchOwner(record);
 
             // 3. 客户端可能因响应丢失而重发终态块，校验文件身份并幂等返回原结果。
-            if (!"RUNNING".equals(record.getRecordStatus())) {
+            if (record.getRecordStatus() != TaskStatus.RUNNING) {
                 GisFileTransferRecordItem terminalItem = fileTransferRecordService.getImportItem(
                         record.getId(), command.sequenceNo());
                 if (terminalItem == null || !isItemFinished(terminalItem)) {
@@ -444,7 +445,7 @@ public class FileUploadService {
     }
 
     private void finishTaskIfDone(GisFileTransferRecord record) {
-        if (!"RUNNING".equals(record.getRecordStatus())) {
+        if (record.getRecordStatus() != TaskStatus.RUNNING) {
             fileUploadUtil.deleteEmptyBatchDirectory(record.getRecordNo());
             asyncTaskService.finalizeTaskResult(
                     record.getRecordNo(),
@@ -499,7 +500,7 @@ public class FileUploadService {
                 : candidate.getRequestId();
         synchronized (requestLock(lockKey)) {
             GisFileTransferRecord record = candidate;
-            if ("RUNNING".equals(record.getRecordStatus())) {
+            if (record.getRecordStatus() == TaskStatus.RUNNING) {
                 record = fileTransferRecordService.expireUploadBatch(
                         record.getId(), record.getVersion(), inactiveBefore);
                 if (record == null) {
@@ -624,7 +625,7 @@ public class FileUploadService {
         result.put("fileCompleted", item != null && "SUCCESS".equals(item.getOperationStatus()));
         result.put("fileFailed", fileFailed
                 || (item != null && "FAILED".equals(item.getOperationStatus())));
-        result.put("taskCompleted", !"RUNNING".equals(record.getRecordStatus()));
+        result.put("taskCompleted", record.getRecordStatus() != TaskStatus.RUNNING);
         result.put("completedCount", record.getCompletedCount());
         result.put("failedCount", record.getFailedCount());
         result.put("status", record.getRecordStatus());

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.ocean.admin.gis.entity.GisFileTransferRecord;
+import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.vo.GisFileTransferRecordVO;
 
 import java.time.LocalDateTime;
@@ -18,7 +19,7 @@ public interface GisFileTransferRecordMapper extends BaseMapper<GisFileTransferR
             @Param("categoryId") Long categoryId,
             @Param("recordNo") String recordNo,
             @Param("operationType") String operationType,
-            @Param("recordStatus") String recordStatus,
+            @Param("recordStatus") TaskStatus recordStatus,
             @Param("originalName") String originalName,
             @Param("extension") String extension,
             @Param("uploadStatus") String uploadStatus,

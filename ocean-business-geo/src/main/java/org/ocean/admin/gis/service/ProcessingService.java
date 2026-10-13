@@ -6,6 +6,7 @@ import org.ocean.admin.gis.dto.GisManagedProcessingRequest;
 import org.ocean.admin.gis.dto.ImageryProcessingParameters;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
 import org.ocean.admin.gis.dto.TerrainProcessingParameters;
+import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.dto.GisWorkspaceProcessingRequest;
 import org.ocean.admin.gis.entity.GisProcessingInput;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
@@ -137,11 +138,12 @@ public class ProcessingService {
                     .taskId(created.taskId())
                     .tileSetId(created.tileSetId())
                     .taskNo(taskNo)
-                    .sourceType(command.sourceType().name())
-                    .processingType(command.processingType().name())
+                    .sourceType(command.sourceType())
+                    .sourceTypeName(command.sourceType().displayName())
+                    .processingType(command.processingType())
                     .outputKey(workspace.outputKey())
-                    .totalCount(prepared.inputs().size())
-                    .status("QUEUED")
+                    .totalCount((long) prepared.inputs().size())
+                    .taskStatus(TaskStatus.QUEUED)
                     .build();
         } catch (RuntimeException ex) {
             prepared.rollback().run();

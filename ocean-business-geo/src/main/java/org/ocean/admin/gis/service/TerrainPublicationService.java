@@ -1,110 +1,118 @@
 package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisPublication;
 import org.ocean.admin.gis.entity.GisTileSet;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
-import org.ocean.admin.gis.vo.GisTerrainPublicationVO;
-import org.ocean.admin.kernel.common.PageResult;
+import org.ocean.admin.gis.processing.GisProcessingType;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
-/** 管理地形发布协议，并复用通用 GIS 发布记录和状态服务。 */
+/** Quantized Mesh 地形瓦片发布协议。 */
 @Service
 @RequiredArgsConstructor
-public class TerrainPublicationService {
+public class TerrainPublicationService implements PublicationProtocol {
 
-    private static final String PROCESSING_TYPE = "TERRAIN";
+    private static final GisProcessingType PROCESSING_TYPE = GisProcessingType.TERRAIN;
     private static final String TERRAIN_PREFIX = "terrain/";
 
-    private final PublicationService publicationService;
-    private final ProcessingTaskRecordService taskService;
+    private final PublicationRecordService recordService;
     private final GisProcessingStorageService processingStorageService;
-    private final Map<String, Path> publishedRoots = new ConcurrentHashMap<>();
+    private final Map<String, PublishedArtifact> publishedArtifacts = new ConcurrentHashMap<>();
 
-    public PageResult<List<GisTerrainPublicationVO>> getPublicationPage(
-            Integer current,
-            Integer size,
-            String serviceCode,
-            String status,
-            Long dataSetId,
-            LocalDateTime publishTimeStart,
-            LocalDateTime publishTimeEnd) {
-        PageResult<List<GisPublication>> page = publicationService.getPublicationPage(
-                PROCESSING_TYPE, current, size, serviceCode, status, dataSetId,
-                publishTimeStart, publishTimeEnd);
-        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(),
-                page.getRecords().stream().map(this::toVO).toList());
+    @Override
+    public GisProcessingType type() {
+        return PROCESSING_TYPE;
     }
 
-    public GisTerrainPublicationVO publish(Long sourceTaskId) {
-        GisProcessingTask sourceTask = taskService.getRequired(sourceTaskId);
-        GisTileSet tileSet = publicationService.getRequiredTileSet(sourceTaskId, PROCESSING_TYPE);
-        validateSourceTask(sourceTask, tileSet);
-        Path tilesRoot = validateTiles(tileSet.getOutputKey());
-        GisPublication existing = publicationService.findBySourceTaskId(
-                PROCESSING_TYPE, sourceTaskId);
-        String serviceCode = existing == null ? generateServiceCode() : existing.getServiceCode();
-        GisPublication publication = publicationService.publish(
-                tileSet, serviceCode, "地形服务");
-        publishedRoots.put(publication.getServiceCode(), tilesRoot);
-        return toVO(publication);
+    @Override
+    public String displayName() {
+        return "地形服务";
     }
 
-    public GisTerrainPublicationVO get(String serviceCode) {
-        return toVO(publicationService.getRequired(
-                PROCESSING_TYPE, normalizeServiceCode(serviceCode)));
+    @Override
+    public PublishedArtifact validateForPublish(GisProcessingTask task, GisTileSet tileSet) {
+        validateSourceTask(task, tileSet);
+        return new PublishedArtifact(
+                validateTiles(tileSet.getOutputKey()), "terrain",
+                tileSet.getMinZoom(), tileSet.getMaxZoom(), tileSet.getTargetCrs());
     }
 
-    public GisTerrainPublicationVO disable(String serviceCode) {
-        String normalized = normalizeServiceCode(serviceCode);
-        GisPublication publication = publicationService.disable(
-                PROCESSING_TYPE, normalized, "地形服务");
-        publishedRoots.remove(normalized);
-        return toVO(publication);
+    @Override
+    public String generateServiceCode() {
+        return "TRN_" + UUID.randomUUID().toString().replace("-", "")
+                .substring(0, 20).toUpperCase(Locale.ROOT);
+    }
+
+    @Override
+    public String normalizeServiceCode(String serviceCode) {
+        if (serviceCode == null || !serviceCode.matches("TRN_[A-Fa-f0-9]{20}")) {
+            throw new IllegalArgumentException("非法地形服务编码");
+        }
+        return serviceCode.toUpperCase(Locale.ROOT);
+    }
+
+    @Override
+    public void activate(String serviceCode, PublishedArtifact artifact) {
+        publishedArtifacts.put(normalizeServiceCode(serviceCode), artifact);
+    }
+
+    @Override
+    public void deactivate(String serviceCode) {
+        publishedArtifacts.remove(normalizeServiceCode(serviceCode));
     }
 
     /** 解析公开请求中的相对路径；空路径表示请求 layer.json。 */
+    @Override
     public Path resolvePublishedFile(String serviceCode, String relativePath) {
         String normalizedCode = normalizeServiceCode(serviceCode);
-        Path tilesRoot = publishedRoots.computeIfAbsent(normalizedCode, this::loadPublishedRoot);
+        PublishedArtifact artifact = publishedArtifacts.computeIfAbsent(
+                normalizedCode, this::loadPublishedArtifact);
         String normalizedRelative = relativePath == null || relativePath.isBlank()
                 ? "layer.json" : relativePath.replace('\\', '/');
         while (normalizedRelative.startsWith("/")) {
             normalizedRelative = normalizedRelative.substring(1);
         }
-        Path file = tilesRoot.resolve(normalizedRelative).normalize();
-        if (!file.startsWith(tilesRoot) || !Files.isRegularFile(file)) {
+        Path file = artifact.root().resolve(normalizedRelative).normalize();
+        if (!file.startsWith(artifact.root()) || !Files.isRegularFile(file)) {
             throw new IllegalArgumentException("地形资源不存在");
         }
         return file;
     }
 
-    private Path loadPublishedRoot(String serviceCode) {
-        GisPublication publication = publicationService.getRequired(PROCESSING_TYPE, serviceCode);
-        if (!PublicationService.PUBLISHED.equals(publication.getStatus())) {
+    @Override
+    public PublicationAccess buildAccess(GisPublication publication, GisTileSet tileSet) {
+        String root = recordService.buildServiceRoot(PROCESSING_TYPE, publication.getServiceCode());
+        return new PublicationAccess(root, root + "layer.json", null);
+    }
+
+    private PublishedArtifact loadPublishedArtifact(String serviceCode) {
+        GisPublication publication = recordService.getRequired(PROCESSING_TYPE, serviceCode);
+        if (!PublicationRecordService.PUBLISHED.equals(publication.getStatus())) {
             throw new IllegalStateException("地形服务已停用");
         }
-        return validateTiles(publicationService.getPublicationTileSet(publication).getOutputKey());
+        GisTileSet tileSet = recordService.getPublicationTileSet(publication);
+        return new PublishedArtifact(
+                validateTiles(tileSet.getOutputKey()), "terrain",
+                tileSet.getMinZoom(), tileSet.getMaxZoom(), tileSet.getTargetCrs());
     }
 
     private void validateSourceTask(GisProcessingTask task, GisTileSet tileSet) {
-        if (!PROCESSING_TYPE.equals(task.getProcessingType())
-                || !PROCESSING_TYPE.equals(tileSet.getTileType())) {
+        if (PROCESSING_TYPE != task.getProcessingType()
+                || PROCESSING_TYPE != tileSet.getTileType()) {
             throw new IllegalArgumentException("只能发布地形切片任务: " + task.getId());
         }
-        if (!"COMPLETED".equals(task.getTaskStatus())) {
+        if (task.getTaskStatus() != TaskStatus.COMPLETED) {
             throw new IllegalStateException("只有 COMPLETED 状态的地形切片任务可以发布");
         }
         if (!"READY".equals(tileSet.getTileSetStatus())
@@ -128,32 +136,5 @@ public class TerrainPublicationService {
             throw new IllegalStateException("无法检查地形切片目录: " + tilesRoot, ex);
         }
         return tilesRoot;
-    }
-
-    private String generateServiceCode() {
-        return "TRN_" + UUID.randomUUID().toString().replace("-", "")
-                .substring(0, 20).toUpperCase(Locale.ROOT);
-    }
-
-    private String normalizeServiceCode(String serviceCode) {
-        if (serviceCode == null || !serviceCode.matches("TRN_[A-Fa-f0-9]{20}")) {
-            throw new IllegalArgumentException("非法地形服务编码");
-        }
-        return serviceCode.toUpperCase(Locale.ROOT);
-    }
-
-    private GisTerrainPublicationVO toVO(GisPublication publication) {
-        GisTileSet tileSet = publicationService.getPublicationTileSet(publication);
-        return GisTerrainPublicationVO.builder()
-                .id(publication.getId())
-                .serviceCode(publication.getServiceCode())
-                .sourceTaskId(tileSet.getTaskId())
-                .dataSetId(publication.getDataSetId())
-                .status(publication.getStatus())
-                .serviceUrl(publicationService.buildPublicUrl(
-                        "/terrain/" + publication.getServiceCode() + "/"))
-                .publishTime(publication.getPublishTime())
-                .updateTime(publication.getUpdateTime())
-                .build();
     }
 }

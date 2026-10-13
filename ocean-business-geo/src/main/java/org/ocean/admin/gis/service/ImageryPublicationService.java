@@ -1,20 +1,20 @@
 package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisPublication;
 import org.ocean.admin.gis.entity.GisTileSet;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
-import org.ocean.admin.gis.vo.GisImageryPublicationVO;
-import org.ocean.admin.kernel.common.PageResult;
+import org.ocean.admin.gis.processing.GisProcessingType;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -22,103 +22,113 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
-/** 管理 XYZ/TMS 影像瓦片发布，并将公开服务编码解析为受控的本地文件。 */
+/** XYZ/TMS 影像瓦片发布协议。 */
 @Service
 @RequiredArgsConstructor
-public class ImageryPublicationService {
+public class ImageryPublicationService implements PublicationProtocol {
 
-    private static final String PROCESSING_TYPE = "IMAGERY";
+    private static final GisProcessingType PROCESSING_TYPE = GisProcessingType.IMAGERY;
     private static final String IMAGERY_PREFIX = "imagery/";
     private static final Pattern TILE_PATH = Pattern.compile(
             "^(\\d{1,2})/(\\d+)/(\\d+)\\.(png|jpg|jpeg)$",
             Pattern.CASE_INSENSITIVE);
 
-    private final PublicationService publicationService;
-    private final ProcessingTaskRecordService taskService;
+    private final PublicationRecordService recordService;
     private final GisProcessingStorageService processingStorageService;
     private final ObjectMapper objectMapper;
-    private final Map<String, PublishedTiles> publishedTiles = new ConcurrentHashMap<>();
+    private final Map<String, PublishedArtifact> publishedArtifacts = new ConcurrentHashMap<>();
 
-    public PageResult<List<GisImageryPublicationVO>> getPublicationPage(
-            Integer current,
-            Integer size,
-            String serviceCode,
-            String status,
-            Long dataSetId,
-            LocalDateTime publishTimeStart,
-            LocalDateTime publishTimeEnd) {
-        PageResult<List<GisPublication>> page = publicationService.getPublicationPage(
-                PROCESSING_TYPE, current, size, serviceCode, status, dataSetId,
-                publishTimeStart, publishTimeEnd);
-        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(),
-                page.getRecords().stream().map(this::toVO).toList());
+    @Override
+    public GisProcessingType type() {
+        return PROCESSING_TYPE;
     }
 
-    public GisImageryPublicationVO publish(Long sourceTaskId) {
-        GisProcessingTask sourceTask = taskService.getRequired(sourceTaskId);
-        GisTileSet tileSet = publicationService.getRequiredTileSet(sourceTaskId, PROCESSING_TYPE);
-        validateSourceTask(sourceTask, tileSet);
+    @Override
+    public String displayName() {
+        return "影像服务";
+    }
+
+    @Override
+    public PublishedArtifact validateForPublish(GisProcessingTask task, GisTileSet tileSet) {
+        validateSourceTask(task, tileSet);
         PublishedTiles tiles = validateTiles(tileSet.getOutputKey());
         validateTileSetMetadata(tileSet, tiles.metadata());
-
-        GisPublication existing = publicationService.findBySourceTaskId(
-                PROCESSING_TYPE, sourceTaskId);
-        String serviceCode = existing == null ? generateServiceCode() : existing.getServiceCode();
-        GisPublication publication = publicationService.publish(
-                tileSet, serviceCode, "影像服务");
-        publishedTiles.put(publication.getServiceCode(), tiles);
-        return toVO(publication);
+        TileMetadata metadata = tiles.metadata();
+        return new PublishedArtifact(
+                tiles.root(), metadata.extension(), metadata.minZoom(),
+                metadata.maxZoom(), metadata.targetCrs());
     }
 
-    public GisImageryPublicationVO get(String serviceCode) {
-        return toVO(publicationService.getRequired(
-                PROCESSING_TYPE, normalizeServiceCode(serviceCode)));
+    @Override
+    public String generateServiceCode() {
+        return "IMG_" + UUID.randomUUID().toString().replace("-", "")
+                .substring(0, 20).toUpperCase(Locale.ROOT);
     }
 
-    public GisImageryPublicationVO disable(String serviceCode) {
-        String normalized = normalizeServiceCode(serviceCode);
-        GisPublication publication = publicationService.disable(
-                PROCESSING_TYPE, normalized, "影像服务");
-        publishedTiles.remove(normalized);
-        return toVO(publication);
+    @Override
+    public String normalizeServiceCode(String serviceCode) {
+        if (serviceCode == null || !serviceCode.matches("IMG_[A-Fa-f0-9]{20}")) {
+            throw new IllegalArgumentException("非法影像服务编码");
+        }
+        return serviceCode.toUpperCase(Locale.ROOT);
+    }
+
+    @Override
+    public void activate(String serviceCode, PublishedArtifact artifact) {
+        publishedArtifacts.put(normalizeServiceCode(serviceCode), artifact);
+    }
+
+    @Override
+    public void deactivate(String serviceCode) {
+        publishedArtifacts.remove(normalizeServiceCode(serviceCode));
     }
 
     /** 空路径映射到 tilejson.json，其余路径仅允许已发布格式的影像瓦片。 */
+    @Override
     public Path resolvePublishedFile(String serviceCode, String relativePath) {
         String normalizedCode = normalizeServiceCode(serviceCode);
-        PublishedTiles tiles = publishedTiles.computeIfAbsent(
-                normalizedCode, this::loadPublishedTiles);
+        PublishedArtifact artifact = publishedArtifacts.computeIfAbsent(
+                normalizedCode, this::loadPublishedArtifact);
         String normalizedPath = normalizeRelativePath(relativePath);
         if (!"tilejson.json".equals(normalizedPath)) {
-            validateTilePath(normalizedPath, tiles.metadata());
+            validateTilePath(normalizedPath, artifact);
         }
-        Path file = tiles.root().resolve(normalizedPath).normalize();
-        if (!file.startsWith(tiles.root()) || !Files.isRegularFile(file)) {
+        Path file = artifact.root().resolve(normalizedPath).normalize();
+        if (!file.startsWith(artifact.root()) || !Files.isRegularFile(file)) {
             throw new IllegalArgumentException("影像资源不存在");
         }
         return file;
     }
 
-    private PublishedTiles loadPublishedTiles(String serviceCode) {
-        GisPublication publication = publicationService.getRequired(PROCESSING_TYPE, serviceCode);
-        if (!PublicationService.PUBLISHED.equals(publication.getStatus())) {
+    @Override
+    public PublicationAccess buildAccess(GisPublication publication, GisTileSet tileSet) {
+        String root = recordService.buildServiceRoot(PROCESSING_TYPE, publication.getServiceCode());
+        String extension = "PNG".equalsIgnoreCase(tileSet.getOutputFormat()) ? "png" : "jpg";
+        return new PublicationAccess(
+                root, root + "tilejson.json", root + "{z}/{x}/{y}." + extension);
+    }
+
+    private PublishedArtifact loadPublishedArtifact(String serviceCode) {
+        GisPublication publication = recordService.getRequired(PROCESSING_TYPE, serviceCode);
+        if (!PublicationRecordService.PUBLISHED.equals(publication.getStatus())) {
             throw new IllegalStateException("影像服务已停用");
         }
-        GisTileSet tileSet = publicationService.getPublicationTileSet(publication);
+        GisTileSet tileSet = recordService.getPublicationTileSet(publication);
         PublishedTiles tiles = validateTiles(tileSet.getOutputKey());
         validateTileSetMetadata(tileSet, tiles.metadata());
-        return tiles;
+        TileMetadata metadata = tiles.metadata();
+        return new PublishedArtifact(
+                tiles.root(), metadata.extension(), metadata.minZoom(),
+                metadata.maxZoom(), metadata.targetCrs());
     }
 
     private void validateSourceTask(GisProcessingTask task, GisTileSet tileSet) {
-        if (!PROCESSING_TYPE.equals(task.getProcessingType())
-                || !PROCESSING_TYPE.equals(tileSet.getTileType())) {
+        if (PROCESSING_TYPE != task.getProcessingType()
+                || PROCESSING_TYPE != tileSet.getTileType()) {
             throw new IllegalArgumentException("只能发布影像切片任务: " + task.getId());
         }
-        if (!"COMPLETED".equals(task.getTaskStatus())) {
+        if (task.getTaskStatus() != TaskStatus.COMPLETED) {
             throw new IllegalStateException("只有 COMPLETED 状态的影像切片任务可以发布");
         }
         if (!"READY".equals(tileSet.getTileSetStatus())
@@ -152,8 +162,10 @@ public class ImageryPublicationService {
             try (Stream<Path> paths = Files.walk(root)) {
                 String suffix = "." + metadata.extension();
                 if (paths.noneMatch(path -> Files.isRegularFile(path)
-                        && path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(suffix))) {
-                    throw new IllegalStateException("影像切片目录中没有 " + suffix + " 瓦片: " + root);
+                        && path.getFileName().toString().toLowerCase(Locale.ROOT)
+                                .endsWith(suffix))) {
+                    throw new IllegalStateException(
+                            "影像切片目录中没有 " + suffix + " 瓦片: " + root);
                 }
             }
             return new PublishedTiles(root, metadata);
@@ -182,8 +194,7 @@ public class ImageryPublicationService {
         String tileJsonMatrixSet = tileJson.path("tileMatrixSet").asText();
         String manifestMatrixSet = manifest.path("tileMatrixSet").asText();
         if (!profile.manifestType().equalsIgnoreCase(manifest.path("type").asText())
-                || !profile.name().equalsIgnoreCase(
-                        manifest.path("tileProfile").asText())
+                || !profile.name().equalsIgnoreCase(manifest.path("tileProfile").asText())
                 || (!tileJsonCrs.isBlank()
                         && !targetCrs.code().equalsIgnoreCase(tileJsonCrs))
                 || (!tileJsonMatrixSet.isBlank()
@@ -221,9 +232,10 @@ public class ImageryPublicationService {
                 targetCrs.code(), profile.name(), format, extension, minZoom, maxZoom);
     }
 
-    private void validateTilePath(String path, TileMetadata metadata) {
+    private void validateTilePath(String path, PublishedArtifact artifact) {
         Matcher matcher = TILE_PATH.matcher(path);
-        if (!matcher.matches() || !metadata.extension().equalsIgnoreCase(matcher.group(4))) {
+        if (!matcher.matches()
+                || !artifact.extension().equalsIgnoreCase(matcher.group(4))) {
             throw new IllegalArgumentException("非法影像瓦片路径");
         }
         int zoom;
@@ -236,11 +248,11 @@ public class ImageryPublicationService {
         } catch (NumberFormatException ex) {
             throw new IllegalArgumentException("非法影像瓦片坐标", ex);
         }
-        if (zoom < metadata.minZoom() || zoom > metadata.maxZoom()) {
+        if (zoom < artifact.minZoom() || zoom > artifact.maxZoom()) {
             throw new IllegalArgumentException("影像瓦片坐标超出发布范围");
         }
         ImageryTileOptions.TargetCrs targetCrs =
-                ImageryTileOptions.TargetCrs.fromCode(metadata.targetCrs());
+                ImageryTileOptions.TargetCrs.fromCode(artifact.targetCrs());
         long matrixWidth = targetCrs.matrixWidth(zoom);
         long matrixHeight = targetCrs.matrixHeight(zoom);
         if (x < 0 || y < 0 || x >= matrixWidth || y >= matrixHeight) {
@@ -259,44 +271,15 @@ public class ImageryPublicationService {
         return normalized;
     }
 
-    private String generateServiceCode() {
-        return "IMG_" + UUID.randomUUID().toString().replace("-", "")
-                .substring(0, 20).toUpperCase(Locale.ROOT);
+    private record TileMetadata(
+            String targetCrs,
+            String tileProfile,
+            String format,
+            String extension,
+            int minZoom,
+            int maxZoom) {
     }
 
-    private String normalizeServiceCode(String serviceCode) {
-        if (serviceCode == null || !serviceCode.matches("IMG_[A-Fa-f0-9]{20}")) {
-            throw new IllegalArgumentException("非法影像服务编码");
-        }
-        return serviceCode.toUpperCase(Locale.ROOT);
+    private record PublishedTiles(Path root, TileMetadata metadata) {
     }
-
-    private GisImageryPublicationVO toVO(GisPublication publication) {
-        GisTileSet tileSet = publicationService.getPublicationTileSet(publication);
-        String root = publicationService.buildPublicUrl(
-                "/imagery/" + publication.getServiceCode() + "/");
-        String extension = "PNG".equals(tileSet.getOutputFormat()) ? "png" : "jpg";
-        return GisImageryPublicationVO.builder()
-                .id(publication.getId())
-                .serviceCode(publication.getServiceCode())
-                .sourceTaskId(tileSet.getTaskId())
-                .dataSetId(publication.getDataSetId())
-                .status(publication.getStatus())
-                .targetCrs(tileSet.getTargetCrs())
-                .tileProfile(tileSet.getTileProfile())
-                .outputFormat(tileSet.getOutputFormat())
-                .minZoom(tileSet.getMinZoom())
-                .maxZoom(tileSet.getMaxZoom())
-                .serviceUrl(root)
-                .tileJsonUrl(root + "tilejson.json")
-                .tileUrlTemplate(root + "{z}/{x}/{y}." + extension)
-                .publishTime(publication.getPublishTime())
-                .updateTime(publication.getUpdateTime())
-                .build();
-    }
-
-    private record TileMetadata(String targetCrs, String tileProfile, String format,
-                                String extension, int minZoom, int maxZoom) { }
-
-    private record PublishedTiles(Path root, TileMetadata metadata) { }
 }

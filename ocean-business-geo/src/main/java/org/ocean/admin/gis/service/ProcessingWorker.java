@@ -49,9 +49,8 @@ public class ProcessingWorker {
         }
         List<GisProcessingInput> inputs = inputMapper.selectByTaskId(taskId);
         try {
-            GisProcessingType processingType =
-                    GisProcessingType.valueOf(task.getProcessingType());
-            GisInputSourceType sourceType = GisInputSourceType.valueOf(task.getSourceType());
+            GisProcessingType processingType = task.getProcessingType();
+            GisInputSourceType sourceType = task.getSourceType();
             GisProcessingParameters parameters = taskService.readParameters(task);
             List<Path> paths = inputResolverRegistry.require(sourceType).resolveRuntime(inputs);
             GisProcessingWorkspace workspace = storageService.workspaceFromOutputKey(
@@ -90,9 +89,9 @@ public class ProcessingWorker {
     }
 
     private void refreshTileMetadata(GisTileSet tileSet, GisProcessingWorkspace workspace) {
-        if ("IMAGERY".equals(tileSet.getTileType())) {
+        if (tileSet.getTileType() == GisProcessingType.IMAGERY) {
             refreshImageryMetadata(tileSet, workspace.outputPath());
-        } else if ("TERRAIN".equals(tileSet.getTileType())) {
+        } else if (tileSet.getTileType() == GisProcessingType.TERRAIN) {
             refreshTerrainMetadata(tileSet, workspace.outputPath());
         }
     }

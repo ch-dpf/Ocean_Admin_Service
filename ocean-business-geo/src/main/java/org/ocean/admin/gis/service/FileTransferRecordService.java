@@ -8,12 +8,12 @@ import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileTransferRecord;
 import org.ocean.admin.gis.entity.GisFileTransferRecordItem;
 import org.ocean.admin.gis.entity.GisDataSet;
+import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordItemMapper;
 import org.ocean.admin.gis.vo.GisFileTransferRecordVO;
-import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -34,8 +34,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class FileTransferRecordService {
     private static final String UPLOAD_CLEANUP_PENDING = "UPLOAD_CLEANUP_PENDING";
-    private static final Set<String> RECORD_STATUSES = Set.of(
-            "QUEUED", "RUNNING", "COMPLETED", "PARTIAL_FAILED", "FAILED");
     private static final Set<String> OPERATION_TYPES = Set.of("IMPORT", "EXPORT");
     private static final Set<String> UPLOAD_STATUSES = Set.of("PENDING", "READY", "FAILED");
 
@@ -56,7 +54,7 @@ public class FileTransferRecordService {
         long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
         String normalizedRecordNo = trimToNull(recordNo);
         String normalizedOperationType = normalizeUpper(operationType);
-        String normalizedRecordStatus = normalizeUpper(recordStatus);
+        TaskStatus normalizedRecordStatus = normalizeTaskStatus(recordStatus);
         String normalizedOriginalName = trimToNull(originalName);
         String normalizedExtension = normalizeLower(extension);
         String normalizedUploadStatus = normalizeUpper(uploadStatus);
@@ -89,7 +87,7 @@ public class FileTransferRecordService {
         }
         List<GisFileTransferRecordItem> recordItems = recordItemMapper.selectByRecordId(record.getId());
         record.setFiles(recordItems.stream()
-                .map(item -> toFileSnapshotVO(item, record.getDataSetId(), record.getCategoryId()))
+                .map(this::toFileItemVO)
                 .toList());
         return record;
     }
@@ -128,7 +126,7 @@ public class FileTransferRecordService {
         record.setFailedCount(0);
         record.setTotalBytes(totalBytes);
         record.setUploadedBytes(0L);
-        record.setRecordStatus("RUNNING");
+        record.setRecordStatus(TaskStatus.RUNNING);
         record.setCurrentStage("UPLOADING");
         record.setOperatorId(operatorId);
         record.setVersion(0L);
@@ -190,7 +188,7 @@ public class FileTransferRecordService {
         List<GisFileTransferRecord> records = recordMapper.selectList(
                 new LambdaQueryWrapper<GisFileTransferRecord>()
                         .eq(GisFileTransferRecord::getOperationType, "IMPORT")
-                        .eq(GisFileTransferRecord::getRecordStatus, "RUNNING"));
+                        .eq(GisFileTransferRecord::getRecordStatus, TaskStatus.RUNNING));
         for (GisFileTransferRecord record : records) {
             long remaining = Math.max(
                     0L,
@@ -209,7 +207,7 @@ public class FileTransferRecordService {
         }
         return recordMapper.selectList(new LambdaQueryWrapper<GisFileTransferRecord>()
                 .eq(GisFileTransferRecord::getOperationType, "IMPORT")
-                .eq(GisFileTransferRecord::getRecordStatus, "RUNNING")
+                .eq(GisFileTransferRecord::getRecordStatus, TaskStatus.RUNNING)
                 .le(GisFileTransferRecord::getUpdateTime, inactiveBefore)
                 .orderByAsc(GisFileTransferRecord::getUpdateTime)
                 .last("LIMIT " + limit));
@@ -241,22 +239,23 @@ public class FileTransferRecordService {
             throw new IllegalArgumentException("过期上传批次参数不能为空");
         }
         GisFileTransferRecord record = recordMapper.selectById(recordId);
-        if (record == null || !"RUNNING".equals(record.getRecordStatus())) {
+        if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) {
             return null;
         }
         int completed = record.getCompletedCount();
         int failed = record.getTotalCount() - completed;
-        String terminalStatus = completed == 0 ? "FAILED" : "PARTIAL_FAILED";
+        TaskStatus terminalStatus = completed == 0
+                ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED;
         String errorMessage = "上传超过空闲时限未继续，系统已自动终止";
         LocalDateTime now = LocalDateTime.now();
         int updated = recordMapper.update(null, new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
                 .eq("operation_type", "IMPORT")
-                .eq("record_status", "RUNNING")
+                .eq("record_status", TaskStatus.RUNNING.name())
                 .eq("version", expectedVersion)
                 .le("update_time", inactiveBefore)
                 .set("failed_count", failed)
-                .set("record_status", terminalStatus)
+                .set("record_status", terminalStatus.name())
                 .set("current_stage", UPLOAD_CLEANUP_PENDING)
                 .set("error_message", errorMessage)
                 .set("finish_time", now)
@@ -295,7 +294,7 @@ public class FileTransferRecordService {
         int updated = recordMapper.update(null, new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
                 .eq("current_stage", UPLOAD_CLEANUP_PENDING)
-                .set("current_stage", record.getRecordStatus())
+                .set("current_stage", record.getRecordStatus().name())
                 .set("update_time", now)
                 .setSql("version = version + 1"));
         return updated == 1;
@@ -305,7 +304,7 @@ public class FileTransferRecordService {
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public GisFileTransferRecord updateUploadedBytes(Long recordId, long uploadedBytes) {
         GisFileTransferRecord record = recordMapper.selectById(recordId);
-        if (record == null || !"RUNNING".equals(record.getRecordStatus())) {
+        if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) {
             throw new IllegalStateException("上传记录不存在或已结束: " + recordId);
         }
         if (uploadedBytes < 0 || uploadedBytes > valueOrZero(record.getTotalBytes())) {
@@ -314,7 +313,7 @@ public class FileTransferRecordService {
         LocalDateTime now = LocalDateTime.now();
         int updated = recordMapper.update(null, new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
-                .eq("record_status", "RUNNING")
+                .eq("record_status", TaskStatus.RUNNING.name())
                 .setSql("uploaded_bytes = GREATEST(uploaded_bytes, " + uploadedBytes + ")")
                 .set("current_stage", "UPLOADING")
                 .set("update_time", now)
@@ -368,14 +367,16 @@ public class FileTransferRecordService {
         int completed = record.getCompletedCount() + 1;
         int failed = record.getFailedCount();
         boolean terminal = completed + failed == record.getTotalCount();
-        String status = terminal ? (failed == 0 ? "COMPLETED" : "PARTIAL_FAILED") : "RUNNING";
+        TaskStatus status = terminal
+                ? (failed == 0 ? TaskStatus.COMPLETED : TaskStatus.PARTIAL_FAILED)
+                : TaskStatus.RUNNING;
         UpdateWrapper<GisFileTransferRecord> recordUpdate = new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
-                .eq("record_status", "RUNNING")
+                .eq("record_status", TaskStatus.RUNNING.name())
                 .eq("version", record.getVersion())
                 .set("completed_count", completed)
-                .set("record_status", status)
-                .set("current_stage", terminal ? status : "UPLOADING")
+                .set("record_status", status.name())
+                .set("current_stage", terminal ? status.name() : "UPLOADING")
                 .set("update_time", now)
                 .setSql("version = version + 1");
         if (terminal) {
@@ -416,16 +417,16 @@ public class FileTransferRecordService {
         int completed = record.getCompletedCount();
         int failed = record.getFailedCount() + 1;
         boolean terminal = completed + failed == record.getTotalCount();
-        String status = terminal
-                ? (completed == 0 ? "FAILED" : "PARTIAL_FAILED")
-                : "RUNNING";
+        TaskStatus status = terminal
+                ? (completed == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED)
+                : TaskStatus.RUNNING;
         UpdateWrapper<GisFileTransferRecord> update = new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
-                .eq("record_status", "RUNNING")
+                .eq("record_status", TaskStatus.RUNNING.name())
                 .eq("version", record.getVersion())
                 .set("failed_count", failed)
-                .set("record_status", status)
-                .set("current_stage", terminal ? status : "UPLOADING")
+                .set("record_status", status.name())
+                .set("current_stage", terminal ? status.name() : "UPLOADING")
                 .set("error_message", abbreviate(errorMessage, 1000))
                 .set("update_time", now)
                 .setSql("version = version + 1");
@@ -440,7 +441,7 @@ public class FileTransferRecordService {
 
     private GisFileTransferRecord requiredRunningRecord(Long recordId) {
         GisFileTransferRecord record = recordMapper.selectById(recordId);
-        if (record == null || !"RUNNING".equals(record.getRecordStatus())) {
+        if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) {
             throw new IllegalStateException("上传记录不存在或已结束: " + recordId);
         }
         return record;
@@ -466,7 +467,7 @@ public class FileTransferRecordService {
         record.setTotalCount(1);
         record.setCompletedCount(1);
         record.setFailedCount(0);
-        record.setRecordStatus("COMPLETED");
+        record.setRecordStatus(TaskStatus.COMPLETED);
         record.setCurrentStage("COMPLETED");
         record.setOperatorId(operatorId);
         record.setVersion(0L);
@@ -496,16 +497,12 @@ public class FileTransferRecordService {
 
     private void validateQuery(
             String operationType,
-            String recordStatus,
+            TaskStatus recordStatus,
             String uploadStatus,
             LocalDateTime createTimeStart,
             LocalDateTime createTimeEnd) {
         if (operationType != null && !OPERATION_TYPES.contains(operationType)) {
             throw new IllegalArgumentException("传输类型只能为 IMPORT 或 EXPORT");
-        }
-        if (recordStatus != null && !RECORD_STATUSES.contains(recordStatus)) {
-            throw new IllegalArgumentException(
-                    "记录状态只能为 QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED 或 FAILED");
         }
         if (uploadStatus != null && !UPLOAD_STATUSES.contains(uploadStatus)) {
             throw new IllegalArgumentException("文件状态只能为 PENDING、READY 或 FAILED");
@@ -516,28 +513,26 @@ public class FileTransferRecordService {
         }
     }
 
-    private GisFileMetaVO toFileSnapshotVO(
-            GisFileTransferRecordItem item,
-            Long dataSetId,
-            Long categoryId) {
-        GisFileMetaVO vo = new GisFileMetaVO();
-        vo.setId(item.getFileMetaId());
-        vo.setDataSetId(dataSetId);
-        vo.setCategoryId(categoryId);
-        vo.setOriginalName(item.getOriginalName());
-        vo.setStorageName(item.getStorageName());
-        vo.setStorageKey(item.getStorageKey());
-        vo.setStorageType(item.getStorageType());
-        vo.setExtension(item.getExtension());
-        vo.setSizeBytes(item.getSizeBytes());
-        vo.setSha256(item.getSha256());
-        vo.setUploadedBy(item.getUploadedBy());
-        vo.setUploadStatus(item.getUploadStatus());
-        vo.setCleanupStatus(item.getCleanupStatus());
-        vo.setErrorMessage(item.getErrorMessage());
-        vo.setCreateTime(item.getCreateTime());
-        vo.setUpdateTime(item.getUpdateTime());
-        return vo;
+    private GisFileTransferRecordVO.FileItemVO toFileItemVO(
+            GisFileTransferRecordItem item) {
+        return new GisFileTransferRecordVO.FileItemVO(
+                item.getId(),
+                item.getFileMetaId(),
+                item.getSequenceNo(),
+                item.getOperationStatus(),
+                item.getOriginalName(),
+                item.getStorageName(),
+                item.getStorageKey(),
+                item.getStorageType(),
+                item.getExtension(),
+                item.getSizeBytes(),
+                item.getSha256(),
+                item.getUploadedBy(),
+                item.getUploadStatus(),
+                item.getCleanupStatus(),
+                item.getErrorMessage(),
+                item.getCreateTime(),
+                item.getUpdateTime());
     }
 
     private String trimToNull(String value) {
@@ -551,6 +546,19 @@ public class FileTransferRecordService {
     private String normalizeUpper(String value) {
         String normalized = trimToNull(value);
         return normalized == null ? null : normalized.toUpperCase(Locale.ROOT);
+    }
+
+    private TaskStatus normalizeTaskStatus(String value) {
+        String normalized = normalizeUpper(value);
+        if (normalized == null) {
+            return null;
+        }
+        try {
+            return TaskStatus.valueOf(normalized);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException(
+                    "记录状态只能为 QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED 或 FAILED", ex);
+        }
     }
 
     private String normalizeLower(String value) {

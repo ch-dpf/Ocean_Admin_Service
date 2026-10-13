@@ -3,6 +3,7 @@ package org.ocean.admin.gis.vo;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
+import org.ocean.admin.gis.processing.GisProcessingType;
 
 import java.time.LocalDateTime;
 
@@ -14,7 +15,7 @@ public class GisPublicationVO {
     private String serviceCode;
 
     @Schema(description = "发布类型：TERRAIN、IMAGERY、VECTOR")
-    private String processingType;
+    private GisProcessingType processingType;
 
     private Long tileSetId;
     private Long sourceTaskId;
@@ -32,6 +33,12 @@ public class GisPublicationVO {
 
     @Schema(description = "已发布服务的访问根地址")
     private String serviceUrl;
+
+    @Schema(description = "服务描述文件地址，影像为 tilejson.json，地形为 layer.json")
+    private String descriptorUrl;
+
+    @Schema(description = "瓦片访问模板；不适用的发布类型为空")
+    private String tileUrlTemplate;
 
     private LocalDateTime publishTime;
     private LocalDateTime updateTime;

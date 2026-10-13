@@ -3,7 +3,6 @@ package org.ocean.admin.gis.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
@@ -30,7 +29,7 @@ public class DataSetController {
 
     @GetMapping("/page")
     @Operation(summary = "获取数据集分页")
-    public ResponseResult<PageResult<List<GisDataSet>>> getDataSetPage(
+    public ResponseResult<PageResult<List<GisDataSetVO>>> getDataSetPage(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "10") Integer size,
             @RequestParam(required = false) Long categoryId,
@@ -41,7 +40,7 @@ public class DataSetController {
     }
     @GetMapping("/query")
     @Operation(summary = "获取全部数据集列表")
-    public ResponseResult<List<GisDataSet>> getDataSets(
+    public ResponseResult<List<GisDataSetVO>> getDataSets(
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) String dataSetName) {
         return ResponseResult.success(

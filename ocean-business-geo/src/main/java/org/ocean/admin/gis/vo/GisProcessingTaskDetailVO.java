@@ -3,6 +3,7 @@ package org.ocean.admin.gis.vo;
 import lombok.Builder;
 import lombok.Data;
 import org.ocean.admin.gis.dto.GisProcessingParameters;
+import org.ocean.admin.gis.processing.GisProcessingType;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -38,7 +39,7 @@ public class GisProcessingTaskDetailVO {
 
     public record TileSetVO(
             Long id,
-            String tileType,
+            GisProcessingType tileType,
             String tileSetStatus,
             String outputKey,
             String targetCrs,

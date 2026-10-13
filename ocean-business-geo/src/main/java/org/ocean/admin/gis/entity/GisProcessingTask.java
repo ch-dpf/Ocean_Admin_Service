@@ -6,6 +6,9 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+import org.ocean.admin.gis.dto.TaskStatus;
+import org.ocean.admin.gis.processing.GisInputSourceType;
+import org.ocean.admin.gis.processing.GisProcessingType;
 
 import java.time.LocalDateTime;
 
@@ -18,8 +21,8 @@ public class GisProcessingTask {
     private Long id;
     private String taskNo;
     private String taskName;
-    private String processingType;
-    private String sourceType;
+    private GisProcessingType processingType;
+    private GisInputSourceType sourceType;
 
     /** 数据库 JSONB 字段，由 Mapper 显式转换。 */
     @TableField(exist = false)
@@ -31,7 +34,7 @@ public class GisProcessingTask {
     private Long totalCount;
     private Long completedCount;
     private Long failedCount;
-    private String taskStatus;
+    private TaskStatus taskStatus;
     private String currentStage;
     private String errorMessage;
     private LocalDateTime startTime;

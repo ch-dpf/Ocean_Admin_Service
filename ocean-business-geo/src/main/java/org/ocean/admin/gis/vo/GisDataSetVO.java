@@ -4,6 +4,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
 /**
  * 数据集VO
  *
@@ -30,4 +32,16 @@ public class GisDataSetVO {
 
     @Schema(description = "数据集描述")
     private String description;
+
+    @Schema(description = "数据集编码", accessMode = Schema.AccessMode.READ_ONLY)
+    private String dataSetCode;
+
+    @Schema(description = "已就绪文件数量", accessMode = Schema.AccessMode.READ_ONLY)
+    private Integer fileCount;
+
+    @Schema(description = "创建时间", accessMode = Schema.AccessMode.READ_ONLY)
+    private LocalDateTime createTime;
+
+    @Schema(description = "更新时间", accessMode = Schema.AccessMode.READ_ONLY)
+    private LocalDateTime updateTime;
 }
