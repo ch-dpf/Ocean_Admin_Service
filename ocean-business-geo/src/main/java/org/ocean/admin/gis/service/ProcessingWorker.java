@@ -90,10 +90,15 @@ public class ProcessingWorker {
     }
 
     private void refreshTileMetadata(GisTileSet tileSet, GisProcessingWorkspace workspace) {
-        if (!"IMAGERY".equals(tileSet.getTileType())) {
-            return;
+        if ("IMAGERY".equals(tileSet.getTileType())) {
+            refreshImageryMetadata(tileSet, workspace.outputPath());
+        } else if ("TERRAIN".equals(tileSet.getTileType())) {
+            refreshTerrainMetadata(tileSet, workspace.outputPath());
         }
-        Path manifest = workspace.outputPath().resolve("manifest.json");
+    }
+
+    private void refreshImageryMetadata(GisTileSet tileSet, Path outputPath) {
+        Path manifest = outputPath.resolve("manifest.json");
         if (!Files.isRegularFile(manifest)) {
             return;
         }
@@ -108,6 +113,39 @@ public class ProcessingWorker {
                     ? json.path("maxZoom").asInt() : tileSet.getMaxZoom());
         } catch (Exception ex) {
             throw new IllegalStateException("无法读取切片产物元数据", ex);
+        }
+    }
+
+    private void refreshTerrainMetadata(GisTileSet tileSet, Path outputPath) {
+        Path layerJson = outputPath.resolve("layer.json");
+        if (!Files.isRegularFile(layerJson)) {
+            throw new IllegalStateException("地形切片产物缺少 layer.json: " + layerJson);
+        }
+        try {
+            JsonNode available = objectMapper.readTree(layerJson.toFile()).path("available");
+            if (!available.isArray()) {
+                throw new IllegalStateException("地形 layer.json 缺少 available 层级信息");
+            }
+            int minZoom = -1;
+            int maxZoom = -1;
+            for (int zoom = 0; zoom < available.size(); zoom++) {
+                JsonNode ranges = available.get(zoom);
+                if (ranges != null && ranges.isArray() && ranges.size() > 0) {
+                    if (minZoom < 0) {
+                        minZoom = zoom;
+                    }
+                    maxZoom = zoom;
+                }
+            }
+            if (minZoom < 0 || maxZoom > 22) {
+                throw new IllegalStateException("地形 layer.json 的 available 层级范围无效");
+            }
+            tileSet.setMinZoom(minZoom);
+            tileSet.setMaxZoom(maxZoom);
+        } catch (IllegalStateException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("无法读取地形切片产物元数据", ex);
         }
     }
 
