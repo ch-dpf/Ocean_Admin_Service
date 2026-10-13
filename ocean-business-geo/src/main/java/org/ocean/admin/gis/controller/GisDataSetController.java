@@ -53,31 +53,31 @@ public class GisDataSetController {
     @Operation(summary = "创建数据集")
     @OperationLog(module = "GIS_DATASET", type = OperationType.INSERT, description = "创建GIS数据集",
             recordResponse = true)
-    public ResponseResult<GisDataSetVO> createProject(@RequestBody GisDataSetVO reqVO) {
-        GisDataSetVO created = gisDataSetService.createProject(reqVO);
+    public ResponseResult<GisDataSetVO> createDataset(@RequestBody GisDataSetVO reqVO) {
+        GisDataSetVO created = gisDataSetService.createDataset(reqVO);
         return ResponseResult.success("创建成功", created);
     }
 
     @PutMapping("/update")
     @Operation(summary = "更新数据集")
     @OperationLog(module = "GIS_DATASET", type = OperationType.UPDATE, description = "更新GIS数据集")
-    public ResponseResult<String> updateProject(@RequestBody GisDataSetVO reqVO) {
-        gisDataSetService.updateProject(reqVO);
+    public ResponseResult<String> updateDataset(@RequestBody GisDataSetVO reqVO) {
+        gisDataSetService.updateDataset(reqVO);
         return ResponseResult.success("更新成功");
     }
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除数据集")
     @OperationLog(module = "GIS_DATASET", type = OperationType.DELETE, description = "删除GIS数据集")
-    public ResponseResult<String> deleteProject(@PathVariable Long id) {
-        gisDataSetService.deleteProject(id);
+    public ResponseResult<String> deleteDataset(@PathVariable Long id) {
+        gisDataSetService.deleteDataset(id);
         return ResponseResult.success("删除成功");
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "获取数据集详情")
-    public ResponseResult<GisDataSetVO> getProject(@PathVariable Long id) {
-        return ResponseResult.success(gisDataSetService.getProjectDetail(id));
+    public ResponseResult<GisDataSetVO> getDataset(@PathVariable Long id) {
+        return ResponseResult.success(gisDataSetService.getDatasetDetail(id));
     }
 
 

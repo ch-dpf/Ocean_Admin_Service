@@ -94,7 +94,7 @@ public class GisDataSetService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public GisDataSetVO createProject(GisDataSetVO reqVO) {
+    public GisDataSetVO createDataset(GisDataSetVO reqVO) {
         // 校验数据集是否存在，不存在则新增，存在则返回错误原因提示
         validateDataSetRequest(reqVO, false);
         String dataSetName = reqVO.getDataSetName().trim();
@@ -125,7 +125,7 @@ public class GisDataSetService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public void updateProject(GisDataSetVO reqVO) {
+    public void updateDataset(GisDataSetVO reqVO) {
         validateDataSetRequest(reqVO, true);
 
         GisDataSet existing = gisDataSetMapper.selectById(reqVO.getId());
@@ -152,7 +152,7 @@ public class GisDataSetService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public void deleteProject(Long id) {
+    public void deleteDataset(Long id) {
         if (id == null) {
             throw new IllegalArgumentException("数据集ID不能为空");
         }
@@ -169,7 +169,7 @@ public class GisDataSetService {
         log.info("删除 GIS 数据集成功: id={}", id);
     }
 
-    public GisDataSetVO getProjectDetail(Long id) {
+    public GisDataSetVO getDatasetDetail(Long id) {
         if (id == null) {
             throw new IllegalArgumentException("数据集ID不能为空");
         }
