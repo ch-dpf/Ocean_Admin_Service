@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisFileMetaMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO ocean_gis.gis_file_meta (
+            id, data_set_id, original_name,
+            storage_name, storage_key, storage_type, extension,
+            size_bytes, sha256, uploaded_by,
+            upload_status, cleanup_status, error_message,
+            create_time, update_time, deleted
+        ) VALUES
+        <foreach collection="records" item="item" separator=",">
+            (
+                #{item.id}, #{item.dataSetId}, #{item.originalName},
+                #{item.storageName}, #{item.storageKey}, #{item.storageType}, #{item.extension},
+                #{item.sizeBytes}, #{item.sha256}, #{item.uploadedBy},
+                #{item.uploadStatus}, #{item.cleanupStatus}, #{item.errorMessage},
+                #{item.createTime}, #{item.updateTime}, #{item.deleted}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectDeletedPage" resultType="org.ocean.admin.gis.vo.GisFileMetaVO">
+        SELECT fm.id,
+               fm.data_set_id,
+               ds.category_id,
+               fm.original_name,
+               fm.storage_name,
+               fm.storage_key,
+               fm.storage_type,
+               fm.extension,
+               fm.size_bytes,
+               fm.sha256,
+               fm.uploaded_by,
+               fm.upload_status,
+               fm.cleanup_status,
+               fm.error_message,
+               fm.create_time,
+               fm.update_time,
+               fm.deleted
+        FROM ocean_gis.gis_file_meta fm
+        LEFT JOIN ocean_gis.gis_data_set ds ON ds.id = fm.data_set_id
+        WHERE fm.deleted = 1
+        <if test="dataSetId != null">
+            AND fm.data_set_id = #{dataSetId}
+        </if>
+        <if test="categoryId != null">
+            AND ds.category_id = #{categoryId}
+        </if>
+        <if test="originalName != null">
+            AND fm.original_name LIKE CONCAT('%', #{originalName}, '%')
+        </if>
+        <if test="extension != null">
+            AND fm.extension = #{extension}
+        </if>
+        <if test="uploadStatus != null">
+            AND fm.upload_status = #{uploadStatus}
+        </if>
+        ORDER BY fm.create_time DESC
+    </select>
+
+    <select id="selectDeletedById" resultType="org.ocean.admin.gis.entity.GisFileMeta">
+        SELECT *
+        FROM ocean_gis.gis_file_meta
+        WHERE id = #{id}
+          AND deleted = 1
+    </select>
+
+    <update id="restoreDeletedById">
+        UPDATE ocean_gis.gis_file_meta
+        SET deleted = 0,
+            update_time = #{updateTime}
+        WHERE id = #{id}
+          AND deleted = 1
+    </update>
+
+    <delete id="permanentlyDeleteById">
+        DELETE FROM ocean_gis.gis_file_meta
+        WHERE id = #{id}
+          AND deleted = 1
+    </delete>
+
+    <select id="countAllByDataSetId" resultType="long">
+        SELECT COUNT(*)
+        FROM ocean_gis.gis_file_meta
+        WHERE data_set_id = #{dataSetId}
+    </select>
+
+</mapper>

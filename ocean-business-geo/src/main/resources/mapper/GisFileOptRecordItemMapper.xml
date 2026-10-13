@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisFileOptRecordItemMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO ocean_gis.gis_file_opt_record_item (
+            id, record_id, file_meta_id, sequence_no, original_name,
+            storage_name, storage_key, storage_type, extension,
+            operation_status, error_message, size_bytes, sha256,
+            uploaded_by, upload_status, cleanup_status, create_time, update_time
+        ) VALUES
+        <foreach collection="records" item="item" separator=",">
+            (
+                #{item.id}, #{item.recordId}, #{item.fileMetaId}, #{item.sequenceNo},
+                #{item.originalName}, #{item.storageName}, #{item.storageKey},
+                #{item.storageType}, #{item.extension}, #{item.operationStatus},
+                #{item.errorMessage}, #{item.sizeBytes}, #{item.sha256},
+                #{item.uploadedBy}, #{item.uploadStatus}, #{item.cleanupStatus},
+                #{item.createTime}, #{item.updateTime}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectByRecordId"
+            resultType="org.ocean.admin.gis.entity.GisFileOptRecordItem">
+        SELECT item.*
+        FROM ocean_gis.gis_file_opt_record_item item
+        WHERE item.record_id = #{recordId}
+        ORDER BY item.sequence_no, item.id
+    </select>
+
+    <update id="clearFileMetaReference">
+        UPDATE ocean_gis.gis_file_opt_record_item
+        SET file_meta_id = NULL
+        WHERE file_meta_id = #{fileMetaId}
+    </update>
+
+</mapper>
