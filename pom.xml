@@ -21,7 +21,7 @@
         <module>ocean-kernel</module>
         <module>ocean-platform-core</module>
         <module>ocean-bootstrap</module>
-        <module>ocean-gis</module>
+        <module>ocean-business-geo</module>
     </modules>
 
     <properties>

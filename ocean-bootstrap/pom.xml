@@ -23,7 +23,7 @@
         </dependency>
         <dependency>
             <groupId>org.ocean.admin</groupId>
-            <artifactId>ocean-gis</artifactId>
+            <artifactId>ocean-business-geo</artifactId>
             <version>${project.version}</version>
         </dependency>
         <!-- Spring Boot WebSocket -->

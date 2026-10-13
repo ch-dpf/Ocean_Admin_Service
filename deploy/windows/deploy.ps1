@@ -13,7 +13,7 @@ $pidFile = Join-Path $runtimeDir 'ocean-admin.pid'
 $stdoutLog = Join-Path $runtimeDir 'ocean-admin-console.out.log'
 $stderrLog = Join-Path $runtimeDir 'ocean-admin-console.err.log'
 $appJar = if ($env:OCEAN_APP_JAR) { $env:OCEAN_APP_JAR } else { Join-Path $projectRoot 'ocean-bootstrap\target\ocean-bootstrap-1.0.0-SNAPSHOT.jar' }
-$defaultMagoJar = Join-Path $projectRoot 'ocean-gis\tools\mago\mago-3d-terrainer-1.14.2-release.jar'
+$defaultMagoJar = Join-Path $projectRoot 'ocean-business-geo\tools\mago\mago-3d-terrainer-1.14.2-release.jar'
 
 function Import-ApplicationEnvironment {
     if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {

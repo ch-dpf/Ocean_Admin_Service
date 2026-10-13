@@ -12,7 +12,7 @@ WORKDIR /app
 
 COPY --from=builder /workspace/ocean-bootstrap/target/ocean-bootstrap-1.0.0-SNAPSHOT.jar /app/app.jar
 COPY --from=builder /workspace/db/migration /app/db/migration
-COPY --from=builder /workspace/ocean-gis/tools/mago/mago-3d-terrainer-1.14.2-release.jar /app/runtime/mago/mago-3d-terrainer-1.14.2-release.jar
+COPY --from=builder /workspace/ocean-business-geo/tools/mago/mago-3d-terrainer-1.14.2-release.jar /app/runtime/mago/mago-3d-terrainer-1.14.2-release.jar
 
 RUN mkdir -p /app/data /app/logs && chown -R ocean:ocean /app
 

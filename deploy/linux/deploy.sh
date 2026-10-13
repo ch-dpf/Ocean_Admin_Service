@@ -8,7 +8,7 @@ RUNTIME_DIR="${PROJECT_ROOT}/logs"
 PID_FILE="${RUNTIME_DIR}/ocean-admin.pid"
 OUT_LOG="${RUNTIME_DIR}/ocean-admin-console.log"
 APP_JAR="${OCEAN_APP_JAR:-${PROJECT_ROOT}/ocean-bootstrap/target/ocean-bootstrap-1.0.0-SNAPSHOT.jar}"
-DEFAULT_MAGO_JAR="${PROJECT_ROOT}/ocean-gis/tools/mago/mago-3d-terrainer-1.14.2-release.jar"
+DEFAULT_MAGO_JAR="${PROJECT_ROOT}/ocean-business-geo/tools/mago/mago-3d-terrainer-1.14.2-release.jar"
 
 die() {
   echo "ERROR: $*" >&2

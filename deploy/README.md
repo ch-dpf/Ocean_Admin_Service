@@ -18,7 +18,7 @@ deploy/
 
 ## 部署前准备
 
-1. 克隆仓库后执行 `git lfs pull`，确保 `ocean-gis/tools/mago/mago-3d-terrainer-1.14.2-release.jar` 不是 Git LFS 指针文件。
+1. 克隆仓库后执行 `git lfs pull`，确保 `ocean-business-geo/tools/mago/mago-3d-terrainer-1.14.2-release.jar` 不是 Git LFS 指针文件。
 2. 复制配置模板并修改所有 `change-me`：
 
 ```bash
