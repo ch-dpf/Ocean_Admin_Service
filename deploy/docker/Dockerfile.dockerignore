@@ -1,0 +1,12 @@
+.git
+.gitattributes
+.idea
+.planning
+.vscode
+**/target
+**/src/test
+gis
+logs
+*.log
+target-runtime-*.out.log
+
