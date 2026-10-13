@@ -37,7 +37,7 @@
 
     <select id="selectRecordPage" resultType="org.ocean.admin.gis.vo.GisFileTransferRecordVO">
         SELECT <include refid="recordColumns"/>
-        FROM ocean_gis.gis_file_opt_record r
+        FROM ocean_gis.gis_file_transfer_record r
         JOIN ocean_gis.gis_data_set ds ON ds.id = r.data_set_id
         WHERE r.deleted = 0
         <if test="operationType != null">
@@ -64,7 +64,7 @@
         <if test="originalName != null or extension != null or uploadStatus != null">
             AND EXISTS (
                 SELECT 1
-                FROM ocean_gis.gis_file_opt_record_item item
+                FROM ocean_gis.gis_file_transfer_record_item item
                 WHERE item.record_id = r.id
                 <if test="originalName != null">
                     AND item.original_name LIKE CONCAT('%', #{originalName}, '%')
@@ -82,7 +82,7 @@
 
     <select id="selectRecordByNo" resultType="org.ocean.admin.gis.vo.GisFileTransferRecordVO">
         SELECT <include refid="recordColumns"/>
-        FROM ocean_gis.gis_file_opt_record r
+        FROM ocean_gis.gis_file_transfer_record r
         JOIN ocean_gis.gis_data_set ds ON ds.id = r.data_set_id
         WHERE r.deleted = 0
           AND r.record_no = #{recordNo}

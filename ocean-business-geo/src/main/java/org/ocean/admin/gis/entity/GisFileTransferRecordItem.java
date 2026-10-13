@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 /** GIS 原始文件传输批次中的单文件处理明细。 */
 @Data
-@TableName(value = "gis_file_opt_record_item", schema = "ocean_gis")
+@TableName(value = "gis_file_transfer_record_item", schema = "ocean_gis")
 public class GisFileTransferRecordItem {
 
     @TableId(type = IdType.ASSIGN_ID)

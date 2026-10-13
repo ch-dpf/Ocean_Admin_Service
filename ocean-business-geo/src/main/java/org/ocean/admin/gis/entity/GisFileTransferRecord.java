@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 
 /** GIS 原始文件上传、下载传输批次记录。 */
 @Data
-@TableName(value = "gis_file_opt_record", schema = "ocean_gis")
+@TableName(value = "gis_file_transfer_record", schema = "ocean_gis")
 public class GisFileTransferRecord {
 
     @TableId(type = IdType.ASSIGN_ID)
