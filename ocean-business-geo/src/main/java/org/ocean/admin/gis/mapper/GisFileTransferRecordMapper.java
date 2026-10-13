@@ -4,19 +4,20 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.ocean.admin.gis.entity.GisFileOptRecord;
-import org.ocean.admin.gis.vo.GisFileOptRecordVO;
+import org.ocean.admin.gis.entity.GisFileTransferRecord;
+import org.ocean.admin.gis.vo.GisFileTransferRecordVO;
 
 import java.time.LocalDateTime;
 
 @Mapper
-public interface GisFileOptRecordMapper extends BaseMapper<GisFileOptRecord> {
+public interface GisFileTransferRecordMapper extends BaseMapper<GisFileTransferRecord> {
 
-    Page<GisFileOptRecordVO> selectImportRecordPage(
-            Page<GisFileOptRecordVO> page,
+    Page<GisFileTransferRecordVO> selectRecordPage(
+            Page<GisFileTransferRecordVO> page,
             @Param("dataSetId") Long dataSetId,
             @Param("categoryId") Long categoryId,
             @Param("recordNo") String recordNo,
+            @Param("operationType") String operationType,
             @Param("recordStatus") String recordStatus,
             @Param("originalName") String originalName,
             @Param("extension") String extension,
@@ -24,5 +25,5 @@ public interface GisFileOptRecordMapper extends BaseMapper<GisFileOptRecord> {
             @Param("createTimeStart") LocalDateTime createTimeStart,
             @Param("createTimeEnd") LocalDateTime createTimeEnd);
 
-    GisFileOptRecordVO selectImportRecordByNo(@Param("recordNo") String recordNo);
+    GisFileTransferRecordVO selectRecordByNo(@Param("recordNo") String recordNo);
 }

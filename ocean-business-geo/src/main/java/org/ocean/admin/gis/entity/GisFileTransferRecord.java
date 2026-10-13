@@ -8,10 +8,10 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** GIS 文件导入导出记录。 */
+/** GIS 原始文件上传、下载传输批次记录。 */
 @Data
 @TableName(value = "gis_file_opt_record", schema = "ocean_gis")
-public class GisFileOptRecord {
+public class GisFileTransferRecord {
 
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;

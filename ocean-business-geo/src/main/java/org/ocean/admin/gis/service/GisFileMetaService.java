@@ -11,7 +11,7 @@ import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
-import org.ocean.admin.gis.mapper.GisFileOptRecordItemMapper;
+import org.ocean.admin.gis.mapper.GisFileTransferRecordItemMapper;
 import org.ocean.admin.gis.util.FileDownloadUtil;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
@@ -40,10 +40,10 @@ public class GisFileMetaService {
     private static final Set<String> UPLOAD_STATUSES = Set.of("PENDING", "READY", "FAILED");
 
     private final GisFileMetaMapper gisFileMetaMapper;
-    private final GisFileOptRecordItemMapper gisFileOptRecordItemMapper;
+    private final GisFileTransferRecordItemMapper gisFileTransferRecordItemMapper;
     private final GisDataSetMapper gisDataSetMapper;
     private final GisDataSetService gisDataSetService;
-    private final GisFileOptRecordService gisFileOptRecordService;
+    private final GisFileTransferRecordService gisFileTransferRecordService;
     private final FileDownloadUtil fileDownloadUtil;
     private final FileUploadUtil fileUploadUtil;
 
@@ -129,7 +129,7 @@ public class GisFileMetaService {
         GisFileMeta deletedMeta = getRequiredDeleted(id);
         validatePermanentDeleteStorage(deletedMeta);
 
-        gisFileOptRecordItemMapper.clearFileMetaReference(id);
+        gisFileTransferRecordItemMapper.clearFileMetaReference(id);
         if (gisFileMetaMapper.permanentlyDeleteById(id) != 1) {
             throw new IllegalStateException("回收站文件彻底删除失败: " + id);
         }
@@ -253,7 +253,7 @@ public class GisFileMetaService {
                 meta.getStorageKey(), meta.getOriginalName(), request, response);
         if (result.transferAccepted()) {
             try {
-                gisFileOptRecordService.createDownloadRecord(meta, currentOperatorId());
+                gisFileTransferRecordService.createDownloadRecord(meta, currentOperatorId());
             } catch (RuntimeException recordFailure) {
                 log.error("下载记录登记失败: fileMetaId={}", id, recordFailure);
             }

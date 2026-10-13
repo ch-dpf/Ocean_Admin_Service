@@ -13,8 +13,8 @@ import org.ocean.admin.gis.dto.TaskProgressUpdate;
 import org.ocean.admin.gis.dto.TaskStage;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.entity.GisFileOptRecord;
-import org.ocean.admin.gis.entity.GisFileOptRecordItem;
+import org.ocean.admin.gis.entity.GisFileTransferRecord;
+import org.ocean.admin.gis.entity.GisFileTransferRecordItem;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.kernel.audit.CurrentOperator;
@@ -46,7 +46,7 @@ import java.util.Set;
  * </ul>
  *
  * <p>HTTP 请求头解析由 Controller 负责，具体文件 IO 由 {@link FileUploadUtil} 负责，
- * 数据库事务由 {@link GisFileOptRecordService} 负责。本服务不保存独立上传会话。</p>
+ * 数据库事务由 {@link GisFileTransferRecordService} 负责。本服务不保存独立上传会话。</p>
  */
 @Service
 @Slf4j
@@ -67,7 +67,7 @@ public class FileUploadService {
     private final GisDataSetMapper gisDataSetMapper;
     private final FileUploadUtil fileUploadUtil;
     private final AsyncTaskService asyncTaskService;
-    private final GisFileOptRecordService gisFileOptRecordService;
+    private final GisFileTransferRecordService gisFileTransferRecordService;
     private final FileUploadConfig uploadConfig;
     private final Object capacityMonitor = new Object();
 
@@ -97,13 +97,13 @@ public class FileUploadService {
         validateChunk(command);
         synchronized (requestLock(command.requestId())) {
             // 2. 只有第一个文件的首块能够创建批次；之后所有字段必须与首块声明一致。
-            GisFileOptRecord record = getOrCreateBatch(command);
+            GisFileTransferRecord record = getOrCreateBatch(command);
             validateBatch(record, command);
             validateBatchOwner(record);
 
             // 3. 客户端可能因响应丢失而重发终态块，校验文件身份并幂等返回原结果。
             if (!"RUNNING".equals(record.getRecordStatus())) {
-                GisFileOptRecordItem terminalItem = gisFileOptRecordService.getImportItem(
+                GisFileTransferRecordItem terminalItem = gisFileTransferRecordService.getImportItem(
                         record.getId(), command.sequenceNo());
                 if (terminalItem == null || !isItemFinished(terminalItem)) {
                     throw new IllegalStateException("已结束上传批次中不存在该文件: " + command.fileIndex());
@@ -115,14 +115,14 @@ public class FileUploadService {
 
             // 4. Redis 任务可由数据库记录恢复；数据库始终是上传状态的权威来源。
             ensureProgressTask(record);
-            List<GisFileOptRecordItem> items = gisFileOptRecordService.getImportItems(record.getId());
+            List<GisFileTransferRecordItem> items = gisFileTransferRecordService.getImportItems(record.getId());
             int expectedFileIndex = record.getCompletedCount() + record.getFailedCount();
             if (command.fileIndex() > expectedFileIndex) {
                 throw new IllegalStateException(
                         "文件必须按顺序上传，当前应上传fileIndex=" + expectedFileIndex);
             }
 
-            GisFileOptRecordItem item = findItemBySequence(items, command.sequenceNo());
+            GisFileTransferRecordItem item = findItemBySequence(items, command.sequenceNo());
             if (command.fileIndex() < expectedFileIndex) {
                 if (item == null || !isItemFinished(item)) {
                     throw new IllegalStateException("上传记录文件状态不一致: " + command.fileIndex());
@@ -138,7 +138,7 @@ public class FileUploadService {
                     throw new IllegalStateException("新文件首块offset必须为0");
                 }
                 validateDeclaredSizes(items, command);
-                item = gisFileOptRecordService.createRunningImportItem(
+                item = gisFileTransferRecordService.createRunningImportItem(
                         record.getId(),
                         command.sequenceNo(),
                         normalizeFileName(command.fileName()),
@@ -160,14 +160,14 @@ public class FileUploadService {
             } catch (IllegalArgumentException ex) {
                 consumeChunkBody(input, command.chunkSize());
                 fileUploadUtil.deleteUploadPartial(record.getRecordNo(), command.fileIndex());
-                record = gisFileOptRecordService.failImportFile(
+                record = gisFileTransferRecordService.failImportFile(
                         record.getId(), command.sequenceNo(), ex.getMessage());
                 publishFileResult(record, command.fileName());
                 finishTaskIfDone(record);
                 return buildChunkResult(
                         record,
                         command,
-                        gisFileOptRecordService.getImportItem(record.getId(), command.sequenceNo()),
+                        gisFileTransferRecordService.getImportItem(record.getId(), command.sequenceNo()),
                         false,
                         true);
             }
@@ -184,14 +184,14 @@ public class FileUploadService {
                 consumeChunkBody(input, command.chunkSize());
                 record = completeFile(record, command, recovered);
                 return buildChunkResult(record, command,
-                        gisFileOptRecordService.getImportItem(record.getId(), command.sequenceNo()),
+                        gisFileTransferRecordService.getImportItem(record.getId(), command.sequenceNo()),
                         true, false);
             }
 
             // 8. FileUploadUtil 校验重叠字节并追加新内容；块内进度只推送 Redis/WebSocket。
             long[] lastPushNanos = {0L};
             int[] lastProgress = {-1};
-            GisFileOptRecord currentRecord = record;
+            GisFileTransferRecord currentRecord = record;
             FileUploadUtil.ChunkWriteResult writeResult = fileUploadUtil.appendChunk(
                     record.getRecordNo(),
                     command.fileIndex(),
@@ -209,7 +209,7 @@ public class FileUploadService {
             // 9. 完整读取并落盘一个请求块后，数据库进度只提交一次，重复块不会重复累计。
             long uploadedBytes = Math.min(
                     record.getTotalBytes(), completedBytes + writeResult.nextOffset());
-            record = gisFileOptRecordService.updateUploadedBytes(record.getId(), uploadedBytes);
+            record = gisFileTransferRecordService.updateUploadedBytes(record.getId(), uploadedBytes);
             publishProgress(record, command.fileName(), uploadedBytes);
 
             // 10. 文件完成后先原子转入正式目录，再事务提交元数据；提交失败则恢复暂存态。
@@ -240,15 +240,15 @@ public class FileUploadService {
             return buildChunkResult(
                     record,
                     command,
-                    gisFileOptRecordService.getImportItem(record.getId(), command.sequenceNo()),
+                    gisFileTransferRecordService.getImportItem(record.getId(), command.sequenceNo()),
                     writeResult.duplicate(),
                     false);
         }
     }
 
     /** 首块创建权威数据库记录，并在容量检查期间避免本实例内重复预留磁盘空间。 */
-    private GisFileOptRecord getOrCreateBatch(GisUploadChunkCommand command) {
-        GisFileOptRecord existing = gisFileOptRecordService.findImportRecordByRequestId(
+    private GisFileTransferRecord getOrCreateBatch(GisUploadChunkCommand command) {
+        GisFileTransferRecord existing = gisFileTransferRecordService.findImportRecordByRequestId(
                 command.requestId());
         if (existing != null) {
             return existing;
@@ -258,18 +258,18 @@ public class FileUploadService {
         }
         requireDataSet(command.dataSetId());
         synchronized (capacityMonitor) {
-            existing = gisFileOptRecordService.findImportRecordByRequestId(command.requestId());
+            existing = gisFileTransferRecordService.findImportRecordByRequestId(command.requestId());
             if (existing != null) {
                 return existing;
             }
-            long reserved = gisFileOptRecordService.calculateReservedUploadBytes();
+            long reserved = gisFileTransferRecordService.calculateReservedUploadBytes();
             long required = Math.addExact(
                     Math.addExact(reserved, command.totalSize()),
                     uploadConfig.getMinFreeSpace().toBytes());
             fileUploadUtil.ensureFreeSpace(required);
             String taskId = GisTaskNoGenerator.generateUploadTaskNo();
             try {
-                return gisFileOptRecordService.createRunningImportRecord(
+                return gisFileTransferRecordService.createRunningImportRecord(
                         taskId,
                         command.requestId(),
                         command.dataSetId(),
@@ -277,7 +277,7 @@ public class FileUploadService {
                         command.totalSize(),
                         getCurrentOperatorId());
             } catch (DuplicateKeyException ex) {
-                GisFileOptRecord raced = gisFileOptRecordService.findImportRecordByRequestId(
+                GisFileTransferRecord raced = gisFileTransferRecordService.findImportRecordByRequestId(
                         command.requestId());
                 if (raced != null) {
                     return raced;
@@ -288,12 +288,12 @@ public class FileUploadService {
     }
 
     /** 提交单文件成功结果，并同步发布文件计数及批次终态。 */
-    private GisFileOptRecord completeFile(
-            GisFileOptRecord record,
+    private GisFileTransferRecord completeFile(
+            GisFileTransferRecord record,
             GisUploadChunkCommand command,
             GisStoredFile storedFile) {
         GisFileMeta meta = createFileMeta(record, command, storedFile);
-        GisFileOptRecord updated = gisFileOptRecordService.completeImportFile(
+        GisFileTransferRecord updated = gisFileTransferRecordService.completeImportFile(
                 record.getId(), command.sequenceNo(), meta);
         publishFileResult(updated, command.fileName());
         finishTaskIfDone(updated);
@@ -324,7 +324,7 @@ public class FileUploadService {
     }
 
     private void validateBatch(
-            GisFileOptRecord record,
+            GisFileTransferRecord record,
             GisUploadChunkCommand command) {
         if (!command.requestId().equals(record.getRequestId())
                 || !command.dataSetId().equals(record.getDataSetId())
@@ -335,10 +335,10 @@ public class FileUploadService {
     }
 
     private void validateDeclaredSizes(
-            List<GisFileOptRecordItem> items,
+            List<GisFileTransferRecordItem> items,
             GisUploadChunkCommand command) {
         long declaredBefore = 0L;
-        for (GisFileOptRecordItem existing : items) {
+        for (GisFileTransferRecordItem existing : items) {
             declaredBefore = Math.addExact(declaredBefore, existing.getSizeBytes());
         }
         long declaredThroughCurrent = Math.addExact(declaredBefore, command.fileSize());
@@ -351,7 +351,7 @@ public class FileUploadService {
     }
 
     private void validateFile(
-            GisFileOptRecordItem item,
+            GisFileTransferRecordItem item,
             GisUploadChunkCommand command) {
         if (!normalizeFileName(command.fileName()).equals(item.getOriginalName())
                 || command.fileSize() != item.getSizeBytes()) {
@@ -359,7 +359,7 @@ public class FileUploadService {
         }
     }
 
-    private void validateBatchOwner(GisFileOptRecord record) {
+    private void validateBatchOwner(GisFileTransferRecord record) {
         if (record.getOperatorId() == null) {
             return;
         }
@@ -370,7 +370,7 @@ public class FileUploadService {
     }
 
     /** Redis 快照丢失或服务重启时，根据数据库记录重建实时进度任务。 */
-    private void ensureProgressTask(GisFileOptRecord record) {
+    private void ensureProgressTask(GisFileTransferRecord record) {
         String taskId = record.getRecordNo();
         TaskInfo taskInfo = asyncTaskService.getTaskInfo(taskId);
         if (taskInfo == null) {
@@ -402,7 +402,7 @@ public class FileUploadService {
     }
 
     private void reportStreamProgress(
-            GisFileOptRecord record,
+            GisFileTransferRecord record,
             String fileName,
             long uploadedBytes,
             long[] lastPushNanos,
@@ -420,7 +420,7 @@ public class FileUploadService {
     }
 
     private void publishProgress(
-            GisFileOptRecord record, String fileName, long uploadedBytes) {
+            GisFileTransferRecord record, String fileName, long uploadedBytes) {
         asyncTaskService.updateProgress(
                 record.getRecordNo(),
                 TaskProgressUpdate.stageChanged(createByteStage(
@@ -434,7 +434,7 @@ public class FileUploadService {
                         progressPercent(uploadedBytes, record.getTotalBytes())));
     }
 
-    private void publishFileResult(GisFileOptRecord record, String fileName) {
+    private void publishFileResult(GisFileTransferRecord record, String fileName) {
         asyncTaskService.updateProgress(
                 record.getRecordNo(),
                 TaskProgressUpdate.resultChanged(
@@ -443,7 +443,7 @@ public class FileUploadService {
                         "file_finished", "文件处理完成：" + fileName)));
     }
 
-    private void finishTaskIfDone(GisFileOptRecord record) {
+    private void finishTaskIfDone(GisFileTransferRecord record) {
         if (!"RUNNING".equals(record.getRecordStatus())) {
             fileUploadUtil.deleteEmptyBatchDirectory(record.getRecordNo());
             asyncTaskService.finalizeTaskResult(
@@ -471,9 +471,9 @@ public class FileUploadService {
         }
 
         LocalDateTime inactiveBefore = LocalDateTime.now().minus(uploadConfig.getIdleTimeout());
-        List<GisFileOptRecord> pending = gisFileOptRecordService.findCleanupPendingBatches(limit);
+        List<GisFileTransferRecord> pending = gisFileTransferRecordService.findCleanupPendingBatches(limit);
         int cleanedCount = 0;
-        for (GisFileOptRecord record : pending) {
+        for (GisFileTransferRecord record : pending) {
             if (cleanupBatch(record, inactiveBefore)) {
                 cleanedCount++;
             }
@@ -483,9 +483,9 @@ public class FileUploadService {
         if (remaining < 1) {
             return cleanedCount;
         }
-        List<GisFileOptRecord> expired = gisFileOptRecordService.findExpiredUploadBatches(
+        List<GisFileTransferRecord> expired = gisFileTransferRecordService.findExpiredUploadBatches(
                 inactiveBefore, remaining);
-        for (GisFileOptRecord record : expired) {
+        for (GisFileTransferRecord record : expired) {
             if (cleanupBatch(record, inactiveBefore)) {
                 cleanedCount++;
             }
@@ -493,14 +493,14 @@ public class FileUploadService {
         return cleanedCount;
     }
 
-    private boolean cleanupBatch(GisFileOptRecord candidate, LocalDateTime inactiveBefore) {
+    private boolean cleanupBatch(GisFileTransferRecord candidate, LocalDateTime inactiveBefore) {
         String lockKey = candidate.getRequestId() == null
                 ? candidate.getRecordNo()
                 : candidate.getRequestId();
         synchronized (requestLock(lockKey)) {
-            GisFileOptRecord record = candidate;
+            GisFileTransferRecord record = candidate;
             if ("RUNNING".equals(record.getRecordStatus())) {
-                record = gisFileOptRecordService.expireUploadBatch(
+                record = gisFileTransferRecordService.expireUploadBatch(
                         record.getId(), record.getVersion(), inactiveBefore);
                 if (record == null) {
                     return false;
@@ -518,11 +518,11 @@ public class FileUploadService {
             if (!taskFinalized) {
                 return false;
             }
-            return gisFileOptRecordService.completeUploadCleanup(record.getId());
+            return gisFileTransferRecordService.completeUploadCleanup(record.getId());
         }
     }
 
-    private boolean finalizeExpiredProgressTask(GisFileOptRecord record) {
+    private boolean finalizeExpiredProgressTask(GisFileTransferRecord record) {
         try {
             asyncTaskService.updateProgress(
                     record.getRecordNo(),
@@ -558,7 +558,7 @@ public class FileUploadService {
     }
 
     private GisFileMeta createFileMeta(
-            GisFileOptRecord record,
+            GisFileTransferRecord record,
             GisUploadChunkCommand command,
             GisStoredFile storedFile) {
         LocalDateTime now = LocalDateTime.now();
@@ -609,9 +609,9 @@ public class FileUploadService {
     }
 
     private Map<String, Object> buildChunkResult(
-            GisFileOptRecord record,
+            GisFileTransferRecord record,
             GisUploadChunkCommand command,
-            GisFileOptRecordItem item,
+            GisFileTransferRecordItem item,
             boolean duplicate,
             boolean fileFailed) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -632,9 +632,9 @@ public class FileUploadService {
     }
 
     private long nextOffset(
-            GisFileOptRecord record,
+            GisFileTransferRecord record,
             GisUploadChunkCommand command,
-            GisFileOptRecordItem item) {
+            GisFileTransferRecordItem item) {
         if (item != null && "SUCCESS".equals(item.getOperationStatus())) {
             return command.fileSize();
         }
@@ -642,12 +642,12 @@ public class FileUploadService {
             return 0L;
         }
         long successfulBytes = successfulBytes(
-                gisFileOptRecordService.getImportItems(record.getId()));
+                gisFileTransferRecordService.getImportItems(record.getId()));
         return Math.max(0L, record.getUploadedBytes() - successfulBytes);
     }
 
-    private GisFileOptRecordItem findItemBySequence(
-            List<GisFileOptRecordItem> items,
+    private GisFileTransferRecordItem findItemBySequence(
+            List<GisFileTransferRecordItem> items,
             int sequenceNo) {
         return items.stream()
                 .filter(item -> item.getSequenceNo() == sequenceNo)
@@ -655,14 +655,14 @@ public class FileUploadService {
                 .orElse(null);
     }
 
-    private boolean isItemFinished(GisFileOptRecordItem item) {
+    private boolean isItemFinished(GisFileTransferRecordItem item) {
         return "SUCCESS".equals(item.getOperationStatus())
                 || "FAILED".equals(item.getOperationStatus());
     }
 
-    private long successfulBytes(List<GisFileOptRecordItem> items) {
+    private long successfulBytes(List<GisFileTransferRecordItem> items) {
         long completed = 0L;
-        for (GisFileOptRecordItem item : items) {
+        for (GisFileTransferRecordItem item : items) {
             if ("SUCCESS".equals(item.getOperationStatus())) {
                 completed = Math.addExact(completed, item.getSizeBytes());
             }

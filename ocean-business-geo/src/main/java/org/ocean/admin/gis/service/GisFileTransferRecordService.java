@@ -5,14 +5,14 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.entity.GisFileOptRecord;
-import org.ocean.admin.gis.entity.GisFileOptRecordItem;
+import org.ocean.admin.gis.entity.GisFileTransferRecord;
+import org.ocean.admin.gis.entity.GisFileTransferRecordItem;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
-import org.ocean.admin.gis.mapper.GisFileOptRecordMapper;
-import org.ocean.admin.gis.mapper.GisFileOptRecordItemMapper;
-import org.ocean.admin.gis.vo.GisFileOptRecordVO;
+import org.ocean.admin.gis.mapper.GisFileTransferRecordMapper;
+import org.ocean.admin.gis.mapper.GisFileTransferRecordItemMapper;
+import org.ocean.admin.gis.vo.GisFileTransferRecordVO;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
@@ -25,25 +25,27 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * GIS 源数据文件操作记录
+ * GIS 原始文件上传、下载传输记录。
  *
  * @author DeepOcean
  * @since 2026-09-16
  */
 @Service
 @RequiredArgsConstructor
-public class GisFileOptRecordService {
+public class GisFileTransferRecordService {
     private static final String UPLOAD_CLEANUP_PENDING = "UPLOAD_CLEANUP_PENDING";
     private static final Set<String> RECORD_STATUSES = Set.of(
             "QUEUED", "RUNNING", "COMPLETED", "PARTIAL_FAILED", "FAILED");
+    private static final Set<String> OPERATION_TYPES = Set.of("IMPORT", "EXPORT");
     private static final Set<String> UPLOAD_STATUSES = Set.of("PENDING", "READY", "FAILED");
 
-    public PageResult<List<GisFileOptRecordVO>> getImportRecordPage(
+    public PageResult<List<GisFileTransferRecordVO>> getRecordPage(
             Integer current,
             Integer size,
             Long dataSetId,
             Long categoryId,
             String recordNo,
+            String operationType,
             String recordStatus,
             String originalName,
             String extension,
@@ -53,17 +55,20 @@ public class GisFileOptRecordService {
         long currentPage = current == null || current < 1 ? 1L : current;
         long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
         String normalizedRecordNo = trimToNull(recordNo);
+        String normalizedOperationType = normalizeUpper(operationType);
         String normalizedRecordStatus = normalizeUpper(recordStatus);
         String normalizedOriginalName = trimToNull(originalName);
         String normalizedExtension = normalizeLower(extension);
         String normalizedUploadStatus = normalizeUpper(uploadStatus);
-        validateQuery(normalizedRecordStatus, normalizedUploadStatus, createTimeStart, createTimeEnd);
+        validateQuery(normalizedOperationType, normalizedRecordStatus,
+                normalizedUploadStatus, createTimeStart, createTimeEnd);
 
-        Page<GisFileOptRecordVO> page = recordMapper.selectImportRecordPage(
+        Page<GisFileTransferRecordVO> page = recordMapper.selectRecordPage(
                 new Page<>(currentPage, pageSize),
                 dataSetId,
                 categoryId,
                 normalizedRecordNo,
+                normalizedOperationType,
                 normalizedRecordStatus,
                 normalizedOriginalName,
                 normalizedExtension,
@@ -73,39 +78,39 @@ public class GisFileOptRecordService {
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
     }
 
-    public GisFileOptRecordVO getImportRecordDetail(String recordNo) {
+    public GisFileTransferRecordVO getRecordDetail(String recordNo) {
         String normalizedRecordNo = trimToNull(recordNo);
         if (normalizedRecordNo == null || normalizedRecordNo.length() > 64) {
-            throw new IllegalArgumentException("导入记录编号不合法");
+            throw new IllegalArgumentException("文件传输记录编号不合法");
         }
-        GisFileOptRecordVO record = recordMapper.selectImportRecordByNo(normalizedRecordNo);
+        GisFileTransferRecordVO record = recordMapper.selectRecordByNo(normalizedRecordNo);
         if (record == null) {
-            throw new IllegalArgumentException("导入记录不存在: " + normalizedRecordNo);
+            throw new IllegalArgumentException("文件传输记录不存在: " + normalizedRecordNo);
         }
-        List<GisFileOptRecordItem> recordItems = recordItemMapper.selectByRecordId(record.getId());
+        List<GisFileTransferRecordItem> recordItems = recordItemMapper.selectByRecordId(record.getId());
         record.setFiles(recordItems.stream()
                 .map(item -> toFileSnapshotVO(item, record.getDataSetId(), record.getCategoryId()))
                 .toList());
         return record;
     }
 
-    private final GisFileOptRecordMapper recordMapper;
+    private final GisFileTransferRecordMapper recordMapper;
     private final GisFileMetaMapper fileMetaMapper;
-    private final GisFileOptRecordItemMapper recordItemMapper;
+    private final GisFileTransferRecordItemMapper recordItemMapper;
     private final GisDataSetMapper dataSetMapper;
 
-    public GisFileOptRecord findImportRecordByRequestId(String requestId) {
+    public GisFileTransferRecord findImportRecordByRequestId(String requestId) {
         if (requestId == null || requestId.isBlank()) {
             return null;
         }
-        return recordMapper.selectOne(new LambdaQueryWrapper<GisFileOptRecord>()
-                .eq(GisFileOptRecord::getRequestId, requestId)
-                .eq(GisFileOptRecord::getOperationType, "IMPORT"));
+        return recordMapper.selectOne(new LambdaQueryWrapper<GisFileTransferRecord>()
+                .eq(GisFileTransferRecord::getRequestId, requestId)
+                .eq(GisFileTransferRecord::getOperationType, "IMPORT"));
     }
 
     /** 首块到达时直接创建运行中的导入记录，不引入独立上传会话。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileOptRecord createRunningImportRecord(
+    public GisFileTransferRecord createRunningImportRecord(
             String recordNo,
             String requestId,
             Long dataSetId,
@@ -113,7 +118,7 @@ public class GisFileOptRecordService {
             long totalBytes,
             Long operatorId) {
         LocalDateTime now = LocalDateTime.now();
-        GisFileOptRecord record = new GisFileOptRecord();
+        GisFileTransferRecord record = new GisFileTransferRecord();
         record.setRecordNo(recordNo);
         record.setRequestId(requestId);
         record.setOperationType("IMPORT");
@@ -137,31 +142,31 @@ public class GisFileOptRecordService {
         return record;
     }
 
-    public GisFileOptRecordItem getImportItem(Long recordId, int sequenceNo) {
-        return recordItemMapper.selectOne(new LambdaQueryWrapper<GisFileOptRecordItem>()
-                .eq(GisFileOptRecordItem::getRecordId, recordId)
-                .eq(GisFileOptRecordItem::getSequenceNo, sequenceNo));
+    public GisFileTransferRecordItem getImportItem(Long recordId, int sequenceNo) {
+        return recordItemMapper.selectOne(new LambdaQueryWrapper<GisFileTransferRecordItem>()
+                .eq(GisFileTransferRecordItem::getRecordId, recordId)
+                .eq(GisFileTransferRecordItem::getSequenceNo, sequenceNo));
     }
 
-    public List<GisFileOptRecordItem> getImportItems(Long recordId) {
+    public List<GisFileTransferRecordItem> getImportItems(Long recordId) {
         return recordItemMapper.selectByRecordId(recordId);
     }
 
     /** 首次接收某文件时建立运行中明细，后续块复用同一行。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileOptRecordItem createRunningImportItem(
+    public GisFileTransferRecordItem createRunningImportItem(
             Long recordId,
             int sequenceNo,
             String originalName,
             String extension,
             long sizeBytes,
             Long operatorId) {
-        GisFileOptRecordItem existing = getImportItem(recordId, sequenceNo);
+        GisFileTransferRecordItem existing = getImportItem(recordId, sequenceNo);
         if (existing != null) {
             return existing;
         }
         LocalDateTime now = LocalDateTime.now();
-        GisFileOptRecordItem item = new GisFileOptRecordItem();
+        GisFileTransferRecordItem item = new GisFileTransferRecordItem();
         item.setRecordId(recordId);
         item.setSequenceNo(sequenceNo);
         item.setOriginalName(abbreviate(originalName, 255));
@@ -182,11 +187,11 @@ public class GisFileOptRecordService {
     /** 统计运行中上传批次尚未落盘的声明字节数，用于磁盘容量预留。 */
     public long calculateReservedUploadBytes() {
         long reserved = 0L;
-        List<GisFileOptRecord> records = recordMapper.selectList(
-                new LambdaQueryWrapper<GisFileOptRecord>()
-                        .eq(GisFileOptRecord::getOperationType, "IMPORT")
-                        .eq(GisFileOptRecord::getRecordStatus, "RUNNING"));
-        for (GisFileOptRecord record : records) {
+        List<GisFileTransferRecord> records = recordMapper.selectList(
+                new LambdaQueryWrapper<GisFileTransferRecord>()
+                        .eq(GisFileTransferRecord::getOperationType, "IMPORT")
+                        .eq(GisFileTransferRecord::getRecordStatus, "RUNNING"));
+        for (GisFileTransferRecord record : records) {
             long remaining = Math.max(
                     0L,
                     valueOrZero(record.getTotalBytes()) - valueOrZero(record.getUploadedBytes()));
@@ -196,29 +201,29 @@ public class GisFileOptRecordService {
     }
 
     /** 查询超过空闲时间仍未推进的运行中上传批次。 */
-    public List<GisFileOptRecord> findExpiredUploadBatches(
+    public List<GisFileTransferRecord> findExpiredUploadBatches(
             LocalDateTime inactiveBefore,
             int limit) {
         if (inactiveBefore == null || limit < 1) {
             throw new IllegalArgumentException("上传超时查询参数不合法");
         }
-        return recordMapper.selectList(new LambdaQueryWrapper<GisFileOptRecord>()
-                .eq(GisFileOptRecord::getOperationType, "IMPORT")
-                .eq(GisFileOptRecord::getRecordStatus, "RUNNING")
-                .le(GisFileOptRecord::getUpdateTime, inactiveBefore)
-                .orderByAsc(GisFileOptRecord::getUpdateTime)
+        return recordMapper.selectList(new LambdaQueryWrapper<GisFileTransferRecord>()
+                .eq(GisFileTransferRecord::getOperationType, "IMPORT")
+                .eq(GisFileTransferRecord::getRecordStatus, "RUNNING")
+                .le(GisFileTransferRecord::getUpdateTime, inactiveBefore)
+                .orderByAsc(GisFileTransferRecord::getUpdateTime)
                 .last("LIMIT " + limit));
     }
 
     /** 查询上次未能完成暂存目录删除的上传批次。 */
-    public List<GisFileOptRecord> findCleanupPendingBatches(int limit) {
+    public List<GisFileTransferRecord> findCleanupPendingBatches(int limit) {
         if (limit < 1) {
             throw new IllegalArgumentException("上传清理批次数必须大于0");
         }
-        return recordMapper.selectList(new LambdaQueryWrapper<GisFileOptRecord>()
-                .eq(GisFileOptRecord::getOperationType, "IMPORT")
-                .eq(GisFileOptRecord::getCurrentStage, UPLOAD_CLEANUP_PENDING)
-                .orderByAsc(GisFileOptRecord::getUpdateTime)
+        return recordMapper.selectList(new LambdaQueryWrapper<GisFileTransferRecord>()
+                .eq(GisFileTransferRecord::getOperationType, "IMPORT")
+                .eq(GisFileTransferRecord::getCurrentStage, UPLOAD_CLEANUP_PENDING)
+                .orderByAsc(GisFileTransferRecord::getUpdateTime)
                 .last("LIMIT " + limit));
     }
 
@@ -228,14 +233,14 @@ public class GisFileOptRecordService {
      * @return 抢占后的终态记录；批次已恢复活动或被其他清理线程处理时返回 null
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileOptRecord expireUploadBatch(
+    public GisFileTransferRecord expireUploadBatch(
             Long recordId,
             Long expectedVersion,
             LocalDateTime inactiveBefore) {
         if (recordId == null || expectedVersion == null || inactiveBefore == null) {
             throw new IllegalArgumentException("过期上传批次参数不能为空");
         }
-        GisFileOptRecord record = recordMapper.selectById(recordId);
+        GisFileTransferRecord record = recordMapper.selectById(recordId);
         if (record == null || !"RUNNING".equals(record.getRecordStatus())) {
             return null;
         }
@@ -244,7 +249,7 @@ public class GisFileOptRecordService {
         String terminalStatus = completed == 0 ? "FAILED" : "PARTIAL_FAILED";
         String errorMessage = "上传超过空闲时限未继续，系统已自动终止";
         LocalDateTime now = LocalDateTime.now();
-        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
+        int updated = recordMapper.update(null, new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
                 .eq("operation_type", "IMPORT")
                 .eq("record_status", "RUNNING")
@@ -260,7 +265,7 @@ public class GisFileOptRecordService {
         if (updated != 1) {
             return null;
         }
-        recordItemMapper.update(null, new UpdateWrapper<GisFileOptRecordItem>()
+        recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
                 .eq("record_id", recordId)
                 .eq("operation_status", "RUNNING")
                 .set("operation_status", "FAILED")
@@ -277,17 +282,17 @@ public class GisFileOptRecordService {
         if (recordId == null) {
             throw new IllegalArgumentException("上传记录ID不能为空");
         }
-        GisFileOptRecord record = recordMapper.selectById(recordId);
+        GisFileTransferRecord record = recordMapper.selectById(recordId);
         if (record == null || !UPLOAD_CLEANUP_PENDING.equals(record.getCurrentStage())) {
             return false;
         }
         LocalDateTime now = LocalDateTime.now();
-        recordItemMapper.update(null, new UpdateWrapper<GisFileOptRecordItem>()
+        recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
                 .eq("record_id", recordId)
                 .eq("cleanup_status", "PENDING")
                 .set("cleanup_status", "COMPLETED")
                 .set("update_time", now));
-        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
+        int updated = recordMapper.update(null, new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
                 .eq("current_stage", UPLOAD_CLEANUP_PENDING)
                 .set("current_stage", record.getRecordStatus())
@@ -298,8 +303,8 @@ public class GisFileOptRecordService {
 
     /** 每个请求块完成后仅写一次数据库进度；重复块不会导致累计翻倍。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileOptRecord updateUploadedBytes(Long recordId, long uploadedBytes) {
-        GisFileOptRecord record = recordMapper.selectById(recordId);
+    public GisFileTransferRecord updateUploadedBytes(Long recordId, long uploadedBytes) {
+        GisFileTransferRecord record = recordMapper.selectById(recordId);
         if (record == null || !"RUNNING".equals(record.getRecordStatus())) {
             throw new IllegalStateException("上传记录不存在或已结束: " + recordId);
         }
@@ -307,7 +312,7 @@ public class GisFileOptRecordService {
             throw new IllegalArgumentException("上传进度字节数不合法");
         }
         LocalDateTime now = LocalDateTime.now();
-        int updated = recordMapper.update(null, new UpdateWrapper<GisFileOptRecord>()
+        int updated = recordMapper.update(null, new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
                 .eq("record_status", "RUNNING")
                 .setSql("uploaded_bytes = GREATEST(uploaded_bytes, " + uploadedBytes + ")")
@@ -322,12 +327,12 @@ public class GisFileOptRecordService {
 
     /** 文件完整落盘后原子提交元数据、明细、批次计数及数据集计数。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileOptRecord completeImportFile(
+    public GisFileTransferRecord completeImportFile(
             Long recordId,
             int sequenceNo,
             GisFileMeta fileMeta) {
-        GisFileOptRecord record = requiredRunningRecord(recordId);
-        GisFileOptRecordItem item = getImportItem(recordId, sequenceNo);
+        GisFileTransferRecord record = requiredRunningRecord(recordId);
+        GisFileTransferRecordItem item = getImportItem(recordId, sequenceNo);
         if (item == null || !"RUNNING".equals(item.getOperationStatus())) {
             throw new IllegalStateException("上传文件明细不处于运行状态: " + sequenceNo);
         }
@@ -340,7 +345,7 @@ public class GisFileOptRecordService {
         item.setOperationStatus("SUCCESS");
         item.setUpdateTime(now);
         int itemUpdated = recordItemMapper.update(null,
-                new UpdateWrapper<GisFileOptRecordItem>()
+                new UpdateWrapper<GisFileTransferRecordItem>()
                         .eq("id", item.getId())
                         .eq("operation_status", "RUNNING")
                         .set("file_meta_id", item.getFileMetaId())
@@ -364,7 +369,7 @@ public class GisFileOptRecordService {
         int failed = record.getFailedCount();
         boolean terminal = completed + failed == record.getTotalCount();
         String status = terminal ? (failed == 0 ? "COMPLETED" : "PARTIAL_FAILED") : "RUNNING";
-        UpdateWrapper<GisFileOptRecord> recordUpdate = new UpdateWrapper<GisFileOptRecord>()
+        UpdateWrapper<GisFileTransferRecord> recordUpdate = new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
                 .eq("record_status", "RUNNING")
                 .eq("version", record.getVersion())
@@ -391,15 +396,15 @@ public class GisFileOptRecordService {
 
     /** 首块校验失败时登记单文件失败，并允许批次继续上传下一文件。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileOptRecord failImportFile(
+    public GisFileTransferRecord failImportFile(
             Long recordId, int sequenceNo, String errorMessage) {
-        GisFileOptRecord record = requiredRunningRecord(recordId);
-        GisFileOptRecordItem item = getImportItem(recordId, sequenceNo);
+        GisFileTransferRecord record = requiredRunningRecord(recordId);
+        GisFileTransferRecordItem item = getImportItem(recordId, sequenceNo);
         if (item == null || !"RUNNING".equals(item.getOperationStatus())) {
             throw new IllegalStateException("上传文件明细不处于运行状态: " + sequenceNo);
         }
         LocalDateTime now = LocalDateTime.now();
-        if (recordItemMapper.update(null, new UpdateWrapper<GisFileOptRecordItem>()
+        if (recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
                 .eq("id", item.getId())
                 .eq("operation_status", "RUNNING")
                 .set("operation_status", "FAILED")
@@ -414,7 +419,7 @@ public class GisFileOptRecordService {
         String status = terminal
                 ? (completed == 0 ? "FAILED" : "PARTIAL_FAILED")
                 : "RUNNING";
-        UpdateWrapper<GisFileOptRecord> update = new UpdateWrapper<GisFileOptRecord>()
+        UpdateWrapper<GisFileTransferRecord> update = new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", recordId)
                 .eq("record_status", "RUNNING")
                 .eq("version", record.getVersion())
@@ -433,8 +438,8 @@ public class GisFileOptRecordService {
         return recordMapper.selectById(recordId);
     }
 
-    private GisFileOptRecord requiredRunningRecord(Long recordId) {
-        GisFileOptRecord record = recordMapper.selectById(recordId);
+    private GisFileTransferRecord requiredRunningRecord(Long recordId) {
+        GisFileTransferRecord record = recordMapper.selectById(recordId);
         if (record == null || !"RUNNING".equals(record.getRecordStatus())) {
             throw new IllegalStateException("上传记录不存在或已结束: " + recordId);
         }
@@ -452,9 +457,9 @@ public class GisFileOptRecordService {
      * 因此单次下载按“一个批次 + 一条成功明细”收口，便于与导入记录一起检索。</p>
      */
     @Transactional(rollbackFor = Exception.class)
-    public GisFileOptRecord createDownloadRecord(GisFileMeta fileMeta, Long operatorId) {
+    public GisFileTransferRecord createDownloadRecord(GisFileMeta fileMeta, Long operatorId) {
         LocalDateTime now = LocalDateTime.now();
-        GisFileOptRecord record = new GisFileOptRecord();
+        GisFileTransferRecord record = new GisFileTransferRecord();
         record.setRecordNo(GisTaskNoGenerator.generateDownloadTaskNo());
         record.setOperationType("EXPORT");
         record.setDataSetId(fileMeta.getDataSetId());
@@ -474,7 +479,7 @@ public class GisFileOptRecordService {
             throw new IllegalStateException("下载记录创建失败: " + fileMeta.getId());
         }
 
-        GisFileOptRecordItem item = new GisFileOptRecordItem();
+        GisFileTransferRecordItem item = new GisFileTransferRecordItem();
         item.setRecordId(record.getId());
         item.setFileMetaId(fileMeta.getId());
         item.setSequenceNo(1);
@@ -490,10 +495,14 @@ public class GisFileOptRecordService {
     }
 
     private void validateQuery(
+            String operationType,
             String recordStatus,
             String uploadStatus,
             LocalDateTime createTimeStart,
             LocalDateTime createTimeEnd) {
+        if (operationType != null && !OPERATION_TYPES.contains(operationType)) {
+            throw new IllegalArgumentException("传输类型只能为 IMPORT 或 EXPORT");
+        }
         if (recordStatus != null && !RECORD_STATUSES.contains(recordStatus)) {
             throw new IllegalArgumentException(
                     "记录状态只能为 QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED 或 FAILED");
@@ -508,7 +517,7 @@ public class GisFileOptRecordService {
     }
 
     private GisFileMetaVO toFileSnapshotVO(
-            GisFileOptRecordItem item,
+            GisFileTransferRecordItem item,
             Long dataSetId,
             Long categoryId) {
         GisFileMetaVO vo = new GisFileMetaVO();

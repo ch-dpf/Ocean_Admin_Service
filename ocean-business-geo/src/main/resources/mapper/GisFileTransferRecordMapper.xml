@@ -2,7 +2,7 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="org.ocean.admin.gis.mapper.GisFileOptRecordMapper">
+<mapper namespace="org.ocean.admin.gis.mapper.GisFileTransferRecordMapper">
 
     <sql id="recordColumns">
         r.id,
@@ -35,12 +35,14 @@
         r.update_time
     </sql>
 
-    <select id="selectImportRecordPage" resultType="org.ocean.admin.gis.vo.GisFileOptRecordVO">
+    <select id="selectRecordPage" resultType="org.ocean.admin.gis.vo.GisFileTransferRecordVO">
         SELECT <include refid="recordColumns"/>
         FROM ocean_gis.gis_file_opt_record r
         JOIN ocean_gis.gis_data_set ds ON ds.id = r.data_set_id
         WHERE r.deleted = 0
-          AND r.operation_type = 'IMPORT'
+        <if test="operationType != null">
+            AND r.operation_type = #{operationType}
+        </if>
         <if test="dataSetId != null">
             AND r.data_set_id = #{dataSetId}
         </if>
@@ -78,12 +80,11 @@
         ORDER BY r.create_time DESC, r.id DESC
     </select>
 
-    <select id="selectImportRecordByNo" resultType="org.ocean.admin.gis.vo.GisFileOptRecordVO">
+    <select id="selectRecordByNo" resultType="org.ocean.admin.gis.vo.GisFileTransferRecordVO">
         SELECT <include refid="recordColumns"/>
         FROM ocean_gis.gis_file_opt_record r
         JOIN ocean_gis.gis_data_set ds ON ds.id = r.data_set_id
         WHERE r.deleted = 0
-          AND r.operation_type = 'IMPORT'
           AND r.record_no = #{recordNo}
     </select>
 

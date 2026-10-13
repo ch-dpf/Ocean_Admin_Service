@@ -4,8 +4,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.service.GisFileOptRecordService;
-import org.ocean.admin.gis.vo.GisFileOptRecordVO;
+import org.ocean.admin.gis.service.GisFileTransferRecordService;
+import org.ocean.admin.gis.vo.GisFileTransferRecordVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -19,24 +19,26 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * GIS 文件操作记录。
+ * GIS 原始文件上传、下载传输记录查询入口。
  */
 @RestController
-@RequestMapping("/api/gis/fileOpt")
-@Tag(name = "GIS文件操作记录", description = "GIS文件操作记录")
+@RequestMapping("/api/gis/file-transfer-records")
+@Tag(name = "GIS文件传输记录", description = "原始文件批量上传、下载传输记录查询接口")
 @RequiredArgsConstructor
-public class GisFileOptRecordController {
+public class GisFileTransferRecordController {
 
-    private final GisFileOptRecordService gisFileOptRecordService;
+    private final GisFileTransferRecordService gisFileTransferRecordService;
 
-    @GetMapping({"/page", "/uploadRecord"})
-    @Operation(summary = "分页查询文件操作记录")
-    public ResponseResult<PageResult<List<GisFileOptRecordVO>>> page(
+    @GetMapping
+    @Operation(summary = "分页查询文件传输记录")
+    public ResponseResult<PageResult<List<GisFileTransferRecordVO>>> page(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "10") Integer size,
             @RequestParam(required = false) Long dataSetId,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) String recordNo,
+            @Parameter(description = "传输类型：IMPORT-上传导入，EXPORT-下载导出")
+            @RequestParam(required = false) String operationType,
             @RequestParam(required = false) String recordStatus,
             @RequestParam(required = false) String originalName,
             @RequestParam(required = false) String extension,
@@ -49,16 +51,16 @@ public class GisFileOptRecordController {
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
             LocalDateTime createTimeEnd) {
-        return ResponseResult.success(gisFileOptRecordService.getImportRecordPage(
-                current, size, dataSetId, categoryId, recordNo, recordStatus,
+        return ResponseResult.success(gisFileTransferRecordService.getRecordPage(
+                current, size, dataSetId, categoryId, recordNo, operationType, recordStatus,
                 originalName, extension, uploadStatus, createTimeStart, createTimeEnd));
     }
 
     @GetMapping("/{recordNo}")
-    @Operation(summary = "查询文件操作记录详情")
-    public ResponseResult<GisFileOptRecordVO> detail(
-            @Parameter(description = "操作批次编号", required = true)
+    @Operation(summary = "查询文件传输记录详情")
+    public ResponseResult<GisFileTransferRecordVO> detail(
+            @Parameter(description = "传输批次编号", required = true)
             @PathVariable String recordNo) {
-        return ResponseResult.success(gisFileOptRecordService.getImportRecordDetail(recordNo));
+        return ResponseResult.success(gisFileTransferRecordService.getRecordDetail(recordNo));
     }
 }

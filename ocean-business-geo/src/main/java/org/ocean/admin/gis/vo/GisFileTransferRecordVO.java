@@ -6,9 +6,9 @@ import lombok.Data;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** GIS 文件导入导出记录响应对象。 */
+/** GIS 原始文件上传、下载传输记录响应对象。 */
 @Data
-public class GisFileOptRecordVO {
+public class GisFileTransferRecordVO {
 
     private Long id;
     private String recordNo;
