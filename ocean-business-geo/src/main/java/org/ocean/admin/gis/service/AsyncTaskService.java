@@ -13,15 +13,15 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.lang.Nullable;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 异步任务管理服务
@@ -240,16 +240,6 @@ public class AsyncTaskService {
     }
 
     /**
-     * 获取所有运行中的任务
-     */
-    public List<TaskInfo> getRunningTasks() {
-        return activeTaskMap.values().stream()
-                .map(this::snapshot)
-                .filter(task -> task.status() == TaskStatus.RUNNING)
-                .collect(Collectors.toList());
-    }
-
-    /**
      * 获取任务详情
      */
     public TaskInfo getTaskInfo(String taskId) {
@@ -257,10 +247,9 @@ public class AsyncTaskService {
         return taskState == null ? null : snapshot(taskState);
     }
 
-    /**
-     * 手动清理超过活跃超时时间仍未更新的异常存在的实时任务
-     */
-    public int cleanupZombieTasks() {
+    /** 定期清理超过活跃超时时间仍未更新的运行态任务快照。 */
+    @Scheduled(fixedDelay = 1, initialDelay = 1, timeUnit = TimeUnit.HOURS)
+    public void cleanupInactiveTasks() {
         LocalDateTime inactiveBefore = LocalDateTime.now()
                 .minus(RUNNING_TASK_INACTIVE_TIMEOUT);
         int cleanedCount = 0;
@@ -278,8 +267,9 @@ public class AsyncTaskService {
                 cleanedCount++;
             }
         }
-        log.info("手动清理异常存在的实时任务完成: cleanedCount={}", cleanedCount);
-        return cleanedCount;
+        if (cleanedCount > 0) {
+            log.info("定期清理不活跃任务快照完成: cleanedCount={}", cleanedCount);
+        }
     }
 
     /**
