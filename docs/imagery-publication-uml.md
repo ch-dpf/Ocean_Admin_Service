@@ -2,7 +2,7 @@
 
 ## 设计目标
 
-影像与地形共用发布记录和状态流转；发布记录直接关联静态瓦片集，不创建额外任务。各类型服务保留独立的产物校验、公开 URL 和资源 MIME 处理。影像数据面只暴露已发布的 TileJSON 和 XYZ/TMS PNG/JPEG 文件，并支持 WebMercatorQuad（EPSG:3857）与 WorldCRS84Quad（EPSG:4326）瓦片矩阵。
+影像与地形共用发布记录和状态流转；发布记录直接关联静态瓦片集，不创建额外任务。统一控制器承接发布管理和静态资源响应，各类型服务保留独立的产物校验、公开 URL 和资源路径解析。影像数据面只暴露已发布的 TileJSON 和 XYZ/TMS PNG/JPEG 文件，并支持 WebMercatorQuad（EPSG:3857）与 WorldCRS84Quad（EPSG:4326）瓦片矩阵。
 
 ## 类图
 
@@ -36,8 +36,8 @@ classDiagram
         +validateTiles(outputKey)
         +resolvePublishedFile(code, path)
     }
-    class ImageryPublicationController
-    class ImageryResourceController
+    class PublicationController
+    class PublishedResourceController
     class GisPublicationMapper
     class GisProcessingStorageService
 
@@ -47,8 +47,11 @@ classDiagram
     TerrainPublicationService --> PublicationService
     ImageryPublicationService --> PublicationService
     ImageryPublicationService --> GisProcessingStorageService
-    ImageryPublicationController --> ImageryPublicationService
-    ImageryResourceController --> ImageryPublicationService
+    PublicationController --> PublicationService
+    PublicationController --> ImageryPublicationService
+    PublicationController --> TerrainPublicationService
+    PublishedResourceController --> ImageryPublicationService
+    PublishedResourceController --> TerrainPublicationService
 ```
 
 ## 发布时序
@@ -56,7 +59,7 @@ classDiagram
 ```mermaid
 sequenceDiagram
     actor User
-    participant API as ImageryPublicationController
+    participant API as PublicationController
     participant TypeService as ImageryPublicationService
     participant CommonService as PublicationService
     participant FS as Tile Directory
