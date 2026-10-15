@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisTileSetArchiveMapper">
+
+    <sql id="archiveColumns">
+        a.id,
+        a.archive_no,
+        a.processing_task_id,
+        t.task_no,
+        t.task_name,
+        t.processing_type,
+        a.tile_set_id,
+        a.archive_name,
+        a.archive_format,
+        a.archive_status,
+        a.current_stage,
+        a.total_file_count,
+        a.processed_file_count,
+        a.total_bytes,
+        a.processed_bytes,
+        a.archive_size_bytes,
+        a.sha256,
+        a.operator_id,
+        a.download_count,
+        a.last_download_time,
+        a.error_message,
+        a.version,
+        CASE
+            WHEN a.archive_status = 'COMPLETED' THEN 100
+            WHEN a.total_bytes &gt; 0
+                THEN CAST((a.processed_bytes::NUMERIC * 100) / a.total_bytes AS INTEGER)
+            WHEN a.total_file_count &gt; 0
+                THEN CAST((a.processed_file_count::NUMERIC * 100)
+                    / a.total_file_count AS INTEGER)
+            ELSE 0
+        END AS progress,
+        CASE
+            WHEN a.archive_status = 'COMPLETED' AND a.storage_key IS NOT NULL THEN TRUE
+            ELSE FALSE
+        END AS download_available,
+        a.start_time,
+        a.finish_time,
+        a.create_time,
+        a.update_time
+    </sql>
+
+    <select id="selectArchivePage" resultType="org.ocean.admin.gis.vo.GisTileSetArchiveVO">
+        SELECT <include refid="archiveColumns"/>
+        FROM ocean_gis.gis_tile_set_archive a
+        JOIN ocean_gis.gis_processing_task t ON t.id = a.processing_task_id
+        WHERE a.deleted = 0
+        <if test="archiveNo != null">
+            AND a.archive_no LIKE CONCAT('%', #{archiveNo}, '%')
+        </if>
+        <if test="taskNo != null">
+            AND t.task_no LIKE CONCAT('%', #{taskNo}, '%')
+        </if>
+        <if test="taskName != null">
+            AND t.task_name LIKE CONCAT('%', #{taskName}, '%')
+        </if>
+        <if test="processingType != null">
+            AND t.processing_type = #{processingType}
+        </if>
+        <if test="archiveStatus != null">
+            AND a.archive_status = #{archiveStatus}
+        </if>
+        <if test="createTimeStart != null">
+            AND a.create_time &gt;= #{createTimeStart}
+        </if>
+        <if test="createTimeEnd != null">
+            AND a.create_time &lt;= #{createTimeEnd}
+        </if>
+        ORDER BY a.create_time DESC, a.id DESC
+    </select>
+
+    <select id="selectArchiveByNo" resultType="org.ocean.admin.gis.vo.GisTileSetArchiveVO">
+        SELECT <include refid="archiveColumns"/>
+        FROM ocean_gis.gis_tile_set_archive a
+        JOIN ocean_gis.gis_processing_task t ON t.id = a.processing_task_id
+        WHERE a.deleted = 0
+          AND a.archive_no = #{archiveNo}
+    </select>
+</mapper>
