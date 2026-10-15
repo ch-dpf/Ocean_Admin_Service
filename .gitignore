@@ -10,3 +10,8 @@ logs/
 /gis/uploads/
 /gis/processing/
 /gis/workspaces/
+/deploy/docker/images/*.tar
+/deploy/docker/images/*.tar.gz
+/deploy/docker/data/
+/deploy/docker/logs/
+/deploy/docker/backups/

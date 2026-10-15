@@ -9,8 +9,10 @@ services:
       POSTGRES_USER: ${DB_USERNAME:-ocean_admin}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in deploy/application.env}
       TZ: Asia/Shanghai
+    ports:
+      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - "${OCEAN_HOME:-.}/data/postgres:/var/lib/postgresql/data"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
@@ -24,8 +26,10 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in deploy/application.env}
       TZ: Asia/Shanghai
     command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
+    ports:
+      - "${REDIS_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
-      - redis-data:/data
+      - "${OCEAN_HOME:-.}/data/redis:/data"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
       interval: 5s
@@ -36,7 +40,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
-    image: ocean-admin-service:local
+    image: ocean-admin-service:${OCEAN_ADMIN_VERSION:-1.0.0}
     restart: unless-stopped
     environment:
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:-}
@@ -64,12 +68,6 @@ services:
     ports:
       - "${APP_PORT:-8090}:8090"
     volumes:
-      - app-data:/app/data
-      - app-logs:/app/logs
-
-volumes:
-  postgres-data:
-  redis-data:
-  app-data:
-  app-logs:
+      - "${OCEAN_HOME:-.}/data/app:/app/data"
+      - "${OCEAN_HOME:-.}/logs:/app/logs"
 

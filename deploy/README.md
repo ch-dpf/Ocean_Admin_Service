@@ -13,7 +13,11 @@ deploy/
 └── docker/
     ├── Dockerfile               应用镜像
     ├── Dockerfile.dockerignore  Docker 构建上下文过滤规则
-    └── compose.yml              应用、PostgreSQL、Redis 编排
+    ├── compose.yml              应用、PostgreSQL、Redis 编排
+    └── images/                  Linux amd64 离线镜像包（本地生成，不提交 Git）
+        ├── ocean-admin-service-1.0.0.tar
+        ├── postgres-16-alpine.tar
+        └── redis-7-alpine.tar
 ```
 
 ## 部署前准备
@@ -37,6 +41,8 @@ Copy-Item deploy/application.env.example deploy/application.env
 
 | 变量 | 默认示例                                           | 说明 |
 | --- |------------------------------------------------| --- |
+| `OCEAN_HOME` | `.` | Docker 部署根目录；相对路径以 `compose.yml` 所在目录为基准 |
+| `OCEAN_ADMIN_VERSION` | `1.0.0` | Ocean Admin 应用镜像版本 |
 | `APP_PORT` | `8090`                                         | 对外端口；裸机脚本将其映射为 Spring 服务端口，Docker 将其映射为宿主机端口 |
 | `JAVA_TOOL_OPTIONS` | 空                                              | 应用 JVM 参数，例如堆大小；Mago 子进程使用独立配置 |
 | `POSTGRES_DB` | `ocean_admin`                                  | Docker PostgreSQL 数据库名 |
@@ -104,31 +110,129 @@ chmod +x deploy/linux/deploy.sh
 
 前置条件：Docker Engine 及 Docker Compose v2。应用镜像使用 Java 21 多阶段构建，Compose 同时启动 PostgreSQL 16 与 Redis 7。
 
+### 在线构建启动
+
 ```bash
+docker compose \
+  --env-file deploy/application.env \
+  -f deploy/docker/compose.yml \
+  up -d --build
+```
+
+PowerShell：
+
+```powershell
 docker compose `
   --env-file deploy/application.env `
   -f deploy/docker/compose.yml `
   up -d --build
 ```
 
-查看状态与日志：
+### 生成离线镜像包
+
+在 Windows 开发机的仓库根目录执行：
+
+```powershell
+git lfs pull
+
+docker buildx build `
+  --platform linux/amd64 `
+  --file deploy/docker/Dockerfile `
+  --tag ocean-admin-service:1.0.0 `
+  --load `
+  .
+
+New-Item -ItemType Directory -Force deploy/docker/images | Out-Null
+docker save --output deploy/docker/images/ocean-admin-service-1.0.0.tar ocean-admin-service:1.0.0
+docker save --output deploy/docker/images/postgres-16-alpine.tar postgres:16-alpine
+docker save --output deploy/docker/images/redis-7-alpine.tar redis:7-alpine
+```
+
+三个 TAR 文件体积较大，仓库通过 `.gitignore` 忽略它们；发布时应随离线部署包传输，不应提交到普通 Git 历史。
+
+### Linux 离线部署
+
+服务器部署根目录为 `/opt/apps/ocean-admin`：
+
+```text
+/opt/apps/ocean-admin/
+├── compose.yml
+├── application.env
+├── images/
+│   ├── ocean-admin-service-1.0.0.tar
+│   ├── postgres-16-alpine.tar
+│   └── redis-7-alpine.tar
+├── data/
+│   ├── postgres/
+│   ├── redis/
+│   └── app/
+├── logs/
+└── backups/
+```
+
+创建目录并放置 `compose.yml`、`application.env` 和三个镜像包：
+
+```bash
+sudo mkdir -p /opt/apps/ocean-admin/{images,data/postgres,data/redis,data/app,logs,backups}
+cd /opt/apps/ocean-admin
+```
+
+`application.env` 至少确认以下内容：
+
+```dotenv
+OCEAN_HOME=.
+OCEAN_ADMIN_VERSION=1.0.0
+GIS_PUBLIC_BASE_URL=http://192.168.14.58:8090
+GIS_TERRAIN_MAGO_MAX_HEAP=8g
+```
+
+将 `DB_PASSWORD` 和 `REDIS_PASSWORD` 替换为部署环境强密码，然后设置目录权限：
+
+```bash
+sudo chown -R 70:70 data/postgres
+sudo chown -R 999:1000 data/redis
+sudo chown -R 999:999 data/app logs
+sudo chmod 600 application.env
+```
+
+加载全部离线镜像：
+
+```bash
+sudo docker load -i images/ocean-admin-service-1.0.0.tar
+sudo docker load -i images/postgres-16-alpine.tar
+sudo docker load -i images/redis-7-alpine.tar
+```
+
+校验 Compose 并禁止联网拉取或重新构建：
+
+```bash
+sudo docker compose --env-file application.env -f compose.yml config
+sudo docker compose --env-file application.env -f compose.yml up -d --no-build --pull never
+```
+
+离线服务器查看状态与日志：
+
+```bash
+sudo docker compose --env-file application.env -f compose.yml ps
+sudo docker compose --env-file application.env -f compose.yml logs -f app
+```
+
+仓库根目录在线部署时查看状态与日志：
 
 ```bash
 docker compose --env-file deploy/application.env -f deploy/docker/compose.yml ps
 docker compose --env-file deploy/application.env -f deploy/docker/compose.yml logs -f app
 ```
 
-停止服务但保留数据：
+停止服务；`data/` 与 `logs/` 中的绑定目录数据会保留：
 
 ```bash
 docker compose --env-file deploy/application.env -f deploy/docker/compose.yml down
 ```
 
-删除服务及全部命名卷会永久删除数据库、Redis 和 GIS 数据，只有确认不再需要数据时才执行：
+当前 Compose 使用宿主机绑定目录，`down -v` 不会删除 `data/` 和 `logs/`。需要清理环境时先停止服务，再由运维人员确认备份后单独处理这些目录，不得把删除数据目录写入日常停机命令。
 
-```bash
-docker compose --env-file deploy/application.env -f deploy/docker/compose.yml down -v
-```
+在启用 SELinux 的服务器上，如果容器无法访问绑定目录，应为对应挂载增加 `:Z` 标签，或按服务器安全策略设置正确的 SELinux 上下文。
 
 ## 验证
 
@@ -138,7 +242,7 @@ docker compose --env-file deploy/application.env -f deploy/docker/compose.yml do
 curl -I http://127.0.0.1:8090/doc.html
 ```
 
-同时检查 PostgreSQL 与 Redis 无连接错误、Flyway 迁移成功，并执行一次登录及 GIS 文件读写验证。Docker 默认将 PostgreSQL 和 Redis 分别发布到宿主机 `127.0.0.1:5432` 和 `127.0.0.1:6379`，仅供本机管理工具访问；对外防火墙只需开放实际使用的 `APP_PORT`。
+同时检查 PostgreSQL 与 Redis 无连接错误、Flyway 迁移成功，并执行一次登录及 GIS 文件读写验证。PostgreSQL 和 Redis 的监听地址分别由 `POSTGRES_BIND_ADDRESS`、`REDIS_BIND_ADDRESS` 控制；配置为 `0.0.0.0` 时必须通过服务器防火墙限制来源地址，不能直接暴露到公网。
 
 ## 更新与回滚
 

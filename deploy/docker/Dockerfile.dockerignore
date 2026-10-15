@@ -9,4 +9,8 @@ gis
 logs
 *.log
 target-runtime-*.out.log
+deploy/docker/images
+deploy/docker/data
+deploy/docker/logs
+deploy/docker/backups
 
