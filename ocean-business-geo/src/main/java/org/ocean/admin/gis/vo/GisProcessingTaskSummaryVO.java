@@ -34,6 +34,15 @@ public class GisProcessingTaskSummaryVO {
 
     private String currentStage;
     private String errorMessage;
+
+    @Schema(description = "静态瓦片集归档编号；尚未归档时为空")
+    private String archiveNo;
+
+    @Schema(description = "静态瓦片集归档状态：QUEUED、RUNNING、COMPLETED、FAILED")
+    private TaskStatus archiveStatus;
+
+    private Integer archiveProgress;
+    private Boolean archiveDownloadAvailable;
     private LocalDateTime startTime;
     private LocalDateTime finishTime;
     private LocalDateTime createTime;

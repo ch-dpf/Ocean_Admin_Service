@@ -405,6 +405,109 @@ CREATE INDEX idx_gis_tile_set_type_status
     ON ocean_gis.gis_tile_set (tile_type, tile_set_status, create_time DESC);
 
 -- =========================================================
+-- GIS 静态瓦片集成果归档
+-- =========================================================
+
+CREATE TABLE ocean_gis.gis_tile_set_archive (
+    id                      BIGINT        PRIMARY KEY,
+    archive_no              VARCHAR(64)   NOT NULL,
+    processing_task_id      BIGINT        NOT NULL,
+    tile_set_id             BIGINT        NOT NULL,
+    archive_name            VARCHAR(255)  NOT NULL,
+    archive_format          VARCHAR(16)   NOT NULL DEFAULT 'ZIP',
+    archive_status          VARCHAR(20)   NOT NULL DEFAULT 'QUEUED',
+    current_stage           VARCHAR(32),
+    total_file_count        BIGINT        NOT NULL DEFAULT 0,
+    processed_file_count    BIGINT        NOT NULL DEFAULT 0,
+    total_bytes             BIGINT        NOT NULL DEFAULT 0,
+    processed_bytes         BIGINT        NOT NULL DEFAULT 0,
+    archive_size_bytes      BIGINT        NOT NULL DEFAULT 0,
+    storage_key             VARCHAR(1000),
+    sha256                  VARCHAR(64),
+    operator_id             BIGINT,
+    download_count          BIGINT        NOT NULL DEFAULT 0,
+    last_download_time      TIMESTAMP,
+    error_message           VARCHAR(1000),
+    version                 BIGINT        NOT NULL DEFAULT 0,
+    start_time              TIMESTAMP,
+    finish_time             TIMESTAMP,
+    create_time             TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time             TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                 INTEGER       NOT NULL DEFAULT 0,
+    CONSTRAINT uk_gis_tile_set_archive_no UNIQUE (archive_no),
+    CONSTRAINT fk_gis_tile_set_archive_task
+        FOREIGN KEY (processing_task_id) REFERENCES ocean_gis.gis_processing_task (id),
+    CONSTRAINT fk_gis_tile_set_archive_tile_set
+        FOREIGN KEY (tile_set_id) REFERENCES ocean_gis.gis_tile_set (id),
+    CONSTRAINT ck_gis_tile_set_archive_format
+        CHECK (archive_format IN ('ZIP')),
+    CONSTRAINT ck_gis_tile_set_archive_status
+        CHECK (archive_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED')),
+    CONSTRAINT ck_gis_tile_set_archive_counts
+        CHECK (
+            total_file_count >= 0
+            AND processed_file_count >= 0
+            AND processed_file_count <= total_file_count
+        ),
+    CONSTRAINT ck_gis_tile_set_archive_bytes
+        CHECK (
+            total_bytes >= 0
+            AND processed_bytes >= 0
+            AND processed_bytes <= total_bytes
+            AND archive_size_bytes >= 0
+        ),
+    CONSTRAINT ck_gis_tile_set_archive_downloads
+        CHECK (download_count >= 0),
+    CONSTRAINT ck_gis_tile_set_archive_version
+        CHECK (version >= 0),
+    CONSTRAINT ck_gis_tile_set_archive_result
+        CHECK (
+            archive_status <> 'COMPLETED'
+            OR (
+                storage_key IS NOT NULL
+                AND sha256 IS NOT NULL
+                AND processed_file_count = total_file_count
+                AND processed_bytes = total_bytes
+            )
+        ),
+    CONSTRAINT ck_gis_tile_set_archive_timing
+        CHECK (
+            (archive_status = 'QUEUED' AND start_time IS NULL AND finish_time IS NULL)
+            OR (archive_status = 'RUNNING' AND start_time IS NOT NULL AND finish_time IS NULL)
+            OR (
+                archive_status IN ('COMPLETED', 'FAILED')
+                AND start_time IS NOT NULL
+                AND finish_time IS NOT NULL
+            )
+        ),
+    CONSTRAINT ck_gis_tile_set_archive_deleted
+        CHECK (deleted IN (0, 1))
+);
+
+COMMENT ON TABLE ocean_gis.gis_tile_set_archive IS 'GIS 静态瓦片集成果归档及其生成状态';
+COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.archive_no IS '对外暴露的稳定归档编号';
+COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.processing_task_id IS '产生静态瓦片集的处理任务';
+COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.tile_set_id IS '被归档的静态瓦片集';
+COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.storage_key IS '处理存储根目录下的归档文件 Key';
+COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.sha256 IS '归档 ZIP 文件的 SHA-256';
+
+CREATE UNIQUE INDEX uk_gis_tile_set_archive_task
+    ON ocean_gis.gis_tile_set_archive (processing_task_id)
+    WHERE deleted = 0;
+
+CREATE UNIQUE INDEX uk_gis_tile_set_archive_tile_set
+    ON ocean_gis.gis_tile_set_archive (tile_set_id)
+    WHERE deleted = 0;
+
+CREATE INDEX idx_gis_tile_set_archive_status
+    ON ocean_gis.gis_tile_set_archive (archive_status, create_time DESC)
+    WHERE deleted = 0;
+
+CREATE INDEX idx_gis_tile_set_archive_create_time
+    ON ocean_gis.gis_tile_set_archive (create_time DESC)
+    WHERE deleted = 0;
+
+-- =========================================================
 -- GIS 瓦片服务发布记录
 -- =========================================================
 

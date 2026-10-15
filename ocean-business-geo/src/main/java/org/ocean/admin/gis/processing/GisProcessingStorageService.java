@@ -78,6 +78,26 @@ public class GisProcessingStorageService {
         return resolve(outputKey).resolve("tiles").normalize();
     }
 
+    /** 为归档记录生成不包含用户输入的持久化 Key。 */
+    public String archiveStorageKey(String archiveNo) {
+        requireArchiveNo(archiveNo);
+        return "archives/" + archiveNo + ".zip";
+    }
+
+    /** 安全解析数据库保存的静态瓦片集归档 Key。 */
+    public Path resolveArchive(String storageKey) {
+        if (storageKey == null || !storageKey.matches("archives/[A-Za-z0-9_.-]+\\.zip")) {
+            throw new IllegalArgumentException("静态瓦片集归档 Key 不合法");
+        }
+        return resolve(storageKey);
+    }
+
+    /** 解析与正式归档同目录的临时文件，便于完成后原子移动。 */
+    public Path resolveArchiveTemporary(String archiveNo) {
+        requireArchiveNo(archiveNo);
+        return resolve("archives/" + archiveNo + ".zip.part");
+    }
+
     /** 根据持久化 outputKey 重建执行工作区。 */
     public GisProcessingWorkspace workspaceFromOutputKey(String outputKey) {
         if (outputKey == null || outputKey.isBlank()) {
@@ -97,5 +117,11 @@ public class GisProcessingStorageService {
             throw new IllegalArgumentException("非法处理产物 Key: " + key);
         }
         return resolved;
+    }
+
+    private void requireArchiveNo(String archiveNo) {
+        if (archiveNo == null || !archiveNo.matches("[A-Za-z0-9_.-]{1,64}")) {
+            throw new IllegalArgumentException("静态瓦片集归档编号不合法");
+        }
     }
 }

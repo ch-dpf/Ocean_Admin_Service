@@ -122,7 +122,9 @@ public class AsyncTaskService {
         TaskInfo initialSnapshot = taskState.snapshot();
         activeTaskMap.put(taskId, taskState);
         persistTask(initialSnapshot);
-        log.info("创建任务: taskId={}, taskName={}, total={}", taskId, taskName, total);
+        log.info("创建实时进度任务: taskId={}, correlationId={}, taskName={}, "
+                        + "taskType={}, total={}, unit={}",
+                taskId, correlationId, taskName, taskState.taskType, total, resultUnit);
     }
 
     /**
@@ -163,6 +165,10 @@ public class AsyncTaskService {
             published = taskState.snapshot();
         }
         broadcastProgress(published, "task_update");
+        log.info("实时进度任务已结束: taskId={}, taskType={}, status={}, succeeded={}, "
+                        + "failed={}, version={}",
+                published.taskId(), published.taskType(), published.status(),
+                published.result().succeeded(), published.result().failed(), published.version());
         activeTaskMap.remove(taskId, taskState);
         deleteTaskFromRedis(taskId);
     }
@@ -191,6 +197,9 @@ public class AsyncTaskService {
             published = taskState.snapshot();
         }
         broadcastProgress(published, "task_update");
+        log.warn("实时进度任务已失败: taskId={}, taskType={}, failed={}, version={}, message={}",
+                published.taskId(), published.taskType(), published.result().failed(),
+                published.version(), published.currentStage().message());
         activeTaskMap.remove(taskId, taskState);
         deleteTaskFromRedis(taskId);
     }
@@ -219,10 +228,13 @@ public class AsyncTaskService {
             persistTask(published);
         }
         broadcastProgress(published, "task_update");
-        log.debug("推送任务进度: taskId={}, stage={}, overallPercent={}, message={}",
+        log.debug("实时进度已上报: taskId={}, taskType={}, stage={}, overallPercent={}, "
+                        + "version={}, message={}",
                 taskId,
+                published.taskType(),
                 published.currentStage().code(),
                 published.overallPercent(),
+                published.version(),
                 published.currentStage().message());
     }
 
@@ -235,8 +247,10 @@ public class AsyncTaskService {
                 snapshot,
                 System.currentTimeMillis());
         webSocketHandler.broadcastTaskProgress(message);
-        log.debug("推送任务进度: taskId={}, overallPercent={}",
-                snapshot.taskId(), snapshot.overallPercent());
+        log.debug("实时进度已交给WebSocket广播: eventType={}, taskId={}, taskType={}, "
+                        + "status={}, overallPercent={}, version={}",
+                message.eventType(), snapshot.taskId(), snapshot.taskType(), snapshot.status(),
+                snapshot.overallPercent(), snapshot.version());
     }
 
     /**

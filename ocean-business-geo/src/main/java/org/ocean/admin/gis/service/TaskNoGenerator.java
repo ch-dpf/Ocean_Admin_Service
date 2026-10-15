@@ -26,6 +26,10 @@ public final class TaskNoGenerator {
         return generate("download", LocalDateTime.now());
     }
 
+    public static String generateArchiveTaskNo() {
+        return generate("archive", LocalDateTime.now());
+    }
+
     public static String generateProcessingTaskNo(GisProcessingType type) {
         if (type == null) {
             throw new IllegalArgumentException("GIS 处理类型不能为空");

@@ -70,7 +70,20 @@ public class FileDownloadUtil {
             String downloadName,
             HttpServletRequest request,
             HttpServletResponse response) {
-        Path source = resolveStoredPath(storageKey);
+        return writePathToResponse(
+                resolveStoredPath(storageKey), downloadName, request, response);
+    }
+
+    /** 把业务层已完成边界校验的本地文件写入下载响应。 */
+    public DownloadResult writePathToResponse(
+            Path source,
+            String downloadName,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        if (source == null || !Files.isRegularFile(source)) {
+            throw new IllegalArgumentException("待下载文件不存在");
+        }
+        source = source.toAbsolutePath().normalize();
         String fileName = safeFileName(downloadName);
         try {
             long sizeBytes = Files.size(source);

@@ -53,26 +53,45 @@ public class TaskWebSocketHandler extends TextWebSocketHandler {
      */
     public void broadcastTaskProgress(TaskProgressMessage message) {
         if (sessions.isEmpty()) {
+            log.debug("WebSocket进度广播已跳过: eventType={}, taskId={}, reason=NO_SESSION",
+                    message.eventType(), message.task().taskId());
             return;
         }
 
         try {
             String jsonMessage = objectMapper.writeValueAsString(message);
             TextMessage textMessage = new TextMessage(jsonMessage);
+            int sentCount = 0;
+            int failedCount = 0;
 
             for (WebSocketSession session : sessions.values()) {
                 if (session.isOpen()) {
                     try {
                         session.sendMessage(textMessage);
+                        sentCount++;
                     } catch (Exception e) {
+                        failedCount++;
                         log.error("发送消息失败: sessionId={}", session.getId(), e);
                         sessions.remove(session.getId());
                         closeQuietly(session);
                     }
                 }
             }
+            if (message.task().status().isTerminal()) {
+                log.info("WebSocket终态进度广播完成: eventType={}, taskId={}, taskType={}, "
+                                + "status={}, version={}, sentCount={}, failedCount={}",
+                        message.eventType(), message.task().taskId(), message.task().taskType(),
+                        message.task().status(), message.task().version(), sentCount, failedCount);
+            } else {
+                log.debug("WebSocket进度广播完成: eventType={}, taskId={}, taskType={}, "
+                                + "overallPercent={}, version={}, sentCount={}, failedCount={}",
+                        message.eventType(), message.task().taskId(), message.task().taskType(),
+                        message.task().overallPercent(), message.task().version(), sentCount,
+                        failedCount);
+            }
         } catch (Exception e) {
-            log.error("序列化消息失败", e);
+            log.error("WebSocket进度消息序列化失败: eventType={}, taskId={}",
+                    message.eventType(), message.task().taskId(), e);
         }
     }
 

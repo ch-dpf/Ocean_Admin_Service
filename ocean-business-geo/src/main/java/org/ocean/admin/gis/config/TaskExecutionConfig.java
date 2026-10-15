@@ -26,4 +26,16 @@ public class TaskExecutionConfig {
         executor.initialize();
         return executor;
     }
+
+    /** 归档属于磁盘密集任务，使用独立小线程池避免阻塞切片处理。 */
+    @Bean("archiveExecutor")
+    public Executor archiveExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("geo-archive-");
+        executor.initialize();
+        return executor;
+    }
 }

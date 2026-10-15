@@ -11,9 +11,11 @@ import org.ocean.admin.gis.dto.TerrainProcessingParameters;
 import org.ocean.admin.gis.entity.GisProcessingInput;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisTileSet;
+import org.ocean.admin.gis.entity.GisTileSetArchive;
 import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
 import org.ocean.admin.gis.mapper.GisProcessingTaskMapper;
 import org.ocean.admin.gis.mapper.GisTileSetMapper;
+import org.ocean.admin.gis.mapper.GisTileSetArchiveMapper;
 import org.ocean.admin.gis.processing.GisInputSourceType;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.vo.GisProcessingTaskDetailVO;
@@ -29,6 +31,9 @@ import tools.jackson.databind.node.ObjectNode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** GIS 处理任务的持久化查询及生命周期状态更新。 */
 @Service
@@ -38,6 +43,7 @@ public class ProcessingTaskRecordService {
     private final GisProcessingTaskMapper taskMapper;
     private final GisProcessingInputMapper inputMapper;
     private final GisTileSetMapper tileSetMapper;
+    private final GisTileSetArchiveMapper archiveMapper;
     private final ObjectMapper objectMapper;
 
     public PageResult<List<GisProcessingTaskSummaryVO>> getTaskPage(
@@ -83,6 +89,7 @@ public class ProcessingTaskRecordService {
                 new Page<>(currentPage, pageSize), query);
         List<GisProcessingTaskSummaryVO> records = page.getRecords().stream()
                 .map(this::toSummary).toList();
+        enrichArchiveStatus(records);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), records);
     }
 
@@ -93,8 +100,10 @@ public class ProcessingTaskRecordService {
         if (tileSet == null) {
             throw new IllegalStateException("处理任务关联的瓦片集不存在: " + taskId);
         }
+        GisProcessingTaskSummaryVO taskSummary = toSummary(task);
+        enrichArchiveStatus(List.of(taskSummary));
         return GisProcessingTaskDetailVO.builder()
-                .task(toSummary(task))
+                .task(taskSummary)
                 .parameterSchemaVersion(task.getParameterSchemaVersion())
                 .requestFingerprint(task.getRequestFingerprint())
                 .parameters(readParameters(task))
@@ -211,6 +220,51 @@ public class ProcessingTaskRecordService {
         result.setCreateTime(task.getCreateTime());
         result.setUpdateTime(task.getUpdateTime());
         return result;
+    }
+
+    private void enrichArchiveStatus(List<GisProcessingTaskSummaryVO> records) {
+        if (records.isEmpty()) {
+            return;
+        }
+        List<Long> taskIds = records.stream()
+                .map(GisProcessingTaskSummaryVO::getId)
+                .toList();
+        Map<Long, GisTileSetArchive> archivesByTaskId = archiveMapper.selectList(
+                        new LambdaQueryWrapper<GisTileSetArchive>()
+                                .in(GisTileSetArchive::getProcessingTaskId, taskIds))
+                .stream()
+                .collect(Collectors.toMap(
+                        GisTileSetArchive::getProcessingTaskId, Function.identity()));
+        records.forEach(record -> {
+            GisTileSetArchive archive = archivesByTaskId.get(record.getId());
+            if (archive == null) {
+                record.setArchiveProgress(0);
+                record.setArchiveDownloadAvailable(false);
+                return;
+            }
+            record.setArchiveNo(archive.getArchiveNo());
+            record.setArchiveStatus(archive.getArchiveStatus());
+            record.setArchiveProgress(archiveProgress(archive));
+            record.setArchiveDownloadAvailable(
+                    archive.getArchiveStatus() == TaskStatus.COMPLETED
+                            && archive.getStorageKey() != null);
+        });
+    }
+
+    private int archiveProgress(GisTileSetArchive archive) {
+        if (archive.getArchiveStatus() == TaskStatus.COMPLETED) {
+            return 100;
+        }
+        if (archive.getTotalBytes() != null && archive.getTotalBytes() > 0) {
+            return (int) Math.min(100,
+                    (double) archive.getProcessedBytes() * 100 / archive.getTotalBytes());
+        }
+        if (archive.getTotalFileCount() != null && archive.getTotalFileCount() > 0) {
+            return (int) Math.min(100,
+                    (double) archive.getProcessedFileCount() * 100
+                            / archive.getTotalFileCount());
+        }
+        return 0;
     }
 
     public GisProcessingParameters readParameters(GisProcessingTask task) {

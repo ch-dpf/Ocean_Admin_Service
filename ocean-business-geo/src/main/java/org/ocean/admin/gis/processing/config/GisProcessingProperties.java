@@ -1,6 +1,8 @@
 package org.ocean.admin.gis.processing.config;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -28,5 +30,8 @@ public class GisProcessingProperties {
     private long imageryMaxTileCount = 200_000L;
     @Positive
     private int imageryOverviewMinSize = 512;
+    @Min(0)
+    @Max(9)
+    private int archiveCompressionLevel = 1;
     private Map<String, String> workspaces = new LinkedHashMap<>();
 }
