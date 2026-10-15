@@ -55,7 +55,7 @@ Copy-Item deploy/application.env.example deploy/application.env
 | `GIS_PUBLIC_BASE_URL` | `http://127.0.0.1:8090`                        | 对浏览器可访问的服务地址；反向代理部署时改为实际域名 |
 | `GIS_TERRAIN_MAGO_ENABLED` | `true`                                         | 是否启用 Mago 地形引擎 |
 | `GIS_TERRAIN_MAGO_JAR_PATH` | 空                                              | 裸机脚本自动使用仓库内 JAR，容器模式自动使用镜像内路径 |
-| `GIS_TERRAIN_MAGO_MAX_HEAP` | `32g`                                          | Mago 子进程最大堆，来自当前应用默认配置 |
+| `GIS_TERRAIN_MAGO_MAX_HEAP` | `8g`                                           | Mago 子进程最大堆，来自当前应用默认配置 |
 
 所有相对存储路径均以仓库根目录（裸机）或 `/app`（Docker）为基准。生产环境应根据数据规模将 GIS 数据目录和数据库卷纳入备份。
 

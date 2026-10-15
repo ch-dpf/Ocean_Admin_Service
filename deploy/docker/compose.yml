@@ -55,7 +55,7 @@ services:
       GIS_PUBLIC_BASE_URL: ${GIS_PUBLIC_BASE_URL:-http://127.0.0.1:8090}
       GIS_TERRAIN_MAGO_ENABLED: ${GIS_TERRAIN_MAGO_ENABLED:-true}
       GIS_TERRAIN_MAGO_JAR_PATH: /app/runtime/mago/mago-3d-terrainer-1.14.2-release.jar
-      GIS_TERRAIN_MAGO_MAX_HEAP: ${GIS_TERRAIN_MAGO_MAX_HEAP:-32g}
+      GIS_TERRAIN_MAGO_MAX_HEAP: ${GIS_TERRAIN_MAGO_MAX_HEAP:-8g}
     depends_on:
       postgres:
         condition: service_healthy
