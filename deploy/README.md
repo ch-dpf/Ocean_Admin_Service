@@ -35,24 +35,27 @@ Copy-Item deploy/application.env.example deploy/application.env
 
 ## 配置说明
 
-| 变量 | 默认示例 | 说明 |
-| --- | --- | --- |
-| `APP_PORT` | `8090` | 对外端口；裸机脚本将其映射为 Spring 服务端口，Docker 将其映射为宿主机端口 |
-| `JAVA_TOOL_OPTIONS` | 空 | 应用 JVM 参数，例如堆大小；Mago 子进程使用独立配置 |
-| `POSTGRES_DB` | `ocean_admin` | Docker PostgreSQL 数据库名 |
+| 变量 | 默认示例                                           | 说明 |
+| --- |------------------------------------------------| --- |
+| `APP_PORT` | `8090`                                         | 对外端口；裸机脚本将其映射为 Spring 服务端口，Docker 将其映射为宿主机端口 |
+| `JAVA_TOOL_OPTIONS` | 空                                              | 应用 JVM 参数，例如堆大小；Mago 子进程使用独立配置 |
+| `POSTGRES_DB` | `ocean_admin`                                  | Docker PostgreSQL 数据库名 |
+| `POSTGRES_BIND_ADDRESS` | `0.0.0.0`                                      | Docker PostgreSQL 宿主机绑定地址；|
+| `POSTGRES_PORT` | `5432`                                         | Docker PostgreSQL 宿主机端口 |
 | `DB_URL` | `jdbc:postgresql://127.0.0.1:5432/ocean_admin` | 裸机模式数据库连接地址；Docker 模式自动改为容器地址 |
-| `DB_USERNAME` | `ocean_admin` | PostgreSQL 用户名 |
-| `DB_PASSWORD` | 无安全默认值 | PostgreSQL 密码，必须修改 |
-| `REDIS_HOST` | `127.0.0.1` | 裸机模式 Redis 地址；Docker 模式自动改为容器地址 |
-| `REDIS_PORT` | `6379` | Redis 端口 |
-| `REDIS_PASSWORD` | 无安全默认值 | Redis 密码，必须修改 |
-| `REDIS_DB` | `0` | Redis 数据库编号 |
-| `FLYWAY_ENABLED` | `true` | 启动时执行并校验 `db/migration` 迁移 |
-| `GIS_*_PATH` | 仓库内相对路径 | 上传、处理、工作区和影像缓存目录 |
-| `GIS_PUBLIC_BASE_URL` | `http://127.0.0.1:8090` | 对浏览器可访问的服务地址；反向代理部署时改为实际域名 |
-| `GIS_TERRAIN_MAGO_ENABLED` | `true` | 是否启用 Mago 地形引擎 |
-| `GIS_TERRAIN_MAGO_JAR_PATH` | 空 | 裸机脚本自动使用仓库内 JAR，容器模式自动使用镜像内路径 |
-| `GIS_TERRAIN_MAGO_MAX_HEAP` | `32g` | Mago 子进程最大堆，来自当前应用默认配置 |
+| `DB_USERNAME` | `ocean_admin`                                  | PostgreSQL 用户名 |
+| `DB_PASSWORD` | 无安全默认值                                         | PostgreSQL 密码，必须修改 |
+| `REDIS_HOST` | `127.0.0.1`                                    | 裸机模式 Redis 地址；Docker 模式自动改为容器地址 |
+| `REDIS_BIND_ADDRESS` | `0.0.0.0`                                      | Docker Redis 宿主机绑定地址；|
+| `REDIS_PORT` | `6379`                                         | 裸机 Redis 端口及 Docker Redis 宿主机端口 |
+| `REDIS_PASSWORD` | 无安全默认值                                         | Redis 密码，必须修改 |
+| `REDIS_DB` | `0`                                            | Redis 数据库编号 |
+| `FLYWAY_ENABLED` | `true`                                         | 启动时执行并校验 `db/migration` 迁移 |
+| `GIS_*_PATH` | 仓库内相对路径                                        | 上传、处理、工作区和影像缓存目录 |
+| `GIS_PUBLIC_BASE_URL` | `http://127.0.0.1:8090`                        | 对浏览器可访问的服务地址；反向代理部署时改为实际域名 |
+| `GIS_TERRAIN_MAGO_ENABLED` | `true`                                         | 是否启用 Mago 地形引擎 |
+| `GIS_TERRAIN_MAGO_JAR_PATH` | 空                                              | 裸机脚本自动使用仓库内 JAR，容器模式自动使用镜像内路径 |
+| `GIS_TERRAIN_MAGO_MAX_HEAP` | `32g`                                          | Mago 子进程最大堆，来自当前应用默认配置 |
 
 所有相对存储路径均以仓库根目录（裸机）或 `/app`（Docker）为基准。生产环境应根据数据规模将 GIS 数据目录和数据库卷纳入备份。
 
@@ -102,9 +105,9 @@ chmod +x deploy/linux/deploy.sh
 前置条件：Docker Engine 及 Docker Compose v2。应用镜像使用 Java 21 多阶段构建，Compose 同时启动 PostgreSQL 16 与 Redis 7。
 
 ```bash
-docker compose \
-  --env-file deploy/application.env \
-  -f deploy/docker/compose.yml \
+docker compose `
+  --env-file deploy/application.env `
+  -f deploy/docker/compose.yml `
   up -d --build
 ```
 
@@ -135,7 +138,7 @@ docker compose --env-file deploy/application.env -f deploy/docker/compose.yml do
 curl -I http://127.0.0.1:8090/doc.html
 ```
 
-同时检查 PostgreSQL 与 Redis 无连接错误、Flyway 迁移成功，并执行一次登录及 GIS 文件读写验证。反向代理或防火墙只需开放实际使用的 `APP_PORT`，PostgreSQL 和 Redis 在 Docker 方案中不映射到宿主机。
+同时检查 PostgreSQL 与 Redis 无连接错误、Flyway 迁移成功，并执行一次登录及 GIS 文件读写验证。Docker 默认将 PostgreSQL 和 Redis 分别发布到宿主机 `127.0.0.1:5432` 和 `127.0.0.1:6379`，仅供本机管理工具访问；对外防火墙只需开放实际使用的 `APP_PORT`。
 
 ## 更新与回滚
 
