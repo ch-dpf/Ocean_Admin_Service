@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in deploy/application.env}
       TZ: Asia/Shanghai
     ports:
-      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - "${OCEAN_HOME:-.}/data/postgres:/var/lib/postgresql/data"
     healthcheck:
@@ -27,7 +27,7 @@ services:
       TZ: Asia/Shanghai
     command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
     ports:
-      - "${REDIS_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+      - "${REDIS_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6381}:6379"
     volumes:
       - "${OCEAN_HOME:-.}/data/redis:/data"
     healthcheck:
