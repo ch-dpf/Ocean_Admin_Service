@@ -59,7 +59,7 @@ import java.util.stream.Stream;
 @Slf4j
 public class GeoTiffPreprocessor {
 
-    private static final String CACHE_VERSION = "v8-target-derived-read-window";
+    private static final String CACHE_VERSION = "v9-zoom-boundary-tolerance";
     private static final String COMPLETE_MARKER = "complete.marker";
     private static final int TIFF_TILE_SIZE = 256;
     private static final int MAX_ZOOM = ImageryTileOptions.MAX_ZOOM;
@@ -517,8 +517,8 @@ public class GeoTiffPreprocessor {
         ReferencedEnvelope bounded = inspection.targetBounds();
         double sourceResolution = Math.max(
                 bounded.getWidth() / inspection.width(), bounded.getHeight() / inspection.height());
-        int nativeZoom = (int) Math.floor(Math.log(worldHeight(options.targetCrs())
-                / (ImageryTileOptions.TILE_SIZE * sourceResolution)) / Math.log(2));
+        int nativeZoom = ImageryTileOptions.calculateNativeMaxZoom(
+                sourceResolution, worldHeight(options.targetCrs()), ImageryTileOptions.TILE_SIZE);
         nativeZoom = Math.max(0, Math.min(MAX_ZOOM, nativeZoom));
         int preparationZoom = options.maxZoom() == null
                 ? nativeZoom : Math.min(nativeZoom, options.maxZoom());

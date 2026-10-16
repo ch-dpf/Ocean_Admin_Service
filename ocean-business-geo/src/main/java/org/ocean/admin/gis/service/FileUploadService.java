@@ -117,7 +117,8 @@ public class FileUploadService {
             // 4. Redis 任务可由数据库记录恢复；数据库始终是上传状态的权威来源。
             ensureProgressTask(record);
             List<GisFileTransferRecordItem> items = fileTransferRecordService.getImportItems(record.getId());
-            int expectedFileIndex = record.getCompletedCount() + record.getFailedCount();
+            int expectedFileIndex = (int) items.stream()
+                    .filter(i -> "READY".equals(i.getUploadStatus()) || "FAILED".equals(i.getOperationStatus())).count();
             if (command.fileIndex() > expectedFileIndex) {
                 throw new IllegalStateException(
                         "文件必须按顺序上传，当前应上传fileIndex=" + expectedFileIndex);
@@ -294,9 +295,10 @@ public class FileUploadService {
             GisUploadChunkCommand command,
             GisStoredFile storedFile) {
         GisFileMeta meta = createFileMeta(record, command, storedFile);
-        GisFileTransferRecord updated = fileTransferRecordService.completeImportFile(
+        GisFileTransferRecord updated = fileTransferRecordService.stageImportFile(
                 record.getId(), command.sequenceNo(), meta);
-        publishFileResult(updated, command.fileName());
+        asyncTaskService.updateProgress(updated.getRecordNo(), TaskProgressUpdate.stageChanged(
+                TaskStage.indeterminate(updated.getCurrentStage(), "文件传输完成，等待空间元数据提取：" + command.fileName())));
         finishTaskIfDone(updated);
         return updated;
     }
@@ -387,8 +389,8 @@ public class FileUploadService {
                     TaskProgressUpdate.resultChanged(
                             record.getCompletedCount(), record.getFailedCount()),
                     TaskProgressUpdate.stageChanged(createByteStage(
-                            "uploading",
-                            "等待上传数据",
+                            record.getCurrentStage(),
+                            "EXTRACTING_METADATA".equals(record.getCurrentStage()) ? "正在提取空间元数据" : "等待上传数据",
                             record.getUploadedBytes(),
                             record.getTotalBytes())),
                     TaskProgressUpdate.overallProgressChanged(progressPercent(
@@ -425,7 +427,7 @@ public class FileUploadService {
         asyncTaskService.updateProgress(
                 record.getRecordNo(),
                 TaskProgressUpdate.stageChanged(createByteStage(
-                        "uploading",
+                        "UPLOADING",
                         "正在上传：" + fileName + "（"
                                 + formatByteSize(uploadedBytes) + "/"
                                 + formatByteSize(record.getTotalBytes()) + "）",
@@ -441,7 +443,7 @@ public class FileUploadService {
                 TaskProgressUpdate.resultChanged(
                         record.getCompletedCount(), record.getFailedCount()),
                 TaskProgressUpdate.stageChanged(TaskStage.indeterminate(
-                        "file_finished", "文件处理完成：" + fileName)));
+                        record.getCurrentStage(), "文件处理完成：" + fileName)));
     }
 
     private void finishTaskIfDone(GisFileTransferRecord record) {
@@ -450,8 +452,8 @@ public class FileUploadService {
             asyncTaskService.finalizeTaskResult(
                     record.getRecordNo(),
                     record.getFailedCount() == 0
-                            ? "全部文件上传完成"
-                            : "上传结束，成功" + record.getCompletedCount()
+                            ? "全部文件导入完成"
+                            : "导入结束，成功" + record.getCompletedCount()
                                     + "个，失败" + record.getFailedCount() + "个");
         }
     }
@@ -575,6 +577,8 @@ public class FileUploadService {
         meta.setSha256(storedFile.getSha256());
         meta.setUploadedBy(getCurrentOperatorId());
         meta.setUploadStatus("READY");
+        meta.setMetadataStatus("QUEUED");
+        meta.setMetadataVersion(0L);
         meta.setCleanupStatus("NOT_REQUIRED");
         meta.setCreateTime(now);
         meta.setUpdateTime(now);
@@ -622,7 +626,9 @@ public class FileUploadService {
         result.put("fileIndex", command.fileIndex());
         result.put("nextOffset", nextOffset(record, command, item));
         result.put("duplicate", duplicate);
-        result.put("fileCompleted", item != null && "SUCCESS".equals(item.getOperationStatus()));
+        result.put("fileCompleted", item != null && "READY".equals(item.getUploadStatus()));
+        result.put("importCompleted", item != null && "SUCCESS".equals(item.getOperationStatus()));
+        result.put("currentStage", record.getCurrentStage());
         result.put("fileFailed", fileFailed
                 || (item != null && "FAILED".equals(item.getOperationStatus())));
         result.put("taskCompleted", record.getRecordStatus() != TaskStatus.RUNNING);
@@ -636,7 +642,7 @@ public class FileUploadService {
             GisFileTransferRecord record,
             GisUploadChunkCommand command,
             GisFileTransferRecordItem item) {
-        if (item != null && "SUCCESS".equals(item.getOperationStatus())) {
+        if (item != null && "READY".equals(item.getUploadStatus())) {
             return command.fileSize();
         }
         if (item != null && "FAILED".equals(item.getOperationStatus())) {
@@ -658,13 +664,14 @@ public class FileUploadService {
 
     private boolean isItemFinished(GisFileTransferRecordItem item) {
         return "SUCCESS".equals(item.getOperationStatus())
+                || "READY".equals(item.getUploadStatus())
                 || "FAILED".equals(item.getOperationStatus());
     }
 
     private long successfulBytes(List<GisFileTransferRecordItem> items) {
         long completed = 0L;
         for (GisFileTransferRecordItem item : items) {
-            if ("SUCCESS".equals(item.getOperationStatus())) {
+            if ("READY".equals(item.getUploadStatus())) {
                 completed = Math.addExact(completed, item.getSizeBytes());
             }
         }
@@ -741,7 +748,7 @@ public class FileUploadService {
         return String.format(Locale.ROOT, "%.2f GiB", bytes / (1024.0d * 1024 * 1024));
     }
 
-    private static Object requestLock(String requestId) {
+    static Object requestLock(String requestId) {
         return REQUEST_LOCKS[(requestId.hashCode() & Integer.MAX_VALUE) % REQUEST_LOCKS.length];
     }
 

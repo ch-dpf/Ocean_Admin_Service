@@ -7,6 +7,8 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import tools.jackson.databind.JsonNode;
 
 /** GIS 文件元数据请求及响应对象。 */
 @Data
@@ -65,6 +67,26 @@ public class GisFileMetaVO {
     @Schema(description = "处理错误信息")
     @Size(max = 1000, message = "错误信息长度不能超过1000个字符")
     private String errorMessage;
+
+    @Schema(description = "元数据提取状态", accessMode = Schema.AccessMode.READ_ONLY)
+    private String metadataStatus;
+    @Schema(accessMode = Schema.AccessMode.READ_ONLY)
+    private Long metadataVersion;
+    @Schema(accessMode = Schema.AccessMode.READ_ONLY)
+    private String metadataErrorCode;
+    @Schema(accessMode = Schema.AccessMode.READ_ONLY)
+    private String metadataErrorMessage;
+    @Schema(accessMode = Schema.AccessMode.READ_ONLY)
+    private LocalDateTime metadataExtractedAt;
+    @Schema(description = "各图层空间信息；geographicExtent 为 EPSG:4326 WKT", accessMode = Schema.AccessMode.READ_ONLY)
+    private List<SpatialReference> spatialReferences;
+
+    public record SpatialReference(String layerKey, String layerName, String dataKind,
+            String sourceCrsCode, String sourceCrsWkt, String sourceUnit, JsonNode sourceExtent,
+            String geographicExtent, String extentKind, Double west, Double south, Double east, Double north,
+            Integer rasterWidth, Integer rasterHeight, Integer bandCount, Double resolutionX, Double resolutionY,
+            String resolutionUnit, String tileMatrixSetId, Integer tileWidth, Integer tileHeight,
+            Integer recommendedMaxZoom, JsonNode calculationDetails, JsonNode extraMetadata) { }
 
     @Schema(description = "创建时间", accessMode = Schema.AccessMode.READ_ONLY)
     private LocalDateTime createTime;

@@ -4,7 +4,7 @@
 
 | 服务 | 镜像 | 容器名 | 本地端口 | 数据/认证 |
 | --- | --- | --- | --- | --- |
-| PostgreSQL | `postgres:16-alpine` | `ocean-admin-postgres` | `5432` | 数据库、用户和密码均为 `ocean_admin` |
+| PostgreSQL/PostGIS | `postgis/postgis:16-3.5-alpine` | `ocean-admin-postgres` | `5432` | 数据库、用户和密码均为 `ocean_admin` |
 | Redis | `redis:7-alpine` | `ocean-admin-redis` | `6379` | 密码为 `123456`，默认 DB 为 `0` |
 
 数据分别保存在 Docker 命名卷 `ocean-admin-postgres-data` 和 `ocean-admin-redis-data` 中，重建容器时不会随容器删除。
@@ -26,7 +26,7 @@ docker run -d `
   --health-interval=5s `
   --health-timeout=3s `
   --health-retries=10 `
-  postgres:16-alpine
+  postgis/postgis:16-3.5-alpine
 
 docker run -d `
   --name ocean-admin-redis `
@@ -47,6 +47,7 @@ docker run -d `
 docker ps --filter "name=ocean-admin-" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
 docker exec ocean-admin-postgres pg_isready -U ocean_admin -d ocean_admin
 docker exec ocean-admin-postgres psql -U ocean_admin -d ocean_admin -c "SELECT current_database(), current_user;"
+docker exec ocean-admin-postgres psql -U ocean_admin -d ocean_admin -c "SELECT postgis_full_version();"
 docker exec ocean-admin-redis redis-cli -a 123456 ping
 ```
 

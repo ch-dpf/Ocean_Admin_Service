@@ -441,8 +441,8 @@ public class GeoTiffTileGenerator {
         double sourceResolution = Math.max(
                 bounds.getWidth() / source.width(), bounds.getHeight() / source.height());
         double levelZeroSpan = worldHeight(options.targetCrs());
-        int nativeZoom = (int) Math.floor(Math.log(levelZeroSpan
-                / (ImageryTileOptions.TILE_SIZE * sourceResolution)) / Math.log(2));
+        int nativeZoom = ImageryTileOptions.calculateNativeMaxZoom(
+                sourceResolution, levelZeroSpan, ImageryTileOptions.TILE_SIZE);
         nativeZoom = Math.max(0, Math.min(ImageryTileOptions.MAX_ZOOM, nativeZoom));
         int max = options.maxZoom() == null ? nativeZoom : options.maxZoom();
         int min = options.minZoom() == null

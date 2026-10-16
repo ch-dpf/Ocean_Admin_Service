@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
+import org.ocean.admin.gis.dto.GisFileQuery;
 
 import java.time.LocalDateTime;
 
@@ -18,19 +19,11 @@ import java.util.List;
 @Mapper
 public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
 
+    Page<GisFileMetaVO> selectFilePage(Page<GisFileMetaVO> page,
+            @Param("q") GisFileQuery query, @Param("deleted") int deleted);
+
     /** 使用单条 SQL 批量写入文件元数据。 */
     int insertBatch(@Param("records") List<GisFileMeta> records);
-
-    /**
-     * 分页查询已逻辑删除的文件元数据。
-     */
-    Page<GisFileMetaVO> selectDeletedPage(
-            Page<GisFileMetaVO> page,
-            @Param("dataSetId") Long dataSetId,
-            @Param("categoryId") Long categoryId,
-            @Param("originalName") String originalName,
-            @Param("extension") String extension,
-            @Param("uploadStatus") String uploadStatus);
 
     /** 绕过逻辑删除拦截读取回收站中的单条记录。 */
     GisFileMeta selectDeletedById(@Param("id") Long id);

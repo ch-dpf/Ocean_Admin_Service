@@ -208,6 +208,7 @@ public class FileTransferRecordService {
         return recordMapper.selectList(new LambdaQueryWrapper<GisFileTransferRecord>()
                 .eq(GisFileTransferRecord::getOperationType, "IMPORT")
                 .eq(GisFileTransferRecord::getRecordStatus, TaskStatus.RUNNING)
+                .eq(GisFileTransferRecord::getCurrentStage, "UPLOADING")
                 .le(GisFileTransferRecord::getUpdateTime, inactiveBefore)
                 .orderByAsc(GisFileTransferRecord::getUpdateTime)
                 .last("LIMIT " + limit));
@@ -238,8 +239,12 @@ public class FileTransferRecordService {
         if (recordId == null || expectedVersion == null || inactiveBefore == null) {
             throw new IllegalArgumentException("过期上传批次参数不能为空");
         }
-        GisFileTransferRecord record = recordMapper.selectById(recordId);
+        GisFileTransferRecord record = recordMapper.lockById(recordId);
         if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) {
+            return null;
+        }
+        if (getImportItems(recordId).stream().anyMatch(item -> "READY".equals(item.getUploadStatus())
+                && "RUNNING".equals(item.getOperationStatus()))) {
             return null;
         }
         int completed = record.getCompletedCount();
@@ -253,6 +258,7 @@ public class FileTransferRecordService {
                 .eq("operation_type", "IMPORT")
                 .eq("record_status", TaskStatus.RUNNING.name())
                 .eq("version", expectedVersion)
+                .eq("current_stage", "UPLOADING")
                 .le("update_time", inactiveBefore)
                 .set("failed_count", failed)
                 .set("record_status", terminalStatus.name())
@@ -303,7 +309,7 @@ public class FileTransferRecordService {
     /** 每个请求块完成后仅写一次数据库进度；重复块不会导致累计翻倍。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public GisFileTransferRecord updateUploadedBytes(Long recordId, long uploadedBytes) {
-        GisFileTransferRecord record = recordMapper.selectById(recordId);
+        GisFileTransferRecord record = recordMapper.lockById(recordId);
         if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) {
             throw new IllegalStateException("上传记录不存在或已结束: " + recordId);
         }
@@ -324,9 +330,9 @@ public class FileTransferRecordService {
         return recordMapper.selectById(recordId);
     }
 
-    /** 文件完整落盘后原子提交元数据、明细、批次计数及数据集计数。 */
+    /** 文件传输完成后登记解析待办；导入成功计数由元数据结果推进。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public GisFileTransferRecord completeImportFile(
+    public GisFileTransferRecord stageImportFile(
             Long recordId,
             int sequenceNo,
             GisFileMeta fileMeta) {
@@ -341,7 +347,6 @@ public class FileTransferRecordService {
         }
         item.setFileMetaId(fileMeta.getId());
         item.captureFileMetaSnapshot(fileMeta);
-        item.setOperationStatus("SUCCESS");
         item.setUpdateTime(now);
         int itemUpdated = recordItemMapper.update(null,
                 new UpdateWrapper<GisFileTransferRecordItem>()
@@ -352,7 +357,6 @@ public class FileTransferRecordService {
                         .set("storage_key", item.getStorageKey())
                         .set("storage_type", item.getStorageType())
                         .set("extension", item.getExtension())
-                        .set("operation_status", "SUCCESS")
                         .set("error_message", null)
                         .set("size_bytes", item.getSizeBytes())
                         .set("sha256", item.getSha256())
@@ -364,35 +368,56 @@ public class FileTransferRecordService {
             throw new IllegalStateException("上传文件明细提交失败: " + sequenceNo);
         }
 
-        int completed = record.getCompletedCount() + 1;
-        int failed = record.getFailedCount();
+        return refreshImportRecord(record);
+    }
+
+    /** 与空间记录提交处于同一事务，成功通知发出前已具备可查询范围。 */
+    @Transactional(rollbackFor = Exception.class)
+    public GisFileTransferRecord completeMetadataExtraction(GisFileMeta fileMeta, boolean successful) {
+        List<GisFileTransferRecordItem> items = recordItemMapper.selectList(
+                new LambdaQueryWrapper<GisFileTransferRecordItem>()
+                        .eq(GisFileTransferRecordItem::getFileMetaId, fileMeta.getId())
+                        .eq(GisFileTransferRecordItem::getOperationStatus, "RUNNING"));
+        if (items.isEmpty()) {
+            if (successful && "COMPLETED".equals(fileMeta.getMetadataStatus())) incrementAvailableFiles(fileMeta.getDataSetId());
+            return null;
+        }
+        GisFileTransferRecordItem item = items.getFirst();
+        GisFileTransferRecord record = recordMapper.lockById(item.getRecordId());
+        if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) return null;
+        int updated = recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
+                .eq("id", item.getId()).eq("operation_status", "RUNNING")
+                .set("operation_status", successful ? "SUCCESS" : "FAILED")
+                .set("error_message", fileMeta.getMetadataErrorMessage()).set("update_time", LocalDateTime.now()));
+        if (updated == 1 && successful && "COMPLETED".equals(fileMeta.getMetadataStatus())) incrementAvailableFiles(fileMeta.getDataSetId());
+        return refreshImportRecord(record);
+    }
+
+    private void incrementAvailableFiles(Long dataSetId) {
+        if (dataSetMapper.update(null, new UpdateWrapper<GisDataSet>().eq("id", dataSetId)
+                .setSql("file_count = file_count + 1").set("update_time", LocalDateTime.now())) != 1) {
+            throw new IllegalStateException("数据集文件数更新失败: " + dataSetId);
+        }
+    }
+
+    private GisFileTransferRecord refreshImportRecord(GisFileTransferRecord record) {
+        List<GisFileTransferRecordItem> items = getImportItems(record.getId());
+        int completed = (int) items.stream().filter(i -> "SUCCESS".equals(i.getOperationStatus())).count();
+        int failed = (int) items.stream().filter(i -> "FAILED".equals(i.getOperationStatus())).count();
+        long transferred = items.stream().filter(i -> "READY".equals(i.getUploadStatus()) || "FAILED".equals(i.getOperationStatus())).count();
         boolean terminal = completed + failed == record.getTotalCount();
-        TaskStatus status = terminal
-                ? (failed == 0 ? TaskStatus.COMPLETED : TaskStatus.PARTIAL_FAILED)
-                : TaskStatus.RUNNING;
-        UpdateWrapper<GisFileTransferRecord> recordUpdate = new UpdateWrapper<GisFileTransferRecord>()
-                .eq("id", recordId)
-                .eq("record_status", TaskStatus.RUNNING.name())
-                .eq("version", record.getVersion())
-                .set("completed_count", completed)
-                .set("record_status", status.name())
-                .set("current_stage", terminal ? status.name() : "UPLOADING")
-                .set("update_time", now)
-                .setSql("version = version + 1");
-        if (terminal) {
-            recordUpdate.set("finish_time", now);
-        }
-        if (recordMapper.update(null, recordUpdate) != 1) {
-            throw new IllegalStateException("上传批次计数提交冲突: " + record.getRecordNo());
-        }
-        int dataSetUpdated = dataSetMapper.update(null, new UpdateWrapper<GisDataSet>()
-                .eq("id", record.getDataSetId())
-                .setSql("file_count = file_count + 1")
-                .set("update_time", now));
-        if (dataSetUpdated != 1) {
-            throw new IllegalStateException("数据集文件数更新失败: " + record.getDataSetId());
-        }
-        return recordMapper.selectById(recordId);
+        TaskStatus state = !terminal ? TaskStatus.RUNNING : failed == 0 ? TaskStatus.COMPLETED
+                : completed == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED;
+        recordMapper.update(null, new UpdateWrapper<GisFileTransferRecord>()
+                .eq("id", record.getId())
+                .set("completed_count", completed).set("failed_count", failed)
+                .set("record_status", state.name())
+                .set("current_stage", terminal ? state.name() : transferred == record.getTotalCount() ? "EXTRACTING_METADATA" : "UPLOADING")
+                .set("error_message", items.stream().filter(i -> "FAILED".equals(i.getOperationStatus()))
+                        .map(GisFileTransferRecordItem::getErrorMessage).filter(java.util.Objects::nonNull).findFirst().orElse(null))
+                .set("finish_time", terminal ? LocalDateTime.now() : null)
+                .set("update_time", LocalDateTime.now()).setSql("version = version + 1"));
+        return recordMapper.selectById(record.getId());
     }
 
     /** 首块校验失败时登记单文件失败，并允许批次继续上传下一文件。 */
@@ -414,33 +439,11 @@ public class FileTransferRecordService {
                 .set("update_time", now)) != 1) {
             throw new IllegalStateException("上传文件失败状态提交冲突: " + sequenceNo);
         }
-        int completed = record.getCompletedCount();
-        int failed = record.getFailedCount() + 1;
-        boolean terminal = completed + failed == record.getTotalCount();
-        TaskStatus status = terminal
-                ? (completed == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED)
-                : TaskStatus.RUNNING;
-        UpdateWrapper<GisFileTransferRecord> update = new UpdateWrapper<GisFileTransferRecord>()
-                .eq("id", recordId)
-                .eq("record_status", TaskStatus.RUNNING.name())
-                .eq("version", record.getVersion())
-                .set("failed_count", failed)
-                .set("record_status", status.name())
-                .set("current_stage", terminal ? status.name() : "UPLOADING")
-                .set("error_message", abbreviate(errorMessage, 1000))
-                .set("update_time", now)
-                .setSql("version = version + 1");
-        if (terminal) {
-            update.set("finish_time", now);
-        }
-        if (recordMapper.update(null, update) != 1) {
-            throw new IllegalStateException("上传批次失败计数提交冲突: " + record.getRecordNo());
-        }
-        return recordMapper.selectById(recordId);
+        return refreshImportRecord(record);
     }
 
     private GisFileTransferRecord requiredRunningRecord(Long recordId) {
-        GisFileTransferRecord record = recordMapper.selectById(recordId);
+        GisFileTransferRecord record = recordMapper.lockById(recordId);
         if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) {
             throw new IllegalStateException("上传记录不存在或已结束: " + recordId);
         }

@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
@@ -31,6 +32,7 @@ public class DataSetService {
 
     private final GisDataSetMapper gisDataSetMapper;
     private final GisFileMetaMapper gisFileMetaMapper;
+    private final GisFileSpatialMetadataMapper spatialMetadataMapper;
     private final FileUploadUtil fileUploadUtil;
 
     public void incrementFileCount(Long dataSetId, long increment) {
@@ -136,6 +138,11 @@ public class DataSetService {
 
         String dataSetName = reqVO.getDataSetName().trim();
         ensureDataSetNameAvailable(dataSetName, reqVO.getId());
+
+        if (!existing.getCategoryId().equals(reqVO.getCategoryId())) {
+            // 推荐层级依赖分类，分类变化后旧结果与正在提取的版本均失效。
+            spatialMetadataMapper.invalidateDataSetRasters(reqVO.getId());
+        }
 
         int updated = gisDataSetMapper.update(
                 null,

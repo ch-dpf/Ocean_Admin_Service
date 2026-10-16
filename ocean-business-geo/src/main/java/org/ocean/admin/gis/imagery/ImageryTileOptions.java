@@ -16,6 +16,22 @@ public record ImageryTileOptions(
 
     public static final int TILE_SIZE = 256;
     public static final int MAX_ZOOM = 22;
+    /** 坐标转换与大坐标相减可能使整层边界出现微小误差，容差单位为缩放层级。 */
+    public static final double ZOOM_BOUNDARY_TOLERANCE = 1e-7;
+
+    /** 按目标瓦片矩阵的零级跨度和像素间距计算不进行上采样的最大层级。 */
+    public static int calculateNativeMaxZoom(double resolution, double levelZeroSpan, int tilePixels) {
+        if (!Double.isFinite(resolution) || resolution <= 0 || !Double.isFinite(levelZeroSpan)
+                || levelZeroSpan <= 0 || tilePixels < 1) {
+            throw new IllegalArgumentException("分辨率和瓦片矩阵尺寸必须为正数");
+        }
+        double zoom = Math.log(levelZeroSpan / (tilePixels * resolution)) / Math.log(2);
+        double nearestInteger = Math.rint(zoom);
+        if (Math.abs(zoom - nearestInteger) <= ZOOM_BOUNDARY_TOLERANCE) {
+            zoom = nearestInteger;
+        }
+        return (int) Math.floor(zoom);
+    }
 
     public enum OutputFormat {
         PNG("png", "image/png"),

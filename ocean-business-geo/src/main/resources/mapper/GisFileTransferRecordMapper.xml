@@ -4,6 +4,10 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="org.ocean.admin.gis.mapper.GisFileTransferRecordMapper">
 
+    <select id="lockById" resultType="org.ocean.admin.gis.entity.GisFileTransferRecord" flushCache="true">
+        SELECT * FROM ocean_gis.gis_file_transfer_record WHERE id = #{id} AND deleted = 0 FOR UPDATE
+    </select>
+
     <sql id="recordColumns">
         r.id,
         r.record_no,
@@ -25,7 +29,7 @@
         r.version,
         CASE
             WHEN r.record_status = 'RUNNING' AND r.total_bytes > 0
-                THEN CAST((r.uploaded_bytes * 100) / r.total_bytes AS INTEGER)
+                THEN LEAST(99, CAST((r.uploaded_bytes * 100) / r.total_bytes AS INTEGER))
             WHEN r.total_count = 0 THEN 0
             ELSE CAST(((r.completed_count + r.failed_count) * 100) / r.total_count AS INTEGER)
         END AS progress,

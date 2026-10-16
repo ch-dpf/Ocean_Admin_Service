@@ -13,6 +13,8 @@ import java.time.LocalDateTime;
 @Mapper
 public interface GisFileTransferRecordMapper extends BaseMapper<GisFileTransferRecord> {
 
+    GisFileTransferRecord lockById(@Param("id") Long id);
+
     Page<GisFileTransferRecordVO> selectRecordPage(
             Page<GisFileTransferRecordVO> page,
             @Param("dataSetId") Long dataSetId,

@@ -1,4 +1,5 @@
 CREATE SCHEMA IF NOT EXISTS ocean_gis;
+CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA public;
 
 -- =========================================================
 -- GIS 数据集
@@ -146,11 +147,22 @@ CREATE TABLE ocean_gis.gis_file_meta (
     upload_status            VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
     cleanup_status           VARCHAR(20)   NOT NULL DEFAULT 'NOT_REQUIRED',
     error_message            VARCHAR(1000),
+    metadata_status          VARCHAR(24)   NOT NULL DEFAULT 'QUEUED',
+    metadata_version         BIGINT        NOT NULL DEFAULT 0,
+    metadata_lease_expires_at TIMESTAMP,
+    metadata_error_code      VARCHAR(64),
+    metadata_error_message   VARCHAR(1000),
+    metadata_extracted_at    TIMESTAMP,
     create_time              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted                  INTEGER       NOT NULL DEFAULT 0,
     CONSTRAINT ck_gis_file_meta_storage_type
         CHECK (storage_type IN ('LOCAL', 'MINIO', 'S3')),
+    CONSTRAINT ck_gis_file_meta_metadata_status
+        CHECK (metadata_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'NOT_APPLICABLE')),
+    CONSTRAINT ck_gis_file_meta_metadata_version CHECK (metadata_version >= 0),
+    CONSTRAINT ck_gis_file_meta_metadata_lease
+        CHECK ((metadata_status = 'RUNNING') = (metadata_lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_gis_file_meta_size
         CHECK (size_bytes >= 0),
     CONSTRAINT ck_gis_file_meta_deleted
@@ -191,6 +203,51 @@ CREATE INDEX idx_gis_file_meta_data_set
 CREATE INDEX idx_gis_file_meta_sha256
     ON ocean_gis.gis_file_meta (sha256)
     WHERE deleted = 0 AND sha256 IS NOT NULL;
+
+CREATE INDEX idx_gis_file_meta_metadata_queue
+    ON ocean_gis.gis_file_meta (metadata_status, metadata_lease_expires_at, create_time)
+    WHERE deleted = 0 AND upload_status = 'READY';
+
+COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_status IS '元数据提取状态；COMPLETED 后空间信息可检索';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_version IS '领取或重新提取时递增，阻止过期任务提交';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_lease_expires_at IS '后台执行租约到期时间';
+
+CREATE TABLE ocean_gis.gis_file_spatial_metadata (
+    id                      BIGINT PRIMARY KEY,
+    file_meta_id            BIGINT NOT NULL REFERENCES ocean_gis.gis_file_meta(id) ON DELETE CASCADE,
+    layer_key               VARCHAR(255) NOT NULL,
+    layer_name              VARCHAR(255),
+    data_kind               VARCHAR(16) NOT NULL CHECK (data_kind IN ('RASTER', 'VECTOR')),
+    source_crs_code         VARCHAR(100),
+    source_crs_wkt          TEXT NOT NULL,
+    source_unit             VARCHAR(100),
+    source_extent           JSONB NOT NULL,
+    geographic_extent       public.geometry(Geometry,4326) NOT NULL,
+    extent_kind             VARCHAR(32) NOT NULL CHECK (extent_kind IN ('RASTER_FOOTPRINT', 'VECTOR_ENVELOPE')),
+    raster_width            INTEGER CHECK (raster_width > 0),
+    raster_height           INTEGER CHECK (raster_height > 0),
+    band_count              INTEGER CHECK (band_count > 0),
+    resolution_x            DOUBLE PRECISION CHECK (resolution_x > 0 AND resolution_x < 'Infinity'::float8),
+    resolution_y            DOUBLE PRECISION CHECK (resolution_y > 0 AND resolution_y < 'Infinity'::float8),
+    resolution_unit         VARCHAR(100),
+    tile_matrix_set_id      VARCHAR(100),
+    tile_width              INTEGER CHECK (tile_width > 0),
+    tile_height             INTEGER CHECK (tile_height > 0),
+    recommended_max_zoom    INTEGER CHECK (recommended_max_zoom BETWEEN 0 AND 22),
+    calculation_details     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    extra_metadata          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT uk_gis_file_spatial_metadata_layer UNIQUE (file_meta_id, layer_key),
+    CONSTRAINT ck_gis_file_spatial_metadata_geometry
+        CHECK (NOT public.ST_IsEmpty(geographic_extent) AND public.ST_IsValid(geographic_extent)),
+    CONSTRAINT ck_gis_file_spatial_metadata_zoom
+        CHECK (recommended_max_zoom IS NULL OR (tile_matrix_set_id IS NOT NULL AND tile_width IS NOT NULL AND tile_height IS NOT NULL))
+);
+
+CREATE INDEX idx_gis_file_spatial_metadata_extent ON ocean_gis.gis_file_spatial_metadata USING GIST (geographic_extent);
+CREATE INDEX idx_gis_file_spatial_metadata_zoom ON ocean_gis.gis_file_spatial_metadata (tile_matrix_set_id, recommended_max_zoom);
+COMMENT ON TABLE ocean_gis.gis_file_spatial_metadata IS '文件各图层的源空间参考、统一检索范围及推荐层级';
+COMMENT ON COLUMN ocean_gis.gis_file_spatial_metadata.geographic_extent IS 'EPSG:4326 经度/纬度范围；矢量包围范围不代表精确要素覆盖区';
+COMMENT ON COLUMN ocean_gis.gis_file_spatial_metadata.recommended_max_zoom IS '按源分辨率估算的推荐层级，不代表成果实际层级';
 
 -- =========================================================
 -- GIS 文件操作逐文件明细

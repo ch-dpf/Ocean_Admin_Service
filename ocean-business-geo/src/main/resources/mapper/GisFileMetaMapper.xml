@@ -4,6 +4,51 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="org.ocean.admin.gis.mapper.GisFileMetaMapper">
 
+    <sql id="queryEnvelope">
+        <choose>
+            <when test="q.west &gt; q.east">
+                ST_Union(ST_MakeEnvelope(#{q.west}, #{q.south}, 180, #{q.north}, 4326),
+                         ST_MakeEnvelope(-180, #{q.south}, #{q.east}, #{q.north}, 4326))
+            </when>
+            <otherwise>ST_MakeEnvelope(#{q.west}, #{q.south}, #{q.east}, #{q.north}, 4326)</otherwise>
+        </choose>
+    </sql>
+    <select id="selectFilePage" resultType="org.ocean.admin.gis.vo.GisFileMetaVO">
+        SELECT fm.*, ds.category_id
+        FROM ocean_gis.gis_file_meta fm
+        JOIN ocean_gis.gis_data_set ds ON ds.id = fm.data_set_id
+        WHERE fm.deleted = #{deleted}
+        <if test="deleted == 0">AND ds.deleted = 0</if>
+        <choose>
+            <when test="q.metadataStatus != null">AND fm.metadata_status = #{q.metadataStatus}</when>
+            <when test="deleted == 0">AND fm.metadata_status = 'COMPLETED'</when>
+        </choose>
+        <if test="q.dataSetId != null">AND fm.data_set_id = #{q.dataSetId}</if>
+        <if test="q.categoryId != null">AND ds.category_id = #{q.categoryId}</if>
+        <if test="q.originalName != null">AND fm.original_name LIKE CONCAT('%', #{q.originalName}, '%')</if>
+        <if test="q.extension != null">AND fm.extension = #{q.extension}</if>
+        <if test="q.uploadStatus != null">AND fm.upload_status = #{q.uploadStatus}</if>
+        <if test="q.hasBounds() or q.requiredZoom != null">
+            AND fm.metadata_status = 'COMPLETED'
+            AND EXISTS (
+                SELECT 1 FROM ocean_gis.gis_file_spatial_metadata sm WHERE sm.file_meta_id = fm.id
+                <if test="q.hasBounds()">
+                    <choose>
+                        <when test="q.spatialRelation == 'COVERED_BY'">
+                            AND ST_CoveredBy(sm.geographic_extent, <include refid="queryEnvelope"/>)
+                        </when>
+                        <otherwise>AND ST_Intersects(sm.geographic_extent, <include refid="queryEnvelope"/>)</otherwise>
+                    </choose>
+                </if>
+                <if test="q.requiredZoom != null">
+                    AND sm.tile_matrix_set_id = #{q.tileMatrixSetId}
+                    AND sm.recommended_max_zoom &gt;= #{q.requiredZoom}
+                </if>
+            )
+        </if>
+        ORDER BY fm.create_time DESC, fm.id DESC
+    </select>
+
     <insert id="insertBatch">
         INSERT INTO ocean_gis.gis_file_meta (
             id, data_set_id, original_name,
@@ -22,45 +67,6 @@
             )
         </foreach>
     </insert>
-
-    <select id="selectDeletedPage" resultType="org.ocean.admin.gis.vo.GisFileMetaVO">
-        SELECT fm.id,
-               fm.data_set_id,
-               ds.category_id,
-               fm.original_name,
-               fm.storage_name,
-               fm.storage_key,
-               fm.storage_type,
-               fm.extension,
-               fm.size_bytes,
-               fm.sha256,
-               fm.uploaded_by,
-               fm.upload_status,
-               fm.cleanup_status,
-               fm.error_message,
-               fm.create_time,
-               fm.update_time,
-               fm.deleted
-        FROM ocean_gis.gis_file_meta fm
-        LEFT JOIN ocean_gis.gis_data_set ds ON ds.id = fm.data_set_id
-        WHERE fm.deleted = 1
-        <if test="dataSetId != null">
-            AND fm.data_set_id = #{dataSetId}
-        </if>
-        <if test="categoryId != null">
-            AND ds.category_id = #{categoryId}
-        </if>
-        <if test="originalName != null">
-            AND fm.original_name LIKE CONCAT('%', #{originalName}, '%')
-        </if>
-        <if test="extension != null">
-            AND fm.extension = #{extension}
-        </if>
-        <if test="uploadStatus != null">
-            AND fm.upload_status = #{uploadStatus}
-        </if>
-        ORDER BY fm.create_time DESC
-    </select>
 
     <select id="selectDeletedById" resultType="org.ocean.admin.gis.entity.GisFileMeta">
         SELECT *

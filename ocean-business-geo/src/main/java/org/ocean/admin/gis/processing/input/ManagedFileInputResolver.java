@@ -57,7 +57,7 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
     public List<Path> resolveRuntime(List<GisProcessingInput> inputs) {
         return inputs.stream().map(input -> {
             GisFileMeta meta = fileMetaService.getRequiredEntity(input.getFileMetaId());
-            if (!"READY".equals(meta.getUploadStatus()) || !"LOCAL".equals(meta.getStorageType())) {
+            if (!"READY".equals(meta.getUploadStatus()) || !"COMPLETED".equals(meta.getMetadataStatus()) || !"LOCAL".equals(meta.getStorageType())) {
                 throw new IllegalStateException("已管理文件当前不可用于处理: " + input.getFileMetaId());
             }
             return fileUploadUtil.resolveStoredPath(meta.getStorageKey());
@@ -66,8 +66,8 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
 
     private GisFileMeta getValidMeta(Long id, GisSubmitProcessingCommand command) {
         GisFileMeta meta = fileMetaService.getRequiredEntity(id);
-        if (!"READY".equals(meta.getUploadStatus()) || !"LOCAL".equals(meta.getStorageType())) {
-            throw new IllegalStateException("当前只支持处理 READY 状态的 LOCAL 已管理文件: " + id);
+        if (!"READY".equals(meta.getUploadStatus()) || !"COMPLETED".equals(meta.getMetadataStatus()) || !"LOCAL".equals(meta.getStorageType())) {
+            throw new IllegalStateException("当前只支持处理已完成空间元数据提取的 LOCAL 已管理文件: " + id);
         }
         GisDataSet dataSet = dataSetMapper.selectById(meta.getDataSetId());
         if (dataSet == null || !command.processingType().categoryId().equals(dataSet.getCategoryId())) {

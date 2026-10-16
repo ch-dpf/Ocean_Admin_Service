@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper">
+    <sql id="eligible">
+        deleted = 0 AND upload_status = 'READY'
+        AND (metadata_status = 'QUEUED'
+             OR (metadata_status = 'RUNNING' AND metadata_lease_expires_at &lt; CURRENT_TIMESTAMP))
+    </sql>
+    <select id="selectCandidates" resultType="long">
+        SELECT id FROM ocean_gis.gis_file_meta
+        WHERE <include refid="eligible"/>
+        ORDER BY create_time, id LIMIT #{limit}
+    </select>
+    <select id="claim" resultType="org.ocean.admin.gis.entity.GisFileMeta" affectData="true" flushCache="true">
+        UPDATE ocean_gis.gis_file_meta
+        SET metadata_status = 'RUNNING', metadata_version = metadata_version + 1,
+            metadata_lease_expires_at = #{leaseExpiresAt}, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND <include refid="eligible"/>
+        RETURNING *
+    </select>
+    <select id="lockClaim" resultType="org.ocean.admin.gis.entity.GisFileMeta" flushCache="true">
+        SELECT * FROM ocean_gis.gis_file_meta
+        WHERE id = #{id} AND metadata_version = #{version}
+          AND metadata_status = 'RUNNING' AND deleted = 0 AND upload_status = 'READY'
+        FOR UPDATE
+    </select>
+    <delete id="deleteByFileId">
+        DELETE FROM ocean_gis.gis_file_spatial_metadata WHERE file_meta_id = #{id}
+    </delete>
+    <update id="invalidateDataSetRasters">
+        WITH previous AS MATERIALIZED (
+            SELECT id, metadata_status, deleted FROM ocean_gis.gis_file_meta
+            WHERE data_set_id = #{dataSetId} AND upload_status = 'READY'
+              AND extension IN ('tif', 'tiff')
+            ORDER BY id FOR UPDATE
+        ), queued AS (
+            UPDATE ocean_gis.gis_file_meta fm
+            SET metadata_status = 'QUEUED', metadata_version = fm.metadata_version + 1,
+                metadata_lease_expires_at = NULL, metadata_error_code = NULL,
+                metadata_error_message = NULL, metadata_extracted_at = NULL,
+                update_time = CURRENT_TIMESTAMP
+            FROM previous p WHERE fm.id = p.id
+            RETURNING p.metadata_status, p.deleted
+        )
+        UPDATE ocean_gis.gis_data_set
+        SET file_count = GREATEST(file_count - (
+                SELECT COUNT(*) FROM queued WHERE metadata_status = 'COMPLETED' AND deleted = 0
+            ), 0), update_time = CURRENT_TIMESTAMP
+        WHERE id = #{dataSetId}
+    </update>
+    <insert id="insert">
+        INSERT INTO ocean_gis.gis_file_spatial_metadata
+        (id, file_meta_id, layer_key, layer_name, data_kind, source_crs_code, source_crs_wkt,
+         source_unit, source_extent, geographic_extent, extent_kind, raster_width, raster_height,
+         band_count, resolution_x, resolution_y, resolution_unit, tile_matrix_set_id,
+         tile_width, tile_height, recommended_max_zoom, calculation_details, extra_metadata)
+        VALUES (#{item.id}, #{item.fileMetaId}, #{item.layerKey}, #{item.layerName}, #{item.dataKind},
+         #{item.sourceCrsCode}, #{item.sourceCrsWkt}, #{item.sourceUnit}, CAST(#{item.sourceExtent} AS jsonb),
+         ST_GeomFromText(#{item.geographicExtent}, 4326), #{item.extentKind}, #{item.rasterWidth},
+         #{item.rasterHeight}, #{item.bandCount}, #{item.resolutionX}, #{item.resolutionY},
+         #{item.resolutionUnit}, #{item.tileMatrixSetId}, #{item.tileWidth}, #{item.tileHeight},
+         #{item.recommendedMaxZoom}, CAST(#{item.calculationDetails} AS jsonb), CAST(#{item.extraMetadata} AS jsonb))
+    </insert>
+    <select id="selectByFileIds" resultType="org.ocean.admin.gis.entity.GisFileSpatialMetadata">
+        SELECT sm.id, sm.file_meta_id, sm.layer_key, sm.layer_name, sm.data_kind,
+               sm.source_crs_code, sm.source_crs_wkt, sm.source_unit,
+               sm.source_extent::text AS source_extent,
+               <choose>
+                   <when test="includeGeometry">ST_AsText(sm.geographic_extent)</when>
+                   <otherwise>NULL</otherwise>
+               </choose> AS geographic_extent, sm.extent_kind,
+               sm.raster_width, sm.raster_height, sm.band_count, sm.resolution_x, sm.resolution_y,
+               sm.resolution_unit, sm.tile_matrix_set_id, sm.tile_width, sm.tile_height,
+               sm.recommended_max_zoom, sm.calculation_details::text AS calculation_details,
+               sm.extra_metadata::text AS extra_metadata,
+               ST_XMin(Box3D(sm.geographic_extent)) AS west,
+               ST_YMin(Box3D(sm.geographic_extent)) AS south,
+               ST_XMax(Box3D(sm.geographic_extent)) AS east,
+               ST_YMax(Box3D(sm.geographic_extent)) AS north
+        FROM ocean_gis.gis_file_spatial_metadata sm
+        JOIN ocean_gis.gis_file_meta fm ON fm.id = sm.file_meta_id AND fm.metadata_status = 'COMPLETED'
+        WHERE sm.file_meta_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY sm.file_meta_id, sm.layer_key
+    </select>
+</mapper>

@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.service.FileMetaService;
+import org.ocean.admin.gis.dto.GisFileQuery;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
@@ -34,29 +35,23 @@ public class FileMetaController {
     @GetMapping("/page")
     @Operation(summary = "分页查询文件元数据")
     public ResponseResult<PageResult<List<GisFileMetaVO>>> getFileMetaPage(
-            @RequestParam(defaultValue = "1") Integer current,
-            @RequestParam(defaultValue = "10") Integer size,
-            @RequestParam(required = false) Long dataSetId,
-            @RequestParam(required = false) Long categoryId,
-            @RequestParam(required = false) String originalName,
-            @RequestParam(required = false) String extension,
-            @RequestParam(required = false) String uploadStatus) {
-        return ResponseResult.success(fileMetaService.getFileMetaPage(
-                current, size, dataSetId, categoryId, originalName, extension, uploadStatus));
+            @ModelAttribute GisFileQuery query) {
+        return ResponseResult.success(fileMetaService.getFileMetaPage(query, false));
     }
 
     @GetMapping("/deleted/page")
     @Operation(summary = "分页查询文件元数据(回收站)")
     public ResponseResult<PageResult<List<GisFileMetaVO>>> getDeletedFileMetaPage(
-            @RequestParam(defaultValue = "1") Integer current,
-            @RequestParam(defaultValue = "10") Integer size,
-            @RequestParam(required = false) Long dataSetId,
-            @RequestParam(required = false) Long categoryId,
-            @RequestParam(required = false) String originalName,
-            @RequestParam(required = false) String extension,
-            @RequestParam(required = false) String uploadStatus) {
-        return ResponseResult.success(fileMetaService.getDeletedFileMetaPage(
-                current, size, dataSetId, categoryId, originalName, extension, uploadStatus));
+            @ModelAttribute GisFileQuery query) {
+        return ResponseResult.success(fileMetaService.getFileMetaPage(query, true));
+    }
+
+    @PostMapping("/{id}/metadata/retry")
+    @Operation(summary = "重新提取文件空间元数据")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT, description = "重新提取GIS空间元数据")
+    public ResponseResult<String> retryMetadata(@PathVariable Long id) {
+        fileMetaService.retryMetadata(id);
+        return ResponseResult.success("已提交元数据提取任务");
     }
 
     @PutMapping("/deleted/{id}/restore")

@@ -18,6 +18,18 @@ public record TerrainOptions(
         boolean leaveTemp,
         boolean generateLayerJson) {
 
+    /** 与固定版本 mago-3d-terrainer 的默认可用深度规则一致，包含末级细分。 */
+    public static int calculateRecommendedMaxZoom(double pixelSizeMeters) {
+        if (!Double.isFinite(pixelSizeMeters) || pixelSizeMeters <= 0) {
+            throw new IllegalArgumentException("地形像素间距必须为正数");
+        }
+        for (int depth = 0; depth < 22; depth++) {
+            double tileSpanMeters = Math.toRadians(180d / Math.scalb(1d, depth)) * 6378137d;
+            if (tileSpanMeters <= pixelSizeMeters * 256d) return depth + 1;
+        }
+        return 22;
+    }
+
     public TerrainOptions {
         if (minDepth < 0 || minDepth > 22) {
             throw new IllegalArgumentException("地形最小层级必须在 0 到 22 之间");

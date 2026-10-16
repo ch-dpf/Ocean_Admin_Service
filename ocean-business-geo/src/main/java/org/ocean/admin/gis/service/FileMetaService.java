@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
+import org.ocean.admin.gis.entity.GisFileTransferRecordItem;
+import org.ocean.admin.gis.dto.GisFileQuery;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordItemMapper;
@@ -19,6 +21,7 @@ import org.ocean.admin.kernel.audit.CurrentOperator;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -27,6 +30,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -46,65 +50,24 @@ public class FileMetaService {
     private final FileTransferRecordService fileTransferRecordService;
     private final FileDownloadUtil fileDownloadUtil;
     private final FileUploadUtil fileUploadUtil;
+    private final FileSpatialMetadataService spatialMetadataService;
 
-    public PageResult<List<GisFileMetaVO>> getFileMetaPage(
-            Integer current,
-            Integer size,
-            Long dataSetId,
-            Long categoryId,
-            String originalName,
-            String extension,
-            String uploadStatus) {
-        long currentPage = current == null || current < 1 ? 1L : current;
-        long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
-        String normalizedName = trimToNull(originalName);
-        String normalizedExtension = normalizeExtension(extension);
-        String normalizedStatus = normalizeUpper(uploadStatus);
-        if (normalizedStatus != null && !UPLOAD_STATUSES.contains(normalizedStatus)) {
-            throw new IllegalArgumentException("上传状态只能为 PENDING、READY 或 FAILED");
-        }
-
-        LambdaQueryWrapper<GisFileMeta> query = new LambdaQueryWrapper<GisFileMeta>()
-                .eq(dataSetId != null, GisFileMeta::getDataSetId, dataSetId)
-                .apply(categoryId != null,
-                        "data_set_id IN (SELECT id FROM ocean_gis.gis_data_set "
-                                + "WHERE category_id = {0} AND deleted = 0)",
-                        categoryId)
-                .like(normalizedName != null, GisFileMeta::getOriginalName, normalizedName)
-                .eq(normalizedExtension != null, GisFileMeta::getExtension, normalizedExtension)
-                .eq(normalizedStatus != null, GisFileMeta::getUploadStatus, normalizedStatus)
-                .orderByDesc(GisFileMeta::getCreateTime);
-        Page<GisFileMeta> page = gisFileMetaMapper.selectPage(new Page<>(currentPage, pageSize), query);
-        List<GisFileMetaVO> records = page.getRecords().stream().map(this::toVO).toList();
-        populateCategoryIds(records);
-        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), records);
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public PageResult<List<GisFileMetaVO>> getFileMetaPage(GisFileQuery query, boolean deleted) {
+        query.validate();
+        Page<GisFileMetaVO> page = gisFileMetaMapper.selectFilePage(
+                new Page<>(query.getCurrent(), query.getSize()), query, deleted ? 1 : 0);
+        spatialMetadataService.populate(page.getRecords(), query.isIncludeGeometry());
+        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
     }
 
-    public PageResult<List<GisFileMetaVO>> getDeletedFileMetaPage(
-            Integer current,
-            Integer size,
-            Long dataSetId,
-            Long categoryId,
-            String originalName,
-            String extension,
-            String uploadStatus) {
-        long currentPage = current == null || current < 1 ? 1L : current;
-        long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
-        String normalizedName = trimToNull(originalName);
-        String normalizedExtension = normalizeExtension(extension);
-        String normalizedStatus = normalizeUpper(uploadStatus);
-        if (normalizedStatus != null && !UPLOAD_STATUSES.contains(normalizedStatus)) {
-            throw new IllegalArgumentException("上传状态只能为 PENDING、READY 或 FAILED");
-        }
-
-        Page<GisFileMetaVO> page = gisFileMetaMapper.selectDeletedPage(
-                new Page<>(currentPage, pageSize),
-                dataSetId,
-                categoryId,
-                normalizedName,
-                normalizedExtension,
-                normalizedStatus);
-        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
+    @Transactional(rollbackFor = Exception.class)
+    public void retryMetadata(Long id) {
+        GisFileMeta meta = getRequiredForUpdate(id);
+        if (!"READY".equals(meta.getUploadStatus())) throw new IllegalArgumentException("仅能重新提取传输完整的文件");
+        if ("RUNNING".equals(meta.getMetadataStatus())) throw new IllegalStateException("文件正在提取元数据");
+        if ("COMPLETED".equals(meta.getMetadataStatus())) dataSetService.decrementFileCount(meta.getDataSetId(), 1);
+        spatialMetadataService.invalidate(id);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -118,7 +81,7 @@ public class FileMetaService {
         if (gisFileMetaMapper.restoreDeletedById(id, LocalDateTime.now()) != 1) {
             throw new IllegalStateException("回收站文件恢复失败: " + id);
         }
-        if ("READY".equals(deletedMeta.getUploadStatus())) {
+        if ("COMPLETED".equals(deletedMeta.getMetadataStatus())) {
             dataSetService.incrementFileCount(deletedMeta.getDataSetId(), 1);
         }
         log.info("恢复回收站 GIS 文件成功: id={}, dataSetId={}", id, deletedMeta.getDataSetId());
@@ -158,14 +121,13 @@ public class FileMetaService {
         applyEditableFields(meta, reqVO, storageType, storageKey);
         meta.setUploadStatus(defaultStatus(reqVO.getUploadStatus()));
         meta.setCleanupStatus("NOT_REQUIRED");
+        meta.setMetadataStatus("QUEUED");
+        meta.setMetadataVersion(0L);
         meta.setCreateTime(now);
         meta.setUpdateTime(now);
         meta.setDeleted(0);
         if (gisFileMetaMapper.insert(meta) != 1) {
             throw new IllegalStateException("文件元数据创建失败");
-        }
-        if ("READY".equals(meta.getUploadStatus())) {
-            dataSetService.incrementFileCount(meta.getDataSetId(), 1);
         }
         log.info("创建 GIS 文件元数据成功: id={}, dataSetId={}, storageKey={}",
                 meta.getId(), meta.getDataSetId(), meta.getStorageKey());
@@ -175,7 +137,8 @@ public class FileMetaService {
     @Transactional(rollbackFor = Exception.class)
     public GisFileMetaVO updateFileMeta(GisFileMetaVO reqVO) {
         validateRequest(reqVO, true);
-        GisFileMeta existing = getRequired(reqVO.getId());
+        GisFileMeta existing = getRequiredForUpdate(reqVO.getId());
+        ensureMutable(existing);
         if ("READY".equals(existing.getUploadStatus())
                 && !existing.getDataSetId().equals(reqVO.getDataSetId())) {
             throw new IllegalArgumentException("已上传成功的文件不允许变更所属数据集");
@@ -214,25 +177,36 @@ public class FileMetaService {
         if (updated != 1) {
             throw new IllegalStateException("文件元数据更新失败: " + reqVO.getId());
         }
-        updateReadyFileCount(existing, updatedMeta);
+        boolean sourceChanged = !Objects.equals(existing.getStorageKey(), updatedMeta.getStorageKey())
+                || !Objects.equals(existing.getStorageType(), updatedMeta.getStorageType())
+                || !Objects.equals(existing.getSha256(), updatedMeta.getSha256())
+                || !Objects.equals(existing.getExtension(), updatedMeta.getExtension())
+                || !Objects.equals(existing.getSizeBytes(), updatedMeta.getSizeBytes())
+                || !Objects.equals(existing.getUploadStatus(), updatedMeta.getUploadStatus());
+        if (sourceChanged) {
+            if ("COMPLETED".equals(existing.getMetadataStatus())) dataSetService.decrementFileCount(existing.getDataSetId(), 1);
+            spatialMetadataService.invalidate(existing.getId());
+        }
         updatedMeta.setCreateTime(existing.getCreateTime());
         updatedMeta.setDeleted(existing.getDeleted());
         log.info("更新 GIS 文件元数据成功: id={}", reqVO.getId());
-        return toVOWithCategory(updatedMeta);
+        return toVOWithCategory(getRequired(existing.getId()));
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void deleteFileMeta(Long id) {
-        GisFileMeta existing = getRequired(id);
+        GisFileMeta existing = getRequiredForUpdate(id);
+        ensureMutable(existing);
         if (gisFileMetaMapper.deleteById(id) != 1) {
             throw new IllegalStateException("文件元数据删除失败: " + id);
         }
-        if ("READY".equals(existing.getUploadStatus())) {
+        if ("COMPLETED".equals(existing.getMetadataStatus())) {
             dataSetService.decrementFileCount(existing.getDataSetId(), 1);
         }
         log.info("删除 GIS 文件元数据成功: id={}", id);
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public GisFileMetaVO getFileMetaDetail(Long id) {
         return toVOWithCategory(getRequired(id));
     }
@@ -276,6 +250,23 @@ public class FileMetaService {
             throw new IllegalArgumentException("文件元数据不存在或已删除: " + id);
         }
         return meta;
+    }
+
+    private GisFileMeta getRequiredForUpdate(Long id) {
+        if (id == null) throw new IllegalArgumentException("文件元数据ID不能为空");
+        GisFileMeta meta = gisFileMetaMapper.selectOne(new LambdaQueryWrapper<GisFileMeta>()
+                .eq(GisFileMeta::getId, id).last("FOR UPDATE"));
+        if (meta == null) throw new IllegalArgumentException("文件元数据不存在或已删除: " + id);
+        return meta;
+    }
+
+    private void ensureMutable(GisFileMeta meta) {
+        if ("RUNNING".equals(meta.getMetadataStatus()) || gisFileTransferRecordItemMapper.selectCount(
+                new LambdaQueryWrapper<GisFileTransferRecordItem>()
+                        .eq(GisFileTransferRecordItem::getFileMetaId, meta.getId())
+                        .eq(GisFileTransferRecordItem::getOperationStatus, "RUNNING")) > 0) {
+            throw new IllegalStateException("文件导入或元数据提取进行中，暂不支持修改或删除");
+        }
     }
 
     private GisFileMeta getRequiredDeleted(Long id) {
@@ -389,18 +380,6 @@ public class FileMetaService {
         target.setErrorMessage(trimToNull(source.getErrorMessage()));
     }
 
-    private void updateReadyFileCount(GisFileMeta existing, GisFileMeta updated) {
-        boolean wasReady = "READY".equals(existing.getUploadStatus());
-        boolean isReady = "READY".equals(updated.getUploadStatus());
-        boolean moved = !existing.getDataSetId().equals(updated.getDataSetId());
-        if (wasReady && (!isReady || moved)) {
-            dataSetService.decrementFileCount(existing.getDataSetId(), 1);
-        }
-        if (isReady && (!wasReady || moved)) {
-            dataSetService.incrementFileCount(updated.getDataSetId(), 1);
-        }
-    }
-
     private GisFileMetaVO toVO(GisFileMeta meta) {
         GisFileMetaVO result = new GisFileMetaVO();
         result.setId(meta.getId());
@@ -416,6 +395,11 @@ public class FileMetaService {
         result.setUploadStatus(meta.getUploadStatus());
         result.setCleanupStatus(meta.getCleanupStatus());
         result.setErrorMessage(meta.getErrorMessage());
+        result.setMetadataStatus(meta.getMetadataStatus());
+        result.setMetadataVersion(meta.getMetadataVersion());
+        result.setMetadataErrorCode(meta.getMetadataErrorCode());
+        result.setMetadataErrorMessage(meta.getMetadataErrorMessage());
+        result.setMetadataExtractedAt(meta.getMetadataExtractedAt());
         result.setCreateTime(meta.getCreateTime());
         result.setUpdateTime(meta.getUpdateTime());
         return result;
@@ -424,6 +408,7 @@ public class FileMetaService {
     private GisFileMetaVO toVOWithCategory(GisFileMeta meta) {
         GisFileMetaVO result = toVO(meta);
         populateCategoryIds(List.of(result));
+        spatialMetadataService.populate(List.of(result), true);
         return result;
     }
 
