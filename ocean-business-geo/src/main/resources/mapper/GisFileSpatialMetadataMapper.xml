@@ -22,11 +22,19 @@
         SELECT * FROM ocean_gis.gis_file_meta
         WHERE id = #{id} AND metadata_version = #{version}
           AND metadata_status = 'RUNNING' AND deleted = 0 AND upload_status = 'READY'
+          AND metadata_lease_expires_at &gt; CURRENT_TIMESTAMP
         FOR UPDATE
     </select>
     <delete id="deleteByFileId">
         DELETE FROM ocean_gis.gis_file_spatial_metadata WHERE file_meta_id = #{id}
     </delete>
+    <update id="renewLease">
+        UPDATE ocean_gis.gis_file_meta
+        SET metadata_lease_expires_at = #{leaseExpiresAt}
+        WHERE id = #{id} AND metadata_version = #{version}
+          AND metadata_status = 'RUNNING' AND deleted = 0 AND upload_status = 'READY'
+          AND metadata_lease_expires_at &gt; CURRENT_TIMESTAMP
+    </update>
     <update id="invalidateDataSetRasters">
         WITH previous AS MATERIALIZED (
             SELECT id, metadata_status, deleted FROM ocean_gis.gis_file_meta

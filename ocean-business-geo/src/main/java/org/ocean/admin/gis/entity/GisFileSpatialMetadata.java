@@ -12,6 +12,7 @@ public class GisFileSpatialMetadata {
     private String dataKind;
     private String sourceCrsCode;
     private String sourceCrsWkt;
+    /** 源 CRS 坐标轴单位，独立于统一米制分辨率。 */
     private String sourceUnit;
     private String sourceExtent;
     private String geographicExtent;
@@ -19,8 +20,10 @@ public class GisFileSpatialMetadata {
     private Integer rasterWidth;
     private Integer rasterHeight;
     private Integer bandCount;
+    /** EPSG:3857 投影下沿两个像元轴的米/像元间距；超出有效域时为空。 */
     private Double resolutionX;
     private Double resolutionY;
+    /** 栅格分辨率统一为 m；矢量没有像元分辨率。 */
     private String resolutionUnit;
     private String tileMatrixSetId;
     private Integer tileWidth;

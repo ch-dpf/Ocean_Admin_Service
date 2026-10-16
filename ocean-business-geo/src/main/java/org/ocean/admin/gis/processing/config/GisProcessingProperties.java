@@ -30,6 +30,14 @@ public class GisProcessingProperties {
     private long imageryMaxTileCount = 200_000L;
     @Positive
     private int imageryOverviewMinSize = 512;
+    // 超出轮廓限额时明确失败，不以矩形或简化几何替代实际覆盖区。
+    @Min(4)
+    private int metadataMaxBoundarySegments = 1_000_000;
+    @Min(8)
+    private int metadataMaxCoordinates = 2_000_000;
+    @Min(1)
+    @Max(16_777_216)
+    private int metadataMaxWindowPixels = 262_144;
     @Min(0)
     @Max(9)
     private int archiveCompressionLevel = 1;

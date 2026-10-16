@@ -13,6 +13,7 @@ public interface GisFileSpatialMetadataMapper {
     List<Long> selectCandidates(@Param("limit") int limit);
     GisFileMeta claim(@Param("id") Long id, @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
     GisFileMeta lockClaim(@Param("id") Long id, @Param("version") Long version);
+    int renewLease(@Param("id") Long id, @Param("version") Long version, @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
     int deleteByFileId(@Param("id") Long id);
     int invalidateDataSetRasters(@Param("dataSetId") Long dataSetId);
     int insert(@Param("item") GisFileSpatialMetadata item);
