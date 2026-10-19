@@ -1,6 +1,8 @@
 package org.ocean.admin.gis.imagery;
 
 import lombok.extern.slf4j.Slf4j;
+import it.geosolutions.imageioimpl.plugins.tiff.TIFFImageReaderSpi;
+import it.geosolutions.imageioimpl.plugins.tiff.TIFFStreamMetadata;
 import org.eclipse.imagen.ImageLayout;
 import org.eclipse.imagen.Interpolation;
 import org.geotools.api.coverage.grid.GridEnvelope;
@@ -12,7 +14,6 @@ import org.geotools.coverage.grid.GridEnvelope2D;
 import org.geotools.coverage.grid.GridGeometry2D;
 import org.geotools.coverage.grid.io.AbstractGridFormat;
 import org.geotools.coverage.processing.Operations;
-import org.geotools.coverage.util.CoverageUtilities;
 import org.geotools.gce.geotiff.GeoTiffFormat;
 import org.geotools.gce.geotiff.GeoTiffReader;
 import org.geotools.gce.geotiff.GeoTiffWriteParams;
@@ -29,8 +30,10 @@ import javax.imageio.ImageReader;
 import javax.imageio.ImageWriteParam;
 import javax.imageio.stream.ImageInputStream;
 import java.awt.Rectangle;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.ColorModel;
+import java.awt.image.DataBuffer;
 import java.awt.image.RenderedImage;
 import java.awt.image.WritableRaster;
 import java.io.IOException;
@@ -47,7 +50,6 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
-import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,7 +61,7 @@ import java.util.stream.Stream;
 @Slf4j
 public class GeoTiffPreprocessor {
 
-    private static final String CACHE_VERSION = "v9-zoom-boundary-tolerance";
+    private static final String CACHE_VERSION = "v12-source-native-zoom";
     private static final String COMPLETE_MARKER = "complete.marker";
     private static final int TIFF_TILE_SIZE = 256;
     private static final int MAX_ZOOM = ImageryTileOptions.MAX_ZOOM;
@@ -88,7 +90,7 @@ public class GeoTiffPreprocessor {
         this.overviewBuilder = overviewBuilder;
     }
 
-    public PreparedRaster prepare(Path input, ImageryTileOptions options,
+    public PreparedRaster prepare(Path input, int nativeZoom, ImageryTileOptions options,
             Consumer<TaskStage> progressListener) {
         long startedAt = System.nanoTime();
         Path source = input.toAbsolutePath().normalize();
@@ -108,11 +110,14 @@ public class GeoTiffPreprocessor {
                         inspection.width(), inspection.height());
             }
 
-            String key = cacheKey(source, inspection, options);
+            if (nativeZoom < 0 || nativeZoom > MAX_ZOOM) {
+                throw new IllegalArgumentException("影像原生最大层级必须在0到22之间");
+            }
+            String key = cacheKey(source, inspection, nativeZoom, options);
             ReentrantLock jvmLock = JVM_CACHE_LOCKS.computeIfAbsent(key, ignored -> new ReentrantLock());
             jvmLock.lock();
             try {
-                return prepareLocked(source, reader, inspection, options,
+                return prepareLocked(source, reader, inspection, nativeZoom, options,
                         progressListener, key, startedAt);
             } finally {
                 jvmLock.unlock();
@@ -131,7 +136,7 @@ public class GeoTiffPreprocessor {
 
 //    核心方法：持有文件锁的情况下，安全地生成或复用影像分块优化缓存，并提供了进度反馈和异常清理
     private PreparedRaster prepareLocked(Path source, GeoTiffReader reader,
-            RasterInspection inspection, ImageryTileOptions options,
+            RasterInspection inspection, int nativeZoom, ImageryTileOptions options,
             Consumer<TaskStage> progressListener, String key,
             long startedAt) throws Exception {
         Path cacheDirectory = cacheRoot.resolve(key);
@@ -155,7 +160,7 @@ public class GeoTiffPreprocessor {
             generationDirectory = cacheDirectory.resolve(generationName);
             Files.createDirectories(generationDirectory);
 
-            ReadPlan plan = createReadPlan(inspection, options);
+            ReadPlan plan = createReadPlan(inspection, nativeZoom, options);
             progressListener.accept(TaskStage.determinate(
                     "preparing",
                     "影像预处理工作量已确定，共" + plan.windows().size() + "个分块",
@@ -169,8 +174,7 @@ public class GeoTiffPreprocessor {
                     plan.globalTargetGrid().getGridRange2D().height);
 
             List<PreparedPart> parts = new ArrayList<>(plan.windows().size());
-            try (DirectWindowReader windowReader = new DirectWindowReader(
-                    source, inspection.width(), inspection.height())) {
+            try (DirectWindowReader windowReader = new DirectWindowReader(source, inspection)) {
                 for (ReadWindow window : plan.windows()) {
                     PreparedPart part = preparePart(windowReader, inspection, options,
                             generationDirectory, window);
@@ -220,7 +224,7 @@ public class GeoTiffPreprocessor {
             projected = (GridCoverage2D) Operations.DEFAULT.resample(
                     boundedSource, inspection.targetCrs(), window.targetGrid(),
                     interpolation(options.resampling()),
-                    backgroundValues(boundedSource, inspection.bands()));
+                    new double[]{0, 0, 0, 0});
             writeCoverage(projected, partPath);
             int overviews = overviewBuilder.build(partPath, overviewMinimumSize, ignored -> { });
             overviewBuilder.validate(partPath, overviewMinimumSize);
@@ -250,13 +254,11 @@ public class GeoTiffPreprocessor {
         BufferedImage image = windowReader.read(region);
         int actualWidth = image.getWidth();
         int actualHeight = image.getHeight();
-        int actualBands = image.getSampleModel().getNumBands();
-        if (actualWidth != region.width || actualHeight != region.height
-                || actualBands != inspection.bands()) {
+        if (actualWidth != region.width || actualHeight != region.height) {
             image.flush();
             throw new IOException("GeoTIFF 窗口读取结果与请求不一致，期望 "
-                    + region.width + "x" + region.height + "x" + inspection.bands()
-                    + "，实际 " + actualWidth + "x" + actualHeight + "x" + actualBands);
+                    + region.width + "x" + region.height
+                    + "，实际 " + actualWidth + "x" + actualHeight);
         }
         return new GridCoverageFactory().create("source-window", image, envelope);
     }
@@ -334,9 +336,9 @@ public class GeoTiffPreprocessor {
                 + ", y=" + range.y + ".." + (range.y + range.height) + ")";
     }
 
-    private ReadPlan createReadPlan(RasterInspection inspection,
+    private ReadPlan createReadPlan(RasterInspection inspection, int nativeZoom,
             ImageryTileOptions options) throws Exception {
-        GridGeometry2D globalTargetGrid = targetGrid(inspection, options);
+        GridGeometry2D globalTargetGrid = targetGrid(inspection, nativeZoom, options);
         int width = inspection.width();
         int height = inspection.height();
         int blockWidth = inspection.blockWidth();
@@ -363,15 +365,33 @@ public class GeoTiffPreprocessor {
         int windowHeight = Math.multiplyExact(windowBlocksY, blockHeight);
         int interpolationRadius = options.resampling() == ImageryTileOptions.Resampling.NEAREST
                 ? 0 : 1;
+        ReferencedEnvelope valid = validSourceBounds(inspection.sourceBounds(),
+                inspection.sourceCrs(), inspection.targetCrs());
+        GridEnvelope2D validSourceGrid = intersection(
+                inspection.sourceGrid().worldToGrid(valid),
+                new GridEnvelope2D(0, 0, width, height));
 
         List<ReadWindowSeed> seeds = new ArrayList<>();
         for (int y = 0; y < height; y += windowHeight) {
             for (int x = 0; x < width; x += windowWidth) {
-                GridEnvelope2D core = new GridEnvelope2D(x, y,
-                        Math.min(windowWidth, width - x),
-                        Math.min(windowHeight, height - y));
+                GridEnvelope2D core = intersection(
+                        new GridEnvelope2D(x, y,
+                                Math.min(windowWidth, width - x),
+                                Math.min(windowHeight, height - y)),
+                        validSourceGrid);
+                if (core.isEmpty()) {
+                    continue;
+                }
                 ReferencedEnvelope coreEnvelope = gridEnvelope(
                         inspection.sourceGrid(), core, inspection.sourceCrs());
+                double minX = Math.max(coreEnvelope.getMinX(), valid.getMinX());
+                double maxX = Math.min(coreEnvelope.getMaxX(), valid.getMaxX());
+                double minY = Math.max(coreEnvelope.getMinY(), valid.getMinY());
+                double maxY = Math.min(coreEnvelope.getMaxY(), valid.getMaxY());
+                if (minX >= maxX || minY >= maxY) {
+                    continue;
+                }
+                coreEnvelope = new ReferencedEnvelope(minX, maxX, minY, maxY, inspection.sourceCrs());
                 ReferencedEnvelope transformed = clampTarget(
                         coreEnvelope.transform(inspection.targetCrs(), true),
                         options.targetCrs());
@@ -509,17 +529,15 @@ public class GeoTiffPreprocessor {
                 sourceCrs, targetCrs, sourceBounds, targetBounds,
                 new GridGeometry2D(reader.getOriginalGridRange(), reader.getOriginalEnvelope()),
                 hasOverviews, !CRS.equalsIgnoreMetadata(sourceCrs, targetCrs),
-                blockWidth, blockHeight);
+                blockWidth, blockHeight,
+                reader.getMetadata().hasNoData() ? reader.getMetadata().getNoData() : null,
+                reader.getMaskOverviewProvider().hasExternalMasks()
+                        ? Path.of(reader.getMaskOverviewProvider().getMaskURL().toURI()) : null);
     }
 
-    private GridGeometry2D targetGrid(RasterInspection inspection,
+    private GridGeometry2D targetGrid(RasterInspection inspection, int nativeZoom,
             ImageryTileOptions options) throws Exception {
         ReferencedEnvelope bounded = inspection.targetBounds();
-        double sourceResolution = Math.max(
-                bounded.getWidth() / inspection.width(), bounded.getHeight() / inspection.height());
-        int nativeZoom = ImageryTileOptions.calculateNativeMaxZoom(
-                sourceResolution, worldHeight(options.targetCrs()), ImageryTileOptions.TILE_SIZE);
-        nativeZoom = Math.max(0, Math.min(MAX_ZOOM, nativeZoom));
         int preparationZoom = options.maxZoom() == null
                 ? nativeZoom : Math.min(nativeZoom, options.maxZoom());
         double resolution = worldHeight(options.targetCrs())
@@ -561,16 +579,28 @@ public class GeoTiffPreprocessor {
 
     private ReferencedEnvelope alignToPixelGrid(ReferencedEnvelope bounds,
             ImageryTileOptions.TargetCrs targetCrs, double resolution) {
-        double minX = worldMinX(targetCrs)
-                + Math.floor((bounds.getMinX() - worldMinX(targetCrs)) / resolution) * resolution;
-        double maxX = worldMinX(targetCrs)
-                + Math.ceil((bounds.getMaxX() - worldMinX(targetCrs)) / resolution) * resolution;
-        double maxY = worldMaxY(targetCrs)
-                - Math.floor((worldMaxY(targetCrs) - bounds.getMaxY()) / resolution) * resolution;
-        double minY = worldMaxY(targetCrs)
-                - Math.ceil((worldMaxY(targetCrs) - bounds.getMinY()) / resolution) * resolution;
+        double minPixelX = snapPixelCoordinate(
+                (bounds.getMinX() - worldMinX(targetCrs)) / resolution);
+        double maxPixelX = snapPixelCoordinate(
+                (bounds.getMaxX() - worldMinX(targetCrs)) / resolution);
+        double minPixelY = snapPixelCoordinate(
+                (worldMaxY(targetCrs) - bounds.getMaxY()) / resolution);
+        double maxPixelY = snapPixelCoordinate(
+                (worldMaxY(targetCrs) - bounds.getMinY()) / resolution);
+        double minX = worldMinX(targetCrs) + Math.floor(minPixelX) * resolution;
+        double maxX = worldMinX(targetCrs) + Math.ceil(maxPixelX) * resolution;
+        double maxY = worldMaxY(targetCrs) - Math.floor(minPixelY) * resolution;
+        double minY = worldMaxY(targetCrs) - Math.ceil(maxPixelY) * resolution;
         return clampTarget(new ReferencedEnvelope(minX, maxX, minY, maxY,
                 targetCrs(targetCrs)), targetCrs);
+    }
+
+    /** 防止 GeoTransform 的十进制尾差把已对齐边界错误扩展一个完整目标像素。 */
+    private double snapPixelCoordinate(double value) {
+        double integer = Math.rint(value);
+        double tolerance = Math.max(1e-6,
+                Math.ulp(Math.max(1.0, Math.abs(value))) * 32.0);
+        return Math.abs(value - integer) <= tolerance ? integer : value;
     }
 
     private ReferencedEnvelope gridEnvelope(GridGeometry2D grid,
@@ -587,15 +617,13 @@ public class GeoTiffPreprocessor {
         return new GridEnvelope2D(minX, minY, maxX - minX, maxY - minY);
     }
 
-    private double[] backgroundValues(GridCoverage2D coverage, int bands) {
-        double[] sourceValues = CoverageUtilities.getBackgroundValues(coverage);
-        double[] values = new double[Math.max(1, bands)];
-        if (sourceValues != null && sourceValues.length > 0) {
-            for (int index = 0; index < values.length; index++) {
-                values[index] = sourceValues[Math.min(index, sourceValues.length - 1)];
-            }
-        }
-        return values;
+    private GridEnvelope2D intersection(GridEnvelope2D left, GridEnvelope2D right) {
+        int minX = Math.max(left.x, right.x);
+        int minY = Math.max(left.y, right.y);
+        int maxX = Math.min(left.x + left.width, right.x + right.width);
+        int maxY = Math.min(left.y + left.height, right.y + right.height);
+        return new GridEnvelope2D(minX, minY,
+                Math.max(0, maxX - minX), Math.max(0, maxY - minY));
     }
 
     private Interpolation interpolation(ImageryTileOptions.Resampling resampling) {
@@ -629,11 +657,16 @@ public class GeoTiffPreprocessor {
      * @return 缓存键
      * @throws IOException io异常
      */
-    private String cacheKey(Path source, RasterInspection inspection,
+    private String cacheKey(Path source, RasterInspection inspection, int nativeZoom,
             ImageryTileOptions options) throws IOException {
         String value = CACHE_VERSION + '|' + source + '|' + inspection.fileSize() + '|'
                 + Files.getLastModifiedTime(source).toMillis() + '|' + options.targetCrs().code()
-                + '|' + options.resampling() + '|' + options.maxZoom() + '|' + maxWindowPixels;
+                + '|' + nativeZoom + '|' + options.resampling() + '|' + options.maxZoom() + '|' + maxWindowPixels
+                + '|' + overviewMinimumSize;
+        if (inspection.maskPath() != null) {
+            value += '|' + inspection.maskPath().toString() + '|' + Files.size(inspection.maskPath())
+                    + '|' + Files.getLastModifiedTime(inspection.maskPath()).toMillis();
+        }
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(StandardCharsets.UTF_8)));
@@ -721,61 +754,139 @@ public class GeoTiffPreprocessor {
         return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 
-    /** 使用已注册的 TIFF ImageReader 对原始影像执行真正的源区域读取。 */
+    /** 源区域读取，同时把源 NoData、独立 mask 和 alpha 归一为透明像素。 */
     private static final class DirectWindowReader implements AutoCloseable {
         private final ImageInputStream input;
         private final ImageReader reader;
+        private final ImageInputStream maskInput;
+        private final ImageReader maskReader;
+        private final int maskIndex;
+        private final Double noData;
 
-        private DirectWindowReader(Path source, int expectedWidth, int expectedHeight)
-                throws IOException {
-            ImageInputStream createdInput = ImageIO.createImageInputStream(source.toFile());
-            if (createdInput == null) {
-                throw new IOException("无法创建 GeoTIFF 输入流: " + source);
-            }
+        private DirectWindowReader(Path source, RasterInspection inspection) throws IOException {
+            ImageInputStream createdInput = new javax.imageio.stream.FileImageInputStream(source.toFile());
             ImageReader createdReader = null;
+            ImageInputStream createdMaskInput = null;
+            ImageReader createdMaskReader = null;
             try {
-                Iterator<ImageReader> readers = ImageIO.getImageReaders(createdInput);
-                if (!readers.hasNext()) {
-                    throw new IOException("当前 JVM 没有可用的 TIFF ImageReader: " + source);
+                createdReader = new TIFFImageReaderSpi().createReaderInstance();
+                createdReader.setInput(createdInput, false, false);
+                if (createdReader.getWidth(0) != inspection.width()
+                        || createdReader.getHeight(0) != inspection.height()) {
+                    throw new IOException("GeoTIFF 窗口读取器尺寸与元数据不一致: " + source);
                 }
-                createdReader = readers.next();
-                createdReader.setInput(createdInput, false, true);
-                int actualWidth = createdReader.getWidth(0);
-                int actualHeight = createdReader.getHeight(0);
-                if (actualWidth != expectedWidth || actualHeight != expectedHeight) {
-                    throw new IOException("GeoTIFF ImageReader 尺寸与元数据不一致，期望 "
-                            + expectedWidth + "x" + expectedHeight + "，实际 "
-                            + actualWidth + "x" + actualHeight);
+                createdReader.getNumImages(true);
+                var layout = ((TIFFStreamMetadata) createdReader.getStreamMetadata()).dtLayout;
+                int index = 0;
+                if (layout.getNumInternalMasks() > 0 || inspection.maskPath() != null) {
+                    Path maskPath = layout.getNumInternalMasks() > 0 ? source : inspection.maskPath();
+                    index = layout.getNumInternalMasks() > 0 ? layout.getInternalMaskImageIndex(0) : 0;
+                    createdMaskInput = new javax.imageio.stream.FileImageInputStream(maskPath.toFile());
+                    createdMaskReader = new TIFFImageReaderSpi().createReaderInstance();
+                    createdMaskReader.setInput(createdMaskInput, false, false);
+                    if (createdMaskReader.getWidth(index) != inspection.width()
+                            || createdMaskReader.getHeight(index) != inspection.height()
+                            || createdMaskReader.getRawImageType(index).getSampleModel().getNumBands() != 1) {
+                        throw new IOException("独立 mask 必须为与影像尺寸一致的单波段图像");
+                    }
                 }
                 this.input = createdInput;
                 this.reader = createdReader;
+                this.maskInput = createdMaskInput;
+                this.maskReader = createdMaskReader;
+                this.maskIndex = index;
+                this.noData = inspection.noData();
             } catch (Exception ex) {
-                if (createdReader != null) {
-                    createdReader.dispose();
-                }
+                if (createdMaskReader != null) createdMaskReader.dispose();
+                if (createdMaskInput != null) createdMaskInput.close();
+                if (createdReader != null) createdReader.dispose();
                 createdInput.close();
-                if (ex instanceof IOException ioException) {
-                    throw ioException;
-                }
                 throw new IOException("初始化 GeoTIFF 窗口读取器失败: " + source, ex);
             }
         }
 
         private BufferedImage read(GridEnvelope2D region) throws IOException {
+            Rectangle rectangle = new Rectangle(region.x, region.y, region.width, region.height);
             ImageReadParam parameters = reader.getDefaultReadParam();
-            parameters.setSourceRegion(new Rectangle(
-                    region.x, region.y, region.width, region.height));
+            parameters.setSourceRegion(rectangle);
             BufferedImage image = reader.read(0, parameters);
             if (image == null) {
                 throw new IOException("GeoTIFF ImageReader 返回空窗口: " + region);
             }
-            return image;
+            BufferedImage mask = null;
+            try {
+                if (maskReader != null) {
+                    ImageReadParam maskParameters = maskReader.getDefaultReadParam();
+                    maskParameters.setSourceRegion(rectangle);
+                    mask = maskReader.read(maskIndex, maskParameters);
+                    if (mask == null || mask.getWidth() != image.getWidth()
+                            || mask.getHeight() != image.getHeight()) {
+                        throw new IOException("独立 mask 的窗口与影像窗口不一致");
+                    }
+                }
+                return validRgba(image, mask, noData);
+            } finally {
+                image.flush();
+                if (mask != null) mask.flush();
+            }
+        }
+
+        private static BufferedImage validRgba(BufferedImage image, BufferedImage mask, Double noData) {
+            int width = image.getWidth(), height = image.getHeight();
+            BufferedImage rgba = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
+            var raster = image.getRaster();
+            boolean testSamples = noData != null || raster.getDataBuffer().getDataType() == DataBuffer.TYPE_FLOAT
+                    || raster.getDataBuffer().getDataType() == DataBuffer.TYPE_DOUBLE;
+            if (mask == null && !testSamples) {
+                Graphics2D graphics = rgba.createGraphics();
+                try {
+                    graphics.drawImage(image, 0, 0, null);
+                } finally {
+                    graphics.dispose();
+                }
+                return rgba;
+            }
+            var alpha = image.getAlphaRaster();
+            int bands = raster.getNumBands() - (alpha == null ? 0 : 1);
+            double[][] samples = testSamples ? new double[bands][width] : null;
+            double[] maskValues = mask == null ? null : new double[width];
+            for (int y = 0; y < height; y++) {
+                int[] colors = image.getRGB(0, y, width, 1, null, 0, width);
+                if (mask != null) mask.getRaster().getSamples(0, y, width, 1, 0, maskValues);
+                if (testSamples) {
+                    for (int band = 0; band < bands; band++) {
+                        raster.getSamples(0, y, width, 1, band, samples[band]);
+                    }
+                }
+                for (int x = 0; x < width; x++) {
+                    boolean valid = maskValues == null
+                            || (Double.isFinite(maskValues[x]) && maskValues[x] > 0);
+                    if (valid && testSamples) {
+                        valid = false;
+                        for (int band = 0; band < bands; band++) {
+                            double value = samples[band][x];
+                            if (Double.isFinite(value) && (noData == null || value != noData)) {
+                                valid = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!valid) colors[x] = 0;
+                }
+                rgba.setRGB(0, y, width, 1, colors, 0, width);
+            }
+            return rgba;
         }
 
         @Override
         public void close() throws IOException {
-            reader.dispose();
-            input.close();
+            try {
+                if (maskReader != null) maskReader.dispose();
+                if (maskInput != null) maskInput.close();
+            } finally {
+                reader.dispose();
+                input.close();
+            }
         }
     }
 
@@ -832,7 +943,9 @@ public class GeoTiffPreprocessor {
             boolean hasOverviews,
             boolean reprojectionRequired,
             int blockWidth,
-            int blockHeight) { }
+            int blockHeight,
+            Double noData,
+            Path maskPath) { }
 
     private record ReadPlan(GridGeometry2D globalTargetGrid, List<ReadWindow> windows) { }
 

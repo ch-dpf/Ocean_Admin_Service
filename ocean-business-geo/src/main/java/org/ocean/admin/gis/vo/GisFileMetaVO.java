@@ -85,8 +85,8 @@ public class GisFileMetaVO {
             String sourceCrsCode, String sourceCrsWkt, String sourceUnit, JsonNode sourceExtent,
             String geographicExtent, String extentKind, Double west, Double south, Double east, Double north,
             Integer rasterWidth, Integer rasterHeight, Integer bandCount,
-            @Schema(description = "EPSG:3857 投影 X 像元轴分辨率，m/像元；超出有效域时为空") Double resolutionX,
-            @Schema(description = "EPSG:3857 投影 Y 像元轴分辨率，m/像元；超出有效域时为空") Double resolutionY,
+            @Schema(description = "源像元在 Web Mercator 赤道处的名义 X 分辨率，m/像元；无法识别源 CRS 时为有效域投影采样间距") Double resolutionX,
+            @Schema(description = "源像元在 Web Mercator 赤道处的名义 Y 分辨率，m/像元；无法识别源 CRS 时为有效域投影采样间距") Double resolutionY,
             @Schema(description = "栅格分辨率单位固定为 m，源单位见 sourceUnit") String resolutionUnit,
             String tileMatrixSetId, Integer tileWidth, Integer tileHeight,
             Integer recommendedMaxZoom, JsonNode calculationDetails, JsonNode extraMetadata) { }

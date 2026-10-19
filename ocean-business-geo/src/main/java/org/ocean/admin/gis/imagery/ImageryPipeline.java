@@ -5,6 +5,8 @@ import org.ocean.admin.gis.dto.TaskStage;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 /** 影像数据处理流程管道 */
@@ -20,25 +22,35 @@ public class ImageryPipeline {
         this.tileGenerator = tileGenerator;
     }
 
-    public void execute(Path source, GisProcessingWorkspace workspace,
+    public void execute(List<Path> sources, GisProcessingWorkspace workspace,
             ImageryTileOptions options,
             Consumer<TaskStage> progressListener) {
         long pipelineStartedAt = System.nanoTime();
         PipelinePhase phase = PipelinePhase.PREPROCESSING;
         boolean successful = false;
         log.info("[Imagery][Pipeline] 开始执行影像处理，源文件: {}, 输出目录: {}",
-                source, workspace.outputPath());
+                sources, workspace.outputPath());
         try {
-            GeoTiffPreprocessor.PreparedRaster prepared = preprocessRaster(
-                    source, options, progressListener);
+            progressListener.accept(TaskStage.indeterminate("analyzing", "正在规划影像集合范围和瓦片预算"));
+            GeoTiffTileGenerator.MosaicPlan plan = tileGenerator.plan(sources, options);
+            List<GeoTiffPreprocessor.PreparedRaster> prepared = new ArrayList<>();
+            for (GeoTiffTileGenerator.SourceRaster source : plan.sources()) {
+                source.validateUnchanged();
+                prepared.add(preprocessRaster(source.path(), source.nativeZoom(), options,
+                        stage -> progressListener.accept(new TaskStage(stage.code(),
+                                "源文件" + (source.sequence() + 1) + "/" + sources.size()
+                                        + "：" + stage.message(),
+                                stage.completed(), stage.total(), stage.unit()))));
+            }
 
             phase = PipelinePhase.TILING;
-            runTilingProcess(prepared, source, workspace, options, progressListener);
+            tileGenerator.generate(plan, prepared, workspace.outputKey(), workspace.outputPath(),
+                    options, progressListener);
             successful = true;
-        } catch (RuntimeException ex) {
+        } catch (Exception ex) {
             log.error("[Imagery][Pipeline] 影像处理失败，阶段: {}, 源文件: {}",
-                    phase.displayName, source, ex);
-            throw ex;
+                    phase.displayName, sources, ex);
+            throw new IllegalStateException("影像集合处理失败: " + ex.getMessage(), ex);
         } finally {
             log.info("[Imagery][Pipeline] 影像处理流程结束，结果: {}, 最后阶段: {}, 总耗时: {} ms",
                     successful ? "成功" : "失败", phase.displayName,
@@ -47,28 +59,16 @@ public class ImageryPipeline {
     }
 
     private GeoTiffPreprocessor.PreparedRaster preprocessRaster(
-            Path source, ImageryTileOptions options,
+            Path source, int nativeZoom, ImageryTileOptions options,
             Consumer<TaskStage> progressListener) {
         long startedAt = System.nanoTime();
         log.info("[Imagery][Pipeline] 开始预处理阶段，源文件: {}", source);
         GeoTiffPreprocessor.PreparedRaster prepared = preprocessor.prepare(
-                source, options, progressListener);
+                source, nativeZoom, options, progressListener);
         log.info("[Imagery][Pipeline] 预处理阶段完成，处理文件: {}, 已优化: {}, 命中缓存: {}, 耗时: {} ms",
                 prepared.parts().getFirst().path(), prepared.optimized(), prepared.cacheHit(),
                 elapsedMillis(startedAt));
         return prepared;
-    }
-
-    private void runTilingProcess(GeoTiffPreprocessor.PreparedRaster prepared,
-            Path source, GisProcessingWorkspace workspace, ImageryTileOptions options,
-            Consumer<TaskStage> progressListener) {
-        long startedAt = System.nanoTime();
-        log.info("[Imagery][Pipeline] 开始切片阶段，处理分块数: {}, 输出目录: {}",
-                prepared.parts().size(), workspace.outputPath());
-        tileGenerator.generate(prepared, source, workspace.outputPath(),
-                options, progressListener);
-        log.info("[Imagery][Pipeline] 切片阶段完成，输出目录: {}, 耗时: {} ms",
-                workspace.outputPath(), elapsedMillis(startedAt));
     }
 
     private long elapsedMillis(long startedAt) {

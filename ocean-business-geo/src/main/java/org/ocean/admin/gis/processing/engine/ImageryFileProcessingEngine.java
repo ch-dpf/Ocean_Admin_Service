@@ -41,14 +41,13 @@ public class ImageryFileProcessingEngine implements GisFileProcessingEngine {
     @Override
     public void process(List<Path> inputPaths, GisProcessingWorkspace workspace,
             GisProcessingParameters parameters, Consumer<TaskStage> progressListener) {
-        if (inputPaths == null || inputPaths.size() != 1) {
-            throw new IllegalArgumentException("首期影像切片每个任务仅支持一个 GeoTIFF");
+        if (inputPaths == null || inputPaths.isEmpty()) {
+            throw new IllegalArgumentException("影像切片至少需要一个 GeoTIFF");
         }
         if (!(parameters instanceof ImageryProcessingParameters imageryParameters)) {
             throw new IllegalArgumentException("影像切片任务参数类型不正确");
         }
-        Path source = inputPaths.get(0);
         ImageryTileOptions options = ImageryTileOptions.from(imageryParameters);
-        imageryPipeline.execute(source, workspace, options, progressListener);
+        imageryPipeline.execute(inputPaths, workspace, options, progressListener);
     }
 }

@@ -20,7 +20,7 @@ public record ImageryProcessingParameters(
         String outputFormat,
         @Min(0) @Max(22) @Schema(description = "最小层级；为空时根据影像范围自动计算")
         Integer minZoom,
-        @Min(0) @Max(22) @Schema(description = "最大层级；为空时按源分辨率计算")
+        @Min(0) @Max(22) @Schema(description = "最大层级；为空时按各源分辨率计算逐层覆盖范围，显式指定时允许上采样")
         Integer maxZoom,
         @Schema(description = "重采样算法，默认 BILINEAR",
                 allowableValues = {"NEAREST", "BILINEAR"}, defaultValue = "BILINEAR")

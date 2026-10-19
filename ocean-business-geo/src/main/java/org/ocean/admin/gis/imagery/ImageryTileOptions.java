@@ -16,6 +16,8 @@ public record ImageryTileOptions(
 
     public static final int TILE_SIZE = 256;
     public static final int MAX_ZOOM = 22;
+    public static final double WEB_MERCATOR_WORLD_SPAN = 40_075_016.685578488;
+    public static final double WEB_MERCATOR_METERS_PER_DEGREE = WEB_MERCATOR_WORLD_SPAN / 360d;
     /** 坐标转换与大坐标相减可能使整层边界出现微小误差，容差单位为缩放层级。 */
     public static final double ZOOM_BOUNDARY_TOLERANCE = 1e-7;
 

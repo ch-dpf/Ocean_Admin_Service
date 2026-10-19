@@ -32,7 +32,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class RasterSpatialMetadataExtractor {
     private static final double MAX_MERCATOR_LATITUDE = 85.0511287798066;
-    private static final double WORLD_METERS = 40075016.68557849;
+    private static final double WORLD_METERS = ImageryTileOptions.WEB_MERCATOR_WORLD_SPAN;
     private static final long MAX_STRIPE_MASK_BYTES = 16 * 1024 * 1024;
     private static final long MAX_DECODED_TILE_BYTES = 64 * 1024 * 1024;
     private static final GeometryFactory GEOMETRIES = new GeometryFactory(new PrecisionModel(), 4326);
@@ -75,17 +75,28 @@ public class RasterSpatialMetadataExtractor {
                     "lowerCorner", new double[]{envelope.getMinimum(0), envelope.getMinimum(1)},
                     "upperCorner", new double[]{envelope.getMaximum(0), envelope.getMaximum(1)})));
             Resolution resolution = calculateResolution(source, gridToSource, toGeographic, footprint, left, top, width, height);
-            metadata.setResolutionX(resolution.x > 0 ? resolution.x : null);
-            metadata.setResolutionY(resolution.y > 0 ? resolution.y : null);
+            NominalResolution nominal = calculateNominalRasterResolution(
+                    source, gridToSource, toGeographic, left, top, width, height);
+            double resolutionX = nominal == null ? resolution.x : nominal.x();
+            double resolutionY = nominal == null ? resolution.y : nominal.y();
+            metadata.setResolutionX(Double.isFinite(resolutionX) && resolutionX > 0 ? resolutionX : null);
+            metadata.setResolutionY(Double.isFinite(resolutionY) && resolutionY > 0 ? resolutionY : null);
             extra.put("resolutionCrs", "EPSG:3857");
-            extra.put("resolutionMethod", "MAX_REPRESENTATIVE_PIXEL_SPACING_IN_VALID_MERCATOR_DOMAIN");
+            extra.put("resolutionMethod", nominal == null
+                    ? "MAX_REPRESENTATIVE_PIXEL_SPACING_IN_VALID_MERCATOR_DOMAIN" : nominal.method());
             extra.put("resolutionSampleCount", resolution.samples);
-            if (resolution.samples == 0) extra.put("resolutionUnavailableReason", "OUTSIDE_WEB_MERCATOR_OR_INVALID_RESOLUTION");
+            if (resolution.samples > 0 && nominal != null) {
+                extra.put("maxRepresentativeProjectedResolutionXMeters", resolution.x);
+                extra.put("maxRepresentativeProjectedResolutionYMeters", resolution.y);
+            }
+            if (metadata.getResolutionX() == null || metadata.getResolutionY() == null) {
+                extra.put("resolutionUnavailableReason", "OUTSIDE_WEB_MERCATOR_OR_INVALID_RESOLUTION");
+            }
             extra.put("footprintMethod", "VALID_PIXEL_BOUNDARY");
             extra.put("footprintCoordinates", footprint.getNumPoints());
             extra.put("geometrySimplified", false);
             if (terrain) calculateTerrainZoom(metadata, reader, source, width);
-            else calculateImageryZoom(metadata, resolution);
+            else calculateImageryZoom(metadata, resolution, nominal);
             metadata.setExtraMetadata(objectMapper.writeValueAsString(extra));
         } finally {
             reader.dispose();
@@ -271,21 +282,76 @@ public class RasterSpatialMetadataExtractor {
         return Double.isFinite(point[0]) && Double.isFinite(point[1]) && Math.abs(point[1]) <= MAX_MERCATOR_LATITUDE;
     }
 
-    private void calculateImageryZoom(GisFileSpatialMetadata metadata, Resolution resolution) {
-        double spacing = Math.max(resolution.x, resolution.y);
-        if (resolution.samples == 0 || !Double.isFinite(spacing) || spacing <= 0) {
+    private NominalResolution calculateNominalRasterResolution(
+            CoordinateReferenceSystem source, MathTransform gridToSource,
+            MathTransform toGeographic, double left, double top, int width, int height) throws Exception {
+        double x = left + width / 2d;
+        double y = top + height / 2d;
+        double[] origin = transform(gridToSource, new double[]{x, y});
+        double[] xNeighbor = transform(gridToSource, new double[]{x + 1d, y});
+        double[] yNeighbor = transform(gridToSource, new double[]{x, y + 1d});
+        Integer epsg;
+        try {
+            epsg = CRS.lookupEpsgCode(source, true);
+        } catch (org.geotools.api.referencing.FactoryException ignored) {
+            epsg = null;
+        }
+        if (Integer.valueOf(4326).equals(epsg)
+                || CRS.equalsIgnoreMetadata(source, CRS.decode("EPSG:4326", true))) {
+            origin = transform(toGeographic, origin);
+            xNeighbor = transform(toGeographic, xNeighbor);
+            yNeighbor = transform(toGeographic, yNeighbor);
+            double resolutionX = angularSpacing(origin, xNeighbor)
+                    * ImageryTileOptions.WEB_MERCATOR_METERS_PER_DEGREE;
+            double resolutionY = angularSpacing(origin, yNeighbor)
+                    * ImageryTileOptions.WEB_MERCATOR_METERS_PER_DEGREE;
+            return new NominalResolution(resolutionX, resolutionY,
+                    "SOURCE_PIXEL_SIZE_AT_WEB_MERCATOR_EQUATOR");
+        }
+        if (Integer.valueOf(3857).equals(epsg)
+                || CRS.equalsIgnoreMetadata(source, CRS.decode("EPSG:3857", true))) {
+            return new NominalResolution(Math.hypot(
+                    xNeighbor[0] - origin[0], xNeighbor[1] - origin[1]), Math.hypot(
+                    yNeighbor[0] - origin[0], yNeighbor[1] - origin[1]),
+                    "SOURCE_PIXEL_SIZE_IN_EPSG_3857");
+        }
+        return null;
+    }
+
+    private double angularSpacing(double[] origin, double[] neighbor) {
+        double longitude = neighbor[0] - origin[0];
+        longitude -= Math.rint(longitude / 360d) * 360d;
+        return Math.hypot(longitude, neighbor[1] - origin[1]);
+    }
+
+    private void calculateImageryZoom(GisFileSpatialMetadata metadata, Resolution resolution,
+            NominalResolution nominal) {
+        double representativeSpacing = Math.max(resolution.x, resolution.y);
+        double spacing = nominal == null ? representativeSpacing : Math.max(nominal.x(), nominal.y());
+        if (!Double.isFinite(spacing) || spacing <= 0) {
             metadata.setCalculationDetails(objectMapper.writeValueAsString(Map.of("reason", "OUTSIDE_WEB_MERCATOR_OR_INVALID_RESOLUTION")));
             return;
         }
         int nativeZoom = ImageryTileOptions.calculateNativeMaxZoom(spacing, WORLD_METERS, 256);
+        int recommendedZoom = Math.clamp(nativeZoom, 0, 22);
         metadata.setTileMatrixSetId("WebMercatorQuad");
         metadata.setTileWidth(256);
         metadata.setTileHeight(256);
-        metadata.setRecommendedMaxZoom(Math.clamp(nativeZoom, 0, 22));
-        metadata.setCalculationDetails(objectMapper.writeValueAsString(Map.of(
-                "method", "MAX_REPRESENTATIVE_PIXEL_SPACING_IN_EPSG_3857", "resolutionMeters", spacing,
-                "unconstrainedMaxZoom", nativeZoom, "rounding", "FLOOR_WITH_INTEGER_TOLERANCE",
-                "zoomBoundaryTolerance", ImageryTileOptions.ZOOM_BOUNDARY_TOLERANCE, "systemMaxZoom", 22)));
+        metadata.setRecommendedMaxZoom(recommendedZoom);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("method", nominal == null
+                ? "MAX_REPRESENTATIVE_PIXEL_SPACING_IN_EPSG_3857" : nominal.method());
+        details.put("sourceNominalResolutionMeters", spacing);
+        if (resolution.samples > 0 && Double.isFinite(representativeSpacing)) {
+            details.put("maxRepresentativeProjectedSpacingMeters", representativeSpacing);
+        }
+        details.put("unconstrainedMaxZoom", nativeZoom);
+        details.put("recommendedZoomResolutionMeters",
+                WORLD_METERS / (256d * Math.scalb(1d, recommendedZoom)));
+        details.put("rounding", "FLOOR_WITH_INTEGER_TOLERANCE");
+        details.put("zoomBoundaryTolerance", ImageryTileOptions.ZOOM_BOUNDARY_TOLERANCE);
+        details.put("systemMaxZoom", 22);
+        metadata.setCalculationDetails(objectMapper.writeValueAsString(details));
     }
 
     private void calculateTerrainZoom(GisFileSpatialMetadata metadata, GeoTiffReader reader,
@@ -323,6 +389,8 @@ public class RasterSpatialMetadataExtractor {
     }
 
     private static final class Resolution { private double x, y; private int samples; }
+
+    private record NominalResolution(double x, double y, String method) { }
 
     private static final class MaskReader implements AutoCloseable {
         private final FileImageInputStream input;

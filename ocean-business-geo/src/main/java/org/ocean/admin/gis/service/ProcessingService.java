@@ -156,9 +156,6 @@ public class ProcessingService {
         if (inputs.size() != paths.size()) {
             throw new IllegalStateException("处理输入快照与运行时资源数量不一致");
         }
-        if (command.processingType() == GisProcessingType.IMAGERY && inputs.size() != 1) {
-            throw new IllegalArgumentException("影像切片每个任务仅支持一个 GeoTIFF");
-        }
         for (int i = 0; i < inputs.size(); i++) {
             GisProcessingInput input = inputs.get(i);
             Path path = paths.get(i);

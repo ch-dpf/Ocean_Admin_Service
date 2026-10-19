@@ -18,6 +18,7 @@ import org.geotools.referencing.CRS;
 import org.geotools.renderer.lite.RendererUtilities;
 import org.geotools.renderer.lite.gridcoverage2d.GridCoverageRenderer;
 import org.geotools.styling.StyleBuilder;
+import org.locationtech.jts.index.strtree.STRtree;
 import org.ocean.admin.gis.dto.TaskProgressUnit;
 import org.ocean.admin.gis.dto.TaskStage;
 
@@ -34,6 +35,7 @@ import java.awt.image.SampleModel;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,6 +43,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Consumer;
 import tools.jackson.databind.ObjectMapper;
 
@@ -49,6 +52,7 @@ import tools.jackson.databind.ObjectMapper;
 public class GeoTiffTileGenerator {
 
     private static final double WEB_MERCATOR_LIMIT = 20_037_508.342789244;
+    private static final double GEOGRAPHIC_BOUNDARY_TOLERANCE = 1e-6;
     private static final int META_TILE_SIZE = 4;
     private static final int MIN_VISIBLE_PIXELS = 1;
     private static final long PROGRESS_REPORT_INTERVAL_NANOS = 2_000_000_000L;
@@ -66,170 +70,159 @@ public class GeoTiffTileGenerator {
         this.maxTileCount = maxTileCount;
     }
 
-    public void generate(Path input, Path output, ImageryTileOptions options,
-            Consumer<TaskStage> progressListener) {
-        generate(input, input, output, options, progressListener);
-    }
-
-    public void generate(Path input, Path metadataSource, Path output, ImageryTileOptions options,
-            Consumer<TaskStage> progressListener) {
-        Path source = input.toAbsolutePath().normalize();
-        GeoTiffReader reader = null;
+    /** 在读取大量像素前，按源分辨率规划各层覆盖范围并去重。 */
+    public MosaicPlan plan(List<Path> inputs, ImageryTileOptions options) {
+        if (inputs == null || inputs.isEmpty()) {
+            throw new IllegalArgumentException("影像切片至少需要一个 GeoTIFF");
+        }
+        List<SourceRaster> sources = new ArrayList<>();
+        ReferencedEnvelope bounds = new ReferencedEnvelope(coordinateReferenceSystem(options.targetCrs()));
+        ReferencedEnvelope geographicBounds = new ReferencedEnvelope(WGS84);
         try {
-            reader = new GeoTiffReader(source.toFile());
-            RasterSource inspected = inspect(reader);
-            GeoTiffPreprocessor.PreparedRaster direct = GeoTiffPreprocessor.PreparedRaster.direct(
-                    source, inspected.bounds(), inspected.width(), inspected.height());
-            generate(direct, metadataSource, output, options, progressListener);
+            for (Path input : inputs) {
+                Path path = input.toAbsolutePath().normalize();
+                if (!Files.isRegularFile(path) || !Files.isReadable(path)) {
+                    throw new IllegalArgumentException("GeoTIFF 不存在或不可读: " + path);
+                }
+                GeoTiffReader reader = new GeoTiffReader(path.toFile());
+                try {
+                    RasterSource raster = inspect(reader);
+                    ReferencedEnvelope sourceBounds = raster.bounds();
+                    if (options.targetCrs() == ImageryTileOptions.TargetCrs.EPSG_3857
+                            && CRS.equalsIgnoreMetadata(sourceBounds.getCoordinateReferenceSystem(), WGS84)) {
+                        sourceBounds = new ReferencedEnvelope(sourceBounds.getMinX(), sourceBounds.getMaxX(),
+                                Math.max(-85.0511287798066, sourceBounds.getMinY()),
+                                Math.min(85.0511287798066, sourceBounds.getMaxY()), WGS84);
+                    }
+                    ReferencedEnvelope target = clampTarget(sourceBounds.transform(
+                            coordinateReferenceSystem(options.targetCrs()), true), options.targetCrs());
+                    ReferencedEnvelope geographic = target.transform(WGS84, true);
+                    double resolutionX = targetResolution(raster.resolutionX(),
+                            sourceBounds.getCoordinateReferenceSystem(), options.targetCrs());
+                    double resolutionY = targetResolution(raster.resolutionY(),
+                            sourceBounds.getCoordinateReferenceSystem(), options.targetCrs());
+                    double nominalResolution = Math.max(resolutionX, resolutionY);
+                    int nativeZoom = Math.max(0, Math.min(ImageryTileOptions.MAX_ZOOM,
+                            ImageryTileOptions.calculateNativeMaxZoom(nominalResolution,
+                                    worldHeight(options.targetCrs()), ImageryTileOptions.TILE_SIZE)));
+                    sources.add(new SourceRaster(path, target, nativeZoom,
+                            nominalResolution, resolutionX * resolutionY, sources.size(),
+                            Files.size(path), Files.getLastModifiedTime(path)));
+                    bounds.expandToInclude(target);
+                    geographicBounds.expandToInclude(geographic);
+                } finally {
+                    reader.dispose();
+                }
+            }
         } catch (Exception ex) {
-            if (ex instanceof IllegalArgumentException || ex instanceof IllegalStateException) {
-                throw (RuntimeException) ex;
-            }
-            throw new IllegalStateException("GeoTIFF 影像切片失败: " + ex.getMessage(), ex);
-        } finally {
-            if (reader != null) {
-                reader.dispose();
-            }
+            throw new IllegalArgumentException("无法分析影像集合: " + ex.getMessage(), ex);
         }
-    }
-
-    public void generate(GeoTiffPreprocessor.PreparedRaster prepared, Path metadataSource,
-            Path output, ImageryTileOptions options,
-            Consumer<TaskStage> progressListener) {
-        long startedAt = System.nanoTime();
-        progressListener.accept(TaskStage.indeterminate(
-                "analyzing", "正在分析影像范围和切片层级"));
-        Path originalSource = metadataSource.toAbsolutePath().normalize();
-        Path target = output.toAbsolutePath().normalize();
-        log.info("[Imagery][Tile] 开始生成影像瓦片，处理分块数: {}, 原始文件: {}, 输出目录: {}, 切片选项: {}",
-                prepared.parts().size(), originalSource, target, options);
-        for (GeoTiffPreprocessor.PreparedPart part : prepared.parts()) {
-            if (!Files.isRegularFile(part.path()) || !Files.isReadable(part.path())) {
-                throw new IllegalArgumentException("GeoTIFF 分块不存在或不可读: " + part.path());
-            }
-        }
-        try {
-            Files.createDirectories(target);
-        } catch (IOException ex) {
-            throw new IllegalStateException("无法创建影像瓦片输出目录: " + target, ex);
+        int max = options.maxZoom() == null
+                ? sources.stream().mapToInt(SourceRaster::nativeZoom).max().orElseThrow()
+                : options.maxZoom();
+        int min = options.minZoom() == null
+                ? Math.min(max, calculateMinimumZoom(bounds, options.targetCrs())) : options.minZoom();
+        if (min > max) {
+            throw new IllegalArgumentException("影像最小层级不能大于集合最大层级");
         }
 
-        GeoTiffReader metadataReader = null;
-        PartReaderCache readerCache = new PartReaderCache(8);
-        PartImageCache imageCache = new PartImageCache(2);
-        try {
-            long analyzingStartedAt = System.nanoTime();
-            metadataReader = new GeoTiffReader(originalSource.toFile());
-            RasterSource rasterSource = inspect(metadataReader);
-            CoordinateReferenceSystem targetCrs = coordinateReferenceSystem(options.targetCrs());
-            ReferencedEnvelope targetBounds = clampTarget(rasterSource.bounds().transform(
-                    targetCrs, true), options.targetCrs());
-            ReferencedEnvelope geographicBounds = rasterSource.bounds().transform(WGS84, true);
-            ZoomRange zooms = resolveZooms(rasterSource, targetBounds, options);
-            long tileCount = countTiles(targetBounds, zooms, options.targetCrs());
-            if (tileCount > maxTileCount) {
-                throw new IllegalArgumentException("预计生成瓦片" + tileCount
-                        + "张，超过单任务上限" + maxTileCount
-                        + "张；可降低maxZoom或调整GIS_IMAGERY_MAX_TILE_COUNT");
-            }
-            log.info("[Imagery][Tile] 影像分析完成，尺寸: {}x{}，源范围: {}，目标范围: {}，"
-                            + "层级: {}-{}，预计瓦片: {}，耗时: {} ms",
-                    rasterSource.width(), rasterSource.height(), rasterSource.bounds(),
-                    targetBounds, zooms.min(), zooms.max(), tileCount,
-                    elapsedMillis(analyzingStartedAt));
-            progressListener.accept(TaskStage.determinate(
-                    "generating",
-                    "影像切片工作量已确定，共" + tileCount + "张瓦片",
-                    0,
-                    tileCount,
-                    TaskProgressUnit.TILE));
-
-            RasterSymbolizer symbolizer = new StyleBuilder().createRasterSymbolizer();
-            Interpolation interpolation = interpolation(options.resampling());
-
-            long completed = 0;
-            int lastReportedPercent = 0;
-            int lastLoggedPercent = 0;
-            long lastReportNanos = System.nanoTime();
-            for (int zoom = zooms.min(); zoom <= zooms.max(); zoom++) {
-                long zoomStartedAt = System.nanoTime();
-                long zoomCompletedBefore = completed;
-                TileRange range = tileRange(targetBounds, zoom, options.targetCrs());
-                long zoomTileCount = (long) (range.maxX() - range.minX() + 1)
-                        * (range.maxY() - range.minY() + 1);
-                log.info("[Imagery][Tile][z={}] 开始生成层级瓦片，范围: x={}-{}, y={}-{}，瓦片数: {}",
-                        zoom, range.minX(), range.maxX(), range.minY(), range.maxY(),
-                        zoomTileCount);
-                for (int x = range.minX(); x <= range.maxX(); x += META_TILE_SIZE) {
-                    int maxX = Math.min(range.maxX(), x + META_TILE_SIZE - 1);
-                    for (int y = range.minY(); y <= range.maxY(); y += META_TILE_SIZE) {
-                        int maxY = Math.min(range.maxY(), y + META_TILE_SIZE - 1);
-                        MetaTileRange metaTile = metaTileRange(
-                                zoom, x, maxX, y, maxY, options.targetCrs());
-                        try {
-                            BufferedImage rendered = renderMetaTile(
-                                    prepared, readerCache, imageCache,
-                                    symbolizer, interpolation,
-                                    metaTile, options);
-                            completed += splitAndWrite(rendered, metaTile, target, options);
-                        } catch (Exception ex) {
-                            throw new IllegalStateException("影像元瓦片处理失败: z=" + zoom
-                                    + ", x=" + x + "-" + maxX
-                                    + ", y=" + y + "-" + maxY, ex);
-                        }
-                        int currentPercent = processingPercent(completed, tileCount);
-                        long currentNanos = System.nanoTime();
-                        if (currentPercent > lastReportedPercent
-                                || currentNanos - lastReportNanos
-                                >= PROGRESS_REPORT_INTERVAL_NANOS) {
-                            lastReportedPercent = currentPercent;
-                            lastReportNanos = currentNanos;
-                            progressListener.accept(TaskStage.determinate(
-                                    "generating",
-                                    "正在生成影像瓦片："
-                                            + completed + "/" + tileCount + "张",
-                                    completed,
-                                    tileCount,
-                                    TaskProgressUnit.TILE));
-                        }
-                        if (currentPercent >= lastLoggedPercent + 5
-                                || completed == tileCount) {
-                            lastLoggedPercent = currentPercent;
-                            log.info("[Imagery][Tile] 切片进度: {}/{}（{}%），当前层级: {}",
-                                    completed, tileCount, currentPercent, zoom);
+        List<PlannedTile> tiles = new ArrayList<>();
+        long count = 0;
+        for (int zoom = min; zoom <= max; zoom++) {
+            Map<Long, Integer> masks = new TreeMap<>();
+            for (SourceRaster source : sources) {
+                if (options.maxZoom() == null && zoom > source.nativeZoom()) {
+                    continue;
+                }
+                TileRange range = tileRange(source.bounds(), zoom, options.targetCrs());
+                for (int x = range.minX(); x <= range.maxX(); x++) {
+                    for (int y = range.minY(); y <= range.maxY(); y++) {
+                        long key = ((long) (x / META_TILE_SIZE) << 32) | (y / META_TILE_SIZE & 0xffffffffL);
+                        int bit = 1 << ((y % META_TILE_SIZE) * META_TILE_SIZE + x % META_TILE_SIZE);
+                        int previous = masks.getOrDefault(key, 0);
+                        if ((previous & bit) == 0) {
+                            masks.put(key, previous | bit);
+                            if (++count > maxTileCount) {
+                                throw new IllegalArgumentException("预计生成瓦片超过单任务上限" + maxTileCount
+                                        + "张；可降低maxZoom或调整GIS_IMAGERY_MAX_TILE_COUNT");
+                            }
                         }
                     }
                 }
-                log.info("[Imagery][Tile][z={}] 层级瓦片生成完成，本层完成: {}，累计完成: {}/{}，耗时: {} ms",
-                        zoom, completed - zoomCompletedBefore, completed, tileCount,
-                        elapsedMillis(zoomStartedAt));
             }
-            progressListener.accept(TaskStage.determinate(
-                    "finalizing",
-                    "正在写入影像切片元数据",
-                    completed,
-                    tileCount,
-                    TaskProgressUnit.TILE));
-            long metadataStartedAt = System.nanoTime();
-            log.info("[Imagery][Tile] 开始写入切片元数据，输出目录: {}", target);
-            writeMetadata(target, originalSource, geographicBounds, zooms, options, tileCount);
-            log.info("[Imagery][Tile] 切片元数据写入完成，输出目录: {}, 耗时: {} ms",
-                    target, elapsedMillis(metadataStartedAt));
-            log.info("[Imagery][Tile] 影像瓦片生成完成，输出目录: {}, 瓦片总数: {}, 总耗时: {} ms",
-                    target, tileCount, elapsedMillis(startedAt));
-        } catch (IOException ex) {
-            throw new IllegalStateException("GeoTIFF 读取或瓦片写入失败: " + ex.getMessage(), ex);
+            for (Map.Entry<Long, Integer> entry : masks.entrySet()) {
+                int x = (int) (entry.getKey() >>> 32) * META_TILE_SIZE;
+                int y = (int) (entry.getKey().longValue()) * META_TILE_SIZE;
+                tiles.add(new PlannedTile(metaTileRange(zoom, x,
+                        Math.min(x + META_TILE_SIZE - 1, options.targetCrs().matrixWidth(zoom) - 1),
+                        y, Math.min(y + META_TILE_SIZE - 1, options.targetCrs().matrixHeight(zoom) - 1),
+                        options.targetCrs()), entry.getValue()));
+            }
+        }
+        log.info("[Imagery][Plan] 源文件: {}，层级: {}-{}，去重瓦片: {}，元瓦片: {}",
+                sources.size(), min, max, count, tiles.size());
+        return new MosaicPlan(List.copyOf(sources), geographicBounds,
+                new ZoomRange(min, max), List.copyOf(tiles), count);
+    }
+
+    public void generate(MosaicPlan plan, List<GeoTiffPreprocessor.PreparedRaster> rasters,
+            String name, Path output, ImageryTileOptions options, Consumer<TaskStage> progressListener) {
+        if (rasters.size() != plan.sources().size()) {
+            throw new IllegalArgumentException("预处理结果与集合输入数量不一致");
+        }
+        Path target = output.toAbsolutePath().normalize();
+        STRtree index = new STRtree();
+        try {
+            Files.createDirectories(target);
+            for (int i = 0; i < rasters.size(); i++) {
+                SourceRaster source = plan.sources().get(i);
+                source.validateUnchanged();
+                for (GeoTiffPreprocessor.PreparedPart part : rasters.get(i).parts()) {
+                    if (!Files.isReadable(part.path())) {
+                        throw new IllegalStateException("影像分块不可读: " + part.path());
+                    }
+                    ReferencedEnvelope bounds = part.bounds().transform(
+                            coordinateReferenceSystem(options.targetCrs()), true);
+                    index.insert(bounds, new IndexedPart(part, source, rasters.get(i).singleSource()));
+                }
+            }
+            index.build();
+            long completed = 0;
+            long lastReport = 0;
+            try (PartReaderCache readers = new PartReaderCache(8);
+                    PartImageCache images = new PartImageCache(2)) {
+                RasterSymbolizer symbolizer = new StyleBuilder().createRasterSymbolizer();
+                Interpolation interpolation = interpolation(options.resampling());
+                progressListener.accept(TaskStage.determinate("generating", "开始生成集合影像瓦片",
+                        0, plan.tileCount(), TaskProgressUnit.TILE));
+                for (PlannedTile tile : plan.tiles()) {
+                    BufferedImage rendered = renderMetaTile(index, readers, images,
+                            symbolizer, interpolation, tile.range(), options);
+                    try {
+                        completed += splitAndWrite(rendered, tile, target, options);
+                    } finally {
+                        rendered.flush();
+                    }
+                    long now = System.nanoTime();
+                    if (completed == plan.tileCount() || now - lastReport >= PROGRESS_REPORT_INTERVAL_NANOS) {
+                        lastReport = now;
+                        progressListener.accept(TaskStage.determinate("generating",
+                                "正在生成集合影像瓦片：" + completed + "/" + plan.tileCount(),
+                                completed, plan.tileCount(), TaskProgressUnit.TILE));
+                    }
+                }
+            }
+            for (SourceRaster source : plan.sources()) {
+                source.validateUnchanged();
+            }
+            if (completed != plan.tileCount()) {
+                throw new IllegalStateException("实际瓦片数量与集合计划不一致");
+            }
+            progressListener.accept(TaskStage.determinate("finalizing", "正在写入集合影像元数据",
+                    completed, completed, TaskProgressUnit.TILE));
+            writeMetadata(target, name, plan, options);
         } catch (Exception ex) {
-            if (ex instanceof IllegalArgumentException || ex instanceof IllegalStateException) {
-                throw (RuntimeException) ex;
-            }
-            throw new IllegalStateException("GeoTIFF 影像切片失败: " + ex.getMessage(), ex);
-        } finally {
-            readerCache.close();
-            imageCache.close();
-            if (metadataReader != null) {
-                metadataReader.dispose();
-            }
+            throw new IllegalStateException("影像集合切片失败: " + ex.getMessage(), ex);
         }
     }
 
@@ -252,26 +245,46 @@ public class GeoTiffTileGenerator {
                 || Math.abs(affine.getShearY()) > 1e-10)) {
             throw new IllegalArgumentException("首期影像切片不支持旋转或错切的 GeoTIFF 仿射变换");
         }
-        ReferencedEnvelope sourceBounds = new ReferencedEnvelope(reader.getOriginalEnvelope())
-                .transform(canonicalSourceCrs, true);
-        validateSourceBounds(sourceBounds, canonicalSourceCrs);
-        return new RasterSource(sourceBounds, gridRange.getSpan(0), gridRange.getSpan(1));
+        ReferencedEnvelope sourceBounds = normalizeSourceBounds(
+                new ReferencedEnvelope(reader.getOriginalEnvelope())
+                        .transform(canonicalSourceCrs, true),
+                canonicalSourceCrs);
+        double[] resolution = pixelResolution(gridToCrs, gridRange);
+        return new RasterSource(sourceBounds, gridRange.getSpan(0), gridRange.getSpan(1),
+                resolution[0], resolution[1]);
     }
 
-    private BufferedImage renderMetaTile(GeoTiffPreprocessor.PreparedRaster prepared,
-            PartReaderCache readerCache,
-            PartImageCache imageCache,
+    private double[] pixelResolution(MathTransform gridToCrs, GridEnvelope gridRange) throws Exception {
+        double x = gridRange.getLow(0) + gridRange.getSpan(0) / 2d;
+        double y = gridRange.getLow(1) + gridRange.getSpan(1) / 2d;
+        double[] grid = {x, y, x + 1d, y, x, y + 1d};
+        double[] world = new double[6];
+        gridToCrs.transform(grid, 0, world, 0, 3);
+        return new double[]{
+                Math.hypot(world[2] - world[0], world[3] - world[1]),
+                Math.hypot(world[4] - world[0], world[5] - world[1])};
+    }
+
+    private double targetResolution(double sourceResolution,
+            CoordinateReferenceSystem sourceCrs, ImageryTileOptions.TargetCrs targetCrs) {
+        boolean geographicSource = CRS.equalsIgnoreMetadata(sourceCrs, WGS84);
+        if (geographicSource && targetCrs == ImageryTileOptions.TargetCrs.EPSG_3857) {
+            return sourceResolution * ImageryTileOptions.WEB_MERCATOR_METERS_PER_DEGREE;
+        }
+        if (!geographicSource && targetCrs == ImageryTileOptions.TargetCrs.EPSG_4326) {
+            return sourceResolution / ImageryTileOptions.WEB_MERCATOR_METERS_PER_DEGREE;
+        }
+        return sourceResolution;
+    }
+
+    private BufferedImage renderMetaTile(STRtree index,
+            PartReaderCache readerCache, PartImageCache imageCache,
             RasterSymbolizer symbolizer, Interpolation interpolation,
             MetaTileRange metaTile, ImageryTileOptions options) throws Exception {
-        int imageType = options.transparent()
-                ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB;
-        BufferedImage rendered = new BufferedImage(
-                metaTile.pixelWidth(), metaTile.pixelHeight(), imageType);
+        BufferedImage rendered = new BufferedImage(metaTile.pixelWidth(), metaTile.pixelHeight(),
+                BufferedImage.TYPE_INT_ARGB_PRE);
         Graphics2D graphics = rendered.createGraphics();
         try {
-            graphics.setColor(options.transparent() ? new Color(0, 0, 0, 0) : Color.WHITE);
-            graphics.fillRect(0, 0, rendered.getWidth(), rendered.getHeight());
-            graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
             graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
                     options.resampling() == ImageryTileOptions.Resampling.NEAREST
                             ? RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR
@@ -279,26 +292,41 @@ public class GeoTiffTileGenerator {
             Rectangle rasterArea = new Rectangle(rendered.getWidth(), rendered.getHeight());
             AffineTransform worldToScreen = RendererUtilities.worldToScreenTransform(
                     metaTile.bounds(), rasterArea);
-            RenderingHints rendererHints = new RenderingHints(
-                    ImageN.KEY_INTERPOLATION, interpolation);
-            List<GeoTiffPreprocessor.PreparedPart> selected = selectParts(
-                    prepared, metaTile, options.targetCrs());
-            if (selected.isEmpty()) {
-                return rendered;
+            List<IndexedPart> selected = new ArrayList<>();
+            for (Object candidate : index.query(metaTile.bounds())) {
+                selected.add((IndexedPart) candidate);
             }
-            if (prepared.singleSource()) {
-                GridCoverageRenderer renderer = new GridCoverageRenderer(
-                        coordinateReferenceSystem(options.targetCrs()), metaTile.bounds(),
-                        rasterArea, worldToScreen, rendererHints);
-                renderer.setAdvancedProjectionHandlingEnabled(false);
-                renderer.setWrapEnabled(false);
-                renderer.paint(graphics, readerCache.reader(selected.getFirst().path()),
-                        readParameters(true), symbolizer, interpolation,
-                        options.transparent() ? null : Color.WHITE);
-            } else {
-                for (GeoTiffPreprocessor.PreparedPart part : selected) {
-                    drawPreparedPart(graphics, worldToScreen, imageCache,
-                            part, metaTile);
+            // 后绘制高分辨率源；同分辨率时按输入序号稳定覆盖，无效像素保留下层。
+            selected.sort(Comparator.comparingDouble((IndexedPart part) -> part.source().pixelArea())
+                    .reversed().thenComparingInt(part -> part.source().sequence())
+                    .thenComparingInt(part -> part.part().order()));
+            int next = 0;
+            while (next < selected.size()) {
+                int sequence = selected.get(next).source().sequence();
+                BufferedImage layer = new BufferedImage(rendered.getWidth(), rendered.getHeight(),
+                        BufferedImage.TYPE_INT_ARGB_PRE);
+                Graphics2D layerGraphics = layer.createGraphics();
+                try {
+                    layerGraphics.setRenderingHints(graphics.getRenderingHints());
+                    // 同源分块可能因重投影采样边缘相交；透明像素不得擦除已绘制的有效像素。
+                    while (next < selected.size() && selected.get(next).source().sequence() == sequence) {
+                        IndexedPart part = selected.get(next++);
+                        if (part.direct()) {
+                            GridCoverageRenderer renderer = new GridCoverageRenderer(
+                                    coordinateReferenceSystem(options.targetCrs()), metaTile.bounds(), rasterArea,
+                                    worldToScreen, new RenderingHints(ImageN.KEY_INTERPOLATION, interpolation));
+                            renderer.setAdvancedProjectionHandlingEnabled(false);
+                            renderer.setWrapEnabled(false);
+                            renderer.paint(layerGraphics, readerCache.reader(part.part().path()), readParameters(true),
+                                    symbolizer, interpolation, null);
+                        } else {
+                            drawPreparedPart(layerGraphics, worldToScreen, imageCache, part.part(), metaTile);
+                        }
+                    }
+                    graphics.drawImage(layer, 0, 0, null);
+                } finally {
+                    layerGraphics.dispose();
+                    layer.flush();
                 }
             }
         } finally {
@@ -324,39 +352,36 @@ public class GeoTiffTileGenerator {
         graphics.drawImage(image, pixelToScreen, null);
     }
 
-    private List<GeoTiffPreprocessor.PreparedPart> selectParts(
-            GeoTiffPreprocessor.PreparedRaster prepared, MetaTileRange metaTile,
-            ImageryTileOptions.TargetCrs targetCrs) throws Exception {
-        List<GeoTiffPreprocessor.PreparedPart> selected = new ArrayList<>();
-        CoordinateReferenceSystem target = coordinateReferenceSystem(targetCrs);
-        for (GeoTiffPreprocessor.PreparedPart part : prepared.parts()) {
-            ReferencedEnvelope bounds = part.bounds();
-            ReferencedEnvelope targetBounds = CRS.equalsIgnoreMetadata(
-                    bounds.getCoordinateReferenceSystem(), target)
-                    ? bounds : bounds.transform(target, true);
-            if (targetBounds.getMaxX() >= metaTile.bounds().getMinX()
-                    && targetBounds.getMinX() <= metaTile.bounds().getMaxX()
-                    && targetBounds.getMaxY() >= metaTile.bounds().getMinY()
-                    && targetBounds.getMinY() <= metaTile.bounds().getMaxY()) {
-                selected.add(part);
-            }
-        }
-        selected.sort(Comparator.comparingInt(GeoTiffPreprocessor.PreparedPart::order));
-        return selected;
-    }
-
-    private int splitAndWrite(BufferedImage rendered, MetaTileRange metaTile,
+    private int splitAndWrite(BufferedImage rendered, PlannedTile planned,
             Path output, ImageryTileOptions options) throws IOException {
+        MetaTileRange metaTile = planned.range();
         int written = 0;
         for (int x = metaTile.minX(); x <= metaTile.maxX(); x++) {
             Path tileDirectory = output.resolve(Integer.toString(metaTile.zoom()))
                     .resolve(Integer.toString(x));
             Files.createDirectories(tileDirectory);
             for (int y = metaTile.minY(); y <= metaTile.maxY(); y++) {
+                int bit = 1 << ((y - metaTile.minY()) * META_TILE_SIZE + x - metaTile.minX());
+                if ((planned.mask() & bit) == 0) {
+                    continue;
+                }
                 int sourceX = (x - metaTile.minX()) * ImageryTileOptions.TILE_SIZE;
                 int sourceY = (y - metaTile.minY()) * ImageryTileOptions.TILE_SIZE;
                 BufferedImage tile = rendered.getSubimage(sourceX, sourceY,
                         ImageryTileOptions.TILE_SIZE, ImageryTileOptions.TILE_SIZE);
+                if (!options.transparent()) {
+                    BufferedImage opaque = new BufferedImage(ImageryTileOptions.TILE_SIZE,
+                            ImageryTileOptions.TILE_SIZE, BufferedImage.TYPE_INT_RGB);
+                    Graphics2D graphics = opaque.createGraphics();
+                    try {
+                        graphics.setColor(Color.WHITE);
+                        graphics.fillRect(0, 0, opaque.getWidth(), opaque.getHeight());
+                        graphics.drawImage(tile, 0, 0, null);
+                    } finally {
+                        graphics.dispose();
+                    }
+                    tile = opaque;
+                }
                 int storedY = options.tileProfile().storedY(
                         options.targetCrs().matrixHeight(metaTile.zoom()), y);
                 Path tilePath = tileDirectory.resolve(
@@ -399,28 +424,30 @@ public class GeoTiffTileGenerator {
                 (maxY - minY + 1) * ImageryTileOptions.TILE_SIZE);
     }
 
-    private void writeMetadata(Path output, Path source, ReferencedEnvelope bounds,
-            ZoomRange zooms, ImageryTileOptions options, long tileCount) throws IOException {
-        double[] geographicBounds = {bounds.getMinX(), bounds.getMinY(),
-                bounds.getMaxX(), bounds.getMaxY()};
+    private void writeMetadata(Path output, String name, MosaicPlan plan,
+            ImageryTileOptions options) throws IOException {
+        ReferencedEnvelope bounds = plan.geographicBounds();
+        double[] geographicBounds = {bounds.getMinX(), bounds.getMinY(), bounds.getMaxX(), bounds.getMaxY()};
         Map<String, Object> tileJson = new LinkedHashMap<>();
         tileJson.put("tilejson", "3.0.0");
-        tileJson.put("name", fileName(source));
+        tileJson.put("name", name);
         tileJson.put("scheme", options.tileProfile().scheme());
         tileJson.put("crs", options.targetCrs().code());
         tileJson.put("tileMatrixSet", options.targetCrs().tileMatrixSet());
-        tileJson.put("tiles", new String[]{"{z}/{x}/{y}."
-                + options.outputFormat().extension()});
-        tileJson.put("minzoom", zooms.min());
-        tileJson.put("maxzoom", zooms.max());
+        tileJson.put("tiles", new String[]{"{z}/{x}/{y}." + options.outputFormat().extension()});
+        tileJson.put("minzoom", plan.zooms().min());
+        tileJson.put("maxzoom", plan.zooms().max());
         tileJson.put("bounds", geographicBounds);
         tileJson.put("format", options.outputFormat().extension());
-        objectMapper.writerWithDefaultPrettyPrinter()
-                .writeValue(output.resolve("tilejson.json").toFile(), tileJson);
 
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("type", options.tileProfile().manifestType());
-        manifest.put("source", source.toString());
+        manifest.put("sources", plan.sources().stream().map(source -> Map.of(
+                "path", source.path().toString(), "sequenceNo", source.sequence() + 1,
+                "sizeBytes", source.size(), "lastModified", source.modified().toString(),
+                "nativeMaxZoom", source.nativeZoom(),
+                "sourceNominalResolution", source.nominalResolution())).toList());
+        manifest.put("overlapRule", "RESOLUTION_THEN_INPUT_ORDER");
         manifest.put("createdAt", Instant.now().toString());
         manifest.put("targetCrs", options.targetCrs().code());
         manifest.put("tileMatrixSet", options.targetCrs().tileMatrixSet());
@@ -428,36 +455,12 @@ public class GeoTiffTileGenerator {
         manifest.put("format", options.outputFormat().name());
         manifest.put("resampling", options.resampling().name());
         manifest.put("transparent", options.transparent());
-        manifest.put("minZoom", zooms.min());
-        manifest.put("maxZoom", zooms.max());
-        manifest.put("tileCount", tileCount);
+        manifest.put("minZoom", plan.zooms().min());
+        manifest.put("maxZoom", plan.zooms().max());
+        manifest.put("tileCount", plan.tileCount());
         manifest.put("bounds", geographicBounds);
-        objectMapper.writerWithDefaultPrettyPrinter()
-                .writeValue(output.resolve("manifest.json").toFile(), manifest);
-    }
-
-    private ZoomRange resolveZooms(RasterSource source, ReferencedEnvelope bounds,
-            ImageryTileOptions options) {
-        double sourceResolution = Math.max(
-                bounds.getWidth() / source.width(), bounds.getHeight() / source.height());
-        double levelZeroSpan = worldHeight(options.targetCrs());
-        int nativeZoom = ImageryTileOptions.calculateNativeMaxZoom(
-                sourceResolution, levelZeroSpan, ImageryTileOptions.TILE_SIZE);
-        nativeZoom = Math.max(0, Math.min(ImageryTileOptions.MAX_ZOOM, nativeZoom));
-        int max = options.maxZoom() == null ? nativeZoom : options.maxZoom();
-        int min = options.minZoom() == null
-                ? Math.min(max, calculateMinimumZoom(bounds, options.targetCrs()))
-                : options.minZoom();
-        if (min > max) {
-            throw new IllegalArgumentException("影像最小层级" + min
-                    + "不能大于按源分辨率确定的最大层级" + max
-                    + "；请显式设置不小于最小层级的 maxZoom");
-        }
-        return new ZoomRange(min, max);
-    }
-
-    private int processingPercent(long completed, long total) {
-        return (int) Math.min(99L, completed * 100L / total);
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(output.resolve("manifest.json").toFile(), manifest);
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(output.resolve("tilejson.json").toFile(), tileJson);
     }
 
     private int calculateMinimumZoom(ReferencedEnvelope bounds,
@@ -474,33 +477,26 @@ public class GeoTiffTileGenerator {
         return ImageryTileOptions.MAX_ZOOM;
     }
 
-    private long countTiles(ReferencedEnvelope bounds, ZoomRange zooms,
-            ImageryTileOptions.TargetCrs targetCrs) {
-        long count = 0;
-        for (int zoom = zooms.min(); zoom <= zooms.max(); zoom++) {
-            TileRange range = tileRange(bounds, zoom, targetCrs);
-            count = Math.addExact(count, (long) (range.maxX() - range.minX() + 1)
-                    * (range.maxY() - range.minY() + 1));
-        }
-        return count;
-    }
-
     private TileRange tileRange(ReferencedEnvelope bounds, int zoom,
             ImageryTileOptions.TargetCrs targetCrs) {
         int matrixWidth = targetCrs.matrixWidth(zoom);
         int matrixHeight = targetCrs.matrixHeight(zoom);
         double minWorldX = worldMinX(targetCrs);
         double maxWorldY = worldMaxY(targetCrs);
-        int minX = clampTile((int) Math.floor((bounds.getMinX() - minWorldX)
-                / worldWidth(targetCrs) * matrixWidth), matrixWidth);
-        int maxX = clampTile((int) Math.floor((Math.nextDown(bounds.getMaxX()) - minWorldX)
-                / worldWidth(targetCrs) * matrixWidth), matrixWidth);
-        int minY = clampTile((int) Math.floor((maxWorldY
-                - Math.nextDown(bounds.getMaxY()))
-                / worldHeight(targetCrs) * matrixHeight), matrixHeight);
-        int maxY = clampTile((int) Math.floor((maxWorldY - bounds.getMinY())
-                / worldHeight(targetCrs) * matrixHeight), matrixHeight);
+        int minX = clampTile((int) Math.floor(snapTileCoordinate((bounds.getMinX() - minWorldX)
+                / worldWidth(targetCrs) * matrixWidth)), matrixWidth);
+        int maxX = clampTile((int) Math.ceil(snapTileCoordinate((bounds.getMaxX() - minWorldX)
+                / worldWidth(targetCrs) * matrixWidth)) - 1, matrixWidth);
+        int minY = clampTile((int) Math.floor(snapTileCoordinate((maxWorldY - bounds.getMaxY())
+                / worldHeight(targetCrs) * matrixHeight)), matrixHeight);
+        int maxY = clampTile((int) Math.ceil(snapTileCoordinate((maxWorldY - bounds.getMinY())
+                / worldHeight(targetCrs) * matrixHeight)) - 1, matrixHeight);
         return new TileRange(minX, maxX, minY, maxY);
+    }
+
+    private double snapTileCoordinate(double value) {
+        double integer = Math.rint(value);
+        return Math.abs(value - integer) <= 1e-7 ? integer : value;
     }
 
     private ReferencedEnvelope tileEnvelope(int zoom, int x, int y,
@@ -589,7 +585,7 @@ public class GeoTiffTileGenerator {
                 + identifier);
     }
 
-    private void validateSourceBounds(ReferencedEnvelope bounds,
+    private ReferencedEnvelope normalizeSourceBounds(ReferencedEnvelope bounds,
             CoordinateReferenceSystem sourceCrs) {
         if (!Double.isFinite(bounds.getMinX()) || !Double.isFinite(bounds.getMaxX())
                 || !Double.isFinite(bounds.getMinY()) || !Double.isFinite(bounds.getMaxY())
@@ -601,21 +597,35 @@ public class GeoTiffTileGenerator {
         double maxX = geographic ? 180d : WEB_MERCATOR_LIMIT;
         double minY = geographic ? -90d : -WEB_MERCATOR_LIMIT;
         double maxY = geographic ? 90d : WEB_MERCATOR_LIMIT;
-        double tolerance = geographic ? 1e-9 : 1e-3;
+        double tolerance = geographic ? GEOGRAPHIC_BOUNDARY_TOLERANCE : 1e-3;
         if (bounds.getMinX() < minX - tolerance || bounds.getMaxX() > maxX + tolerance
                 || bounds.getMinY() < minY - tolerance || bounds.getMaxY() > maxY + tolerance) {
             throw new IllegalArgumentException("GeoTIFF 范围超出源坐标系的有效切片区域；"
                     + "当前不支持跨日期变更线或0到360度经度范围");
         }
+        if (!geographic) {
+            return bounds;
+        }
+        return new ReferencedEnvelope(
+                snapGeographicBoundary(bounds.getMinX(), minX, maxX),
+                snapGeographicBoundary(bounds.getMaxX(), minX, maxX),
+                snapGeographicBoundary(bounds.getMinY(), minY, maxY),
+                snapGeographicBoundary(bounds.getMaxY(), minY, maxY),
+                sourceCrs);
+    }
+
+    private double snapGeographicBoundary(double value, double minimum, double maximum) {
+        if (value < minimum) {
+            return minimum;
+        }
+        if (value > maximum) {
+            return maximum;
+        }
+        return value;
     }
 
     private int clampTile(int value, int dimension) {
         return Math.max(0, Math.min(dimension - 1, value));
-    }
-
-    private String fileName(Path path) {
-        Path name = path.getFileName();
-        return name == null ? path.toString() : name.toString();
     }
 
     private static CoordinateReferenceSystem decode(String code) {
@@ -624,10 +634,6 @@ public class GeoTiffTileGenerator {
         } catch (Exception ex) {
             throw new ExceptionInInitializerError(ex);
         }
-    }
-
-    private long elapsedMillis(long startedAt) {
-        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 
     private static final class PartReaderCache implements AutoCloseable {
@@ -738,13 +744,30 @@ public class GeoTiffTileGenerator {
 
     private record PartImageKey(Path path, int level) { }
 
-    private record ZoomRange(int min, int max) { }
+    public record MosaicPlan(List<SourceRaster> sources, ReferencedEnvelope geographicBounds,
+            ZoomRange zooms, List<PlannedTile> tiles, long tileCount) { }
+
+    public record SourceRaster(Path path, ReferencedEnvelope bounds, int nativeZoom,
+            double nominalResolution, double pixelArea, int sequence, long size, FileTime modified) {
+        public void validateUnchanged() throws IOException {
+            if (Files.size(path) != size || !Files.getLastModifiedTime(path).equals(modified)) {
+                throw new IllegalStateException("处理期间源影像发生变化: " + path);
+            }
+        }
+    }
+
+    public record PlannedTile(MetaTileRange range, int mask) { }
+
+    private record IndexedPart(GeoTiffPreprocessor.PreparedPart part, SourceRaster source, boolean direct) { }
+
+    public record ZoomRange(int min, int max) { }
 
     private record TileRange(int minX, int maxX, int minY, int maxY) { }
 
-    private record RasterSource(ReferencedEnvelope bounds, int width, int height) { }
+    private record RasterSource(ReferencedEnvelope bounds, int width, int height,
+            double resolutionX, double resolutionY) { }
 
-    private record MetaTileRange(
+    public record MetaTileRange(
             int zoom,
             int minX,
             int maxX,

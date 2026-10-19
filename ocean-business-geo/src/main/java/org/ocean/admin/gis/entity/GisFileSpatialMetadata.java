@@ -20,7 +20,7 @@ public class GisFileSpatialMetadata {
     private Integer rasterWidth;
     private Integer rasterHeight;
     private Integer bandCount;
-    /** EPSG:3857 投影下沿两个像元轴的米/像元间距；超出有效域时为空。 */
+    /** 源像元在 Web Mercator 赤道处的名义米制间距；无法识别源 CRS 时使用有效域投影采样间距。 */
     private Double resolutionX;
     private Double resolutionY;
     /** 栅格分辨率统一为 m；矢量没有像元分辨率。 */
