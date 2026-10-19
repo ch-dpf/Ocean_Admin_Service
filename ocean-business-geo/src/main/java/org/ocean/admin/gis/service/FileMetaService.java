@@ -81,6 +81,8 @@ public class FileMetaService {
         if (gisFileMetaMapper.restoreDeletedById(id, LocalDateTime.now()) != 1) {
             throw new IllegalStateException("回收站文件恢复失败: " + id);
         }
+        deletedMeta.setDeleted(0);
+        dataSetService.updateTotalSize(null, deletedMeta);
         if ("COMPLETED".equals(deletedMeta.getMetadataStatus())) {
             dataSetService.incrementFileCount(deletedMeta.getDataSetId(), 1);
         }
@@ -129,6 +131,7 @@ public class FileMetaService {
         if (gisFileMetaMapper.insert(meta) != 1) {
             throw new IllegalStateException("文件元数据创建失败");
         }
+        dataSetService.updateTotalSize(null, meta);
         log.info("创建 GIS 文件元数据成功: id={}, dataSetId={}, storageKey={}",
                 meta.getId(), meta.getDataSetId(), meta.getStorageKey());
         return toVOWithCategory(meta);
@@ -177,6 +180,8 @@ public class FileMetaService {
         if (updated != 1) {
             throw new IllegalStateException("文件元数据更新失败: " + reqVO.getId());
         }
+        updatedMeta.setDeleted(existing.getDeleted());
+        dataSetService.updateTotalSize(existing, updatedMeta);
         boolean sourceChanged = !Objects.equals(existing.getStorageKey(), updatedMeta.getStorageKey())
                 || !Objects.equals(existing.getStorageType(), updatedMeta.getStorageType())
                 || !Objects.equals(existing.getSha256(), updatedMeta.getSha256())
@@ -188,7 +193,6 @@ public class FileMetaService {
             spatialMetadataService.invalidate(existing.getId());
         }
         updatedMeta.setCreateTime(existing.getCreateTime());
-        updatedMeta.setDeleted(existing.getDeleted());
         log.info("更新 GIS 文件元数据成功: id={}", reqVO.getId());
         return toVOWithCategory(getRequired(existing.getId()));
     }
@@ -200,6 +204,7 @@ public class FileMetaService {
         if (gisFileMetaMapper.deleteById(id) != 1) {
             throw new IllegalStateException("文件元数据删除失败: " + id);
         }
+        dataSetService.updateTotalSize(existing, null);
         if ("COMPLETED".equals(existing.getMetadataStatus())) {
             dataSetService.decrementFileCount(existing.getDataSetId(), 1);
         }

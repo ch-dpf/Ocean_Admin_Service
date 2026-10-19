@@ -82,15 +82,24 @@ public class FileSpatialMetadataService {
             if (locked == null) return null;
             spatialMapper.deleteByFileId(fileId);
             if (extracted != null) spatialMapper.insert(extracted);
+            GisFileMeta point = extracted == null ? null : spatialMapper.selectRepresentativePoint(fileId);
+            if (extracted != null && point == null) {
+                throw new IllegalStateException("空间元数据缺少可定位的代表点: " + fileId);
+            }
             String result = code != null ? "FAILED" : notApplicable ? "NOT_APPLICABLE" : "COMPLETED";
-            fileMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()
+            int updated = fileMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()
                     .eq(GisFileMeta::getId, fileId)
                     .set(GisFileMeta::getMetadataStatus, result)
                     .set(GisFileMeta::getMetadataLeaseExpiresAt, null)
                     .set(GisFileMeta::getMetadataErrorCode, code)
                     .set(GisFileMeta::getMetadataErrorMessage, abbreviate(message))
                     .set(GisFileMeta::getMetadataExtractedAt, LocalDateTime.now())
+                    .set(GisFileMeta::getRepresentativeLongitude, point == null ? null : point.getRepresentativeLongitude())
+                    .set(GisFileMeta::getRepresentativeLatitude, point == null ? null : point.getRepresentativeLatitude())
+                    .set(GisFileMeta::getRepresentativeLayerKey, point == null ? null : point.getRepresentativeLayerKey())
+                    .set(GisFileMeta::getRepresentativeExtentKind, point == null ? null : point.getRepresentativeExtentKind())
                     .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
+            if (updated != 1) throw new IllegalStateException("空间元数据结果提交失败: " + fileId);
             locked.setMetadataStatus(result);
             locked.setMetadataErrorMessage(abbreviate(message));
             return transferService.completeMetadataExtraction(locked, code == null);
@@ -108,6 +117,10 @@ public class FileSpatialMetadataService {
                 .set(GisFileMeta::getMetadataErrorCode, null)
                 .set(GisFileMeta::getMetadataErrorMessage, null)
                 .set(GisFileMeta::getMetadataExtractedAt, null)
+                .set(GisFileMeta::getRepresentativeLongitude, null)
+                .set(GisFileMeta::getRepresentativeLatitude, null)
+                .set(GisFileMeta::getRepresentativeLayerKey, null)
+                .set(GisFileMeta::getRepresentativeExtentKind, null)
                 .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
     }
 

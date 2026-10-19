@@ -1,6 +1,7 @@
 package org.ocean.admin.gis.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.kernel.audit.OperationLog;
@@ -77,6 +78,15 @@ public class DataSetController {
     @Operation(summary = "获取数据集详情")
     public ResponseResult<GisDataSetVO> getDataset(@PathVariable Long id) {
         return ResponseResult.success(dataSetService.getDatasetDetail(id));
+    }
+
+    @GetMapping("/{id}/footprints")
+    @Operation(summary = "获取数据集详情（含文件覆盖轮廓）")
+    public ResponseResult<GisDataSetVO> getDatasetFootprints(
+            @PathVariable Long id,
+            @Parameter(description = "拓扑保持简化容差，单位为度，范围0至1；0返回完整几何")
+            @RequestParam(defaultValue = "0.001") double simplifyTolerance) {
+        return ResponseResult.success(dataSetService.getDatasetFootprints(id, simplifyTolerance));
     }
 
 

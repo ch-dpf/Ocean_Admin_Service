@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
+import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
@@ -14,10 +15,16 @@ import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.vo.GisDataSetVO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * gis数据集服务
@@ -34,6 +41,26 @@ public class DataSetService {
     private final GisFileMetaMapper gisFileMetaMapper;
     private final GisFileSpatialMetadataMapper spatialMetadataMapper;
     private final FileUploadUtil fileUploadUtil;
+    private final ObjectMapper objectMapper;
+
+    /** 调用方必须在文件写入事务内提供变更前后快照；元数据解析状态不参与大小计算。 */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void updateTotalSize(GisFileMeta before, GisFileMeta after) {
+        Map<Long, Long> deltas = new TreeMap<>();
+        if (before != null) deltas.merge(before.getDataSetId(), -sizeContribution(before), Math::addExact);
+        if (after != null) deltas.merge(after.getDataSetId(), sizeContribution(after), Math::addExact);
+        // 涉及多个数据集时按 ID 顺序更新，避免相反方向的迁移产生锁顺序冲突。
+        for (var entry : deltas.entrySet()) {
+            if (entry.getValue() != 0 && gisDataSetMapper.adjustTotalSize(entry.getKey(), entry.getValue()) != 1) {
+                throw new IllegalStateException("数据集总大小更新失败或统计值异常: " + entry.getKey());
+            }
+        }
+    }
+
+    private long sizeContribution(GisFileMeta file) {
+        return Integer.valueOf(0).equals(file.getDeleted()) && "READY".equals(file.getUploadStatus())
+                ? file.getSizeBytes() : 0;
+    }
 
     public void incrementFileCount(Long dataSetId, long increment) {
         if (increment <= 0) {
@@ -68,6 +95,7 @@ public class DataSetService {
     }
 
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResult<List<GisDataSetVO>> getDataSetPage(
             Integer current, Integer size, Long categoryId, String dataSetName) {
         long currentPage = current == null || current < 1 ? 1L : current;
@@ -77,23 +105,30 @@ public class DataSetService {
         LambdaQueryWrapper<GisDataSet> queryWrapper = new LambdaQueryWrapper<GisDataSet>()
                 .eq(categoryId != null, GisDataSet::getCategoryId, categoryId)
                 .like(!normalizedDataSetName.isEmpty() , GisDataSet::getDataSetName, normalizedDataSetName)
-                .orderByDesc(GisDataSet::getCreateTime);
+                .orderByDesc(GisDataSet::getCreateTime)
+                .orderByDesc(GisDataSet::getId);
 
         Page<GisDataSet> page = gisDataSetMapper.selectPage(
                 new Page<>(currentPage, pageSize),
                 queryWrapper
         );
-        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(),
-                page.getRecords().stream().map(this::toVO).toList());
+        List<GisDataSetVO> records = page.getRecords().stream().map(this::toVO).toList();
+        populateFileInformation(records, false, 0);
+        populateFilePoints(records);
+        return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), records);
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public List<GisDataSetVO> getDataSets(Long categoryId, String dataSetName) {
         String normalizedDataSetName = dataSetName == null ? "" : dataSetName.trim();
         LambdaQueryWrapper<GisDataSet> queryWrapper = new LambdaQueryWrapper<GisDataSet>()
                 .eq(categoryId != null, GisDataSet::getCategoryId, categoryId)
                 .like(!normalizedDataSetName.isEmpty() , GisDataSet::getDataSetName, normalizedDataSetName)
-                .orderByDesc(GisDataSet::getCreateTime);
-        return gisDataSetMapper.selectList(queryWrapper).stream().map(this::toVO).toList();
+                .orderByDesc(GisDataSet::getCreateTime)
+                .orderByDesc(GisDataSet::getId);
+        List<GisDataSetVO> records = gisDataSetMapper.selectList(queryWrapper).stream().map(this::toVO).toList();
+        populateFileInformation(records, false, 0);
+        return records;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -110,6 +145,7 @@ public class DataSetService {
         dataSet.setDataSetCode(generateDataSetCode());
         dataSet.setDescription(reqVO.getDescription());
         dataSet.setFileCount(0);
+        dataSet.setTotalSizeBytes(0L);
         dataSet.setCreateTime(now);
         dataSet.setUpdateTime(now);
         dataSet.setDeleted(0);
@@ -177,7 +213,24 @@ public class DataSetService {
         log.info("删除 GIS 数据集成功: id={}", id);
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public GisDataSetVO getDatasetDetail(Long id) {
+        return loadDatasetInformation(id, false, 0);
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public GisDataSetVO getDatasetFootprints(Long id, double simplifyTolerance) {
+        validateSimplifyTolerance(simplifyTolerance);
+        return loadDatasetInformation(id, true, simplifyTolerance);
+    }
+
+    private void validateSimplifyTolerance(double tolerance) {
+        if (!Double.isFinite(tolerance) || tolerance < 0 || tolerance > 1) {
+            throw new IllegalArgumentException("轮廓简化容差必须为0至1之间的有限数值，单位为度");
+        }
+    }
+
+    private GisDataSetVO loadDatasetInformation(Long id, boolean includeFootprints, double tolerance) {
         if (id == null) {
             throw new IllegalArgumentException("数据集ID不能为空");
         }
@@ -185,7 +238,47 @@ public class DataSetService {
         if (dataSet == null) {
             throw new IllegalArgumentException("数据集不存在或已删除: " + id);
         }
-        return toVO(dataSet);
+        GisDataSetVO result = toVO(dataSet);
+        populateFileInformation(List.of(result), includeFootprints, tolerance);
+        return result;
+    }
+
+    private void populateFileInformation(List<GisDataSetVO> records, boolean includeFootprints, double tolerance) {
+        if (records.isEmpty()) return;
+        List<Long> ids = records.stream().map(GisDataSetVO::getId).toList();
+        Map<Long, GisDataSetVO.FileSummary> summaries = gisFileMetaMapper.selectDataSetFileSummaries(ids).stream()
+                .collect(Collectors.toMap(GisDataSetVO.FileSummary::getDataSetId, item -> item));
+        Map<Long, List<GisDataSetVO.FootprintRow>> footprints = includeFootprints
+                ? spatialMetadataMapper.selectDataSetFootprints(ids, tolerance).stream()
+                    .collect(Collectors.groupingBy(GisDataSetVO.FootprintRow::getDataSetId))
+                : Map.of();
+        for (GisDataSetVO record : records) {
+            GisDataSetVO.FileSummary summary = summaries.get(record.getId());
+            if (summary == null) {
+                summary = new GisDataSetVO.FileSummary();
+                summary.setDataSetId(record.getId());
+            }
+            record.setFileSummary(summary);
+            if (includeFootprints) {
+                List<GisDataSetVO.FootprintFeature> features = footprints.getOrDefault(record.getId(), List.of()).stream()
+                        .map(row -> new GisDataSetVO.FootprintFeature("Feature", row.getId().toString(),
+                                objectMapper.readTree(row.getGeoJson()),
+                                new GisDataSetVO.FootprintProperties(row.getFileId(), row.getFileName(), row.getLayerKey(),
+                                        row.getExtentKind(), tolerance > 0, tolerance)))
+                        .toList();
+                record.setFootprints(new GisDataSetVO.FootprintCollection("FeatureCollection", features));
+            }
+        }
+    }
+
+    private void populateFilePoints(List<GisDataSetVO> records) {
+        if (records.isEmpty()) return;
+        Map<Long, List<GisDataSetVO.FilePoint>> points = gisFileMetaMapper.selectDataSetFilePoints(
+                        records.stream().map(GisDataSetVO::getId).toList()).stream()
+                .collect(Collectors.groupingBy(GisDataSetVO.FilePoint::getDataSetId));
+        for (GisDataSetVO record : records) {
+            record.setFilePoints(points.getOrDefault(record.getId(), List.of()));
+        }
     }
 
     private void validateDataSetRequest(GisDataSetVO reqVO, boolean requireId) {
@@ -223,6 +316,7 @@ public class DataSetService {
         result.setDescription(dataSet.getDescription());
         result.setDataSetCode(dataSet.getDataSetCode());
         result.setFileCount(dataSet.getFileCount());
+        result.setTotalSizeBytes(dataSet.getTotalSizeBytes());
         result.setCreateTime(dataSet.getCreateTime());
         result.setUpdateTime(dataSet.getUpdateTime());
         return result;

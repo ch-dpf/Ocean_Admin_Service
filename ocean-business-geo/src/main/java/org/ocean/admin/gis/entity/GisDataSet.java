@@ -48,6 +48,9 @@ public class GisDataSet {
      */
     private Integer fileCount;
 
+    /** 未删除且上传完整的管理文件总大小（字节），包含配套文件。 */
+    private Long totalSizeBytes;
+
     /**
      * 数据集创建时间
      */

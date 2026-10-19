@@ -12,6 +12,7 @@ CREATE TABLE ocean_gis.gis_data_set (
     data_set_code   VARCHAR(64)  NOT NULL,
     description     VARCHAR(500),
     file_count      INTEGER      NOT NULL DEFAULT 0,
+    total_size_bytes BIGINT      NOT NULL DEFAULT 0,
     create_time     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted         INTEGER      NOT NULL DEFAULT 0,
@@ -19,6 +20,8 @@ CREATE TABLE ocean_gis.gis_data_set (
         CHECK (category_id BETWEEN 0 AND 2),
     CONSTRAINT ck_gis_data_set_file_count
         CHECK (file_count >= 0),
+    CONSTRAINT ck_gis_data_set_total_size
+        CHECK (total_size_bytes >= 0),
     CONSTRAINT ck_gis_data_set_deleted
         CHECK (deleted IN (0, 1)),
     CONSTRAINT uk_gis_data_set_code
@@ -26,6 +29,7 @@ CREATE TABLE ocean_gis.gis_data_set (
 );
 
 COMMENT ON TABLE ocean_gis.gis_data_set IS 'GIS 数据集';
+COMMENT ON COLUMN ocean_gis.gis_data_set.total_size_bytes IS '未删除且上传状态为 READY 的管理文件总大小（字节），包含配套文件，与元数据提取状态无关';
 COMMENT ON COLUMN ocean_gis.gis_data_set.category_id IS '数据类别：0-影像数据，1-地形数据，2-矢量数据';
 COMMENT ON COLUMN ocean_gis.gis_data_set.deleted IS '逻辑删除：0-未删除，1-已删除';
 
@@ -153,6 +157,10 @@ CREATE TABLE ocean_gis.gis_file_meta (
     metadata_error_code      VARCHAR(64),
     metadata_error_message   VARCHAR(1000),
     metadata_extracted_at    TIMESTAMP,
+    representative_longitude DOUBLE PRECISION,
+    representative_latitude  DOUBLE PRECISION,
+    representative_layer_key VARCHAR(255),
+    representative_extent_kind VARCHAR(32),
     create_time              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted                  INTEGER       NOT NULL DEFAULT 0,
@@ -161,6 +169,19 @@ CREATE TABLE ocean_gis.gis_file_meta (
     CONSTRAINT ck_gis_file_meta_metadata_status
         CHECK (metadata_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'NOT_APPLICABLE')),
     CONSTRAINT ck_gis_file_meta_metadata_version CHECK (metadata_version >= 0),
+    CONSTRAINT ck_gis_file_meta_representative_point
+        CHECK (
+            (representative_longitude IS NULL AND representative_latitude IS NULL
+             AND representative_layer_key IS NULL AND representative_extent_kind IS NULL)
+            OR (representative_longitude IS NOT NULL AND representative_latitude IS NOT NULL
+                AND representative_layer_key IS NOT NULL AND representative_extent_kind IS NOT NULL
+                AND representative_longitude BETWEEN -180 AND 180
+                AND representative_latitude BETWEEN -90 AND 90
+                AND representative_layer_key <> ''
+                AND representative_extent_kind IN ('RASTER_FOOTPRINT', 'VECTOR_ENVELOPE'))
+        ),
+    CONSTRAINT ck_gis_file_meta_completed_point
+        CHECK ((metadata_status = 'COMPLETED') = (representative_longitude IS NOT NULL)),
     CONSTRAINT ck_gis_file_meta_metadata_lease
         CHECK ((metadata_status = 'RUNNING') = (metadata_lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_gis_file_meta_size
@@ -191,6 +212,10 @@ COMMENT ON TABLE ocean_gis.gis_file_meta IS 'GIS 文件元数据';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_key IS '相对存储路径或对象存储 Key';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_type IS '存储类型：LOCAL、MINIO 或 S3';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.cleanup_status IS '失败文件资源清理状态：NOT_REQUIRED、PENDING、COMPLETED、FAILED';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_longitude IS '元数据完成时保存的文件代表点经度，EPSG:4326；分页直接读取';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_latitude IS '元数据完成时保存的文件代表点纬度，EPSG:4326';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_layer_key IS '代表点来源图层键；面按实际面积、线按实际长度选择主要分块';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_extent_kind IS '代表点来源范围类型；VECTOR_ENVELOPE 不保证点位于真实矢量要素内';
 
 CREATE UNIQUE INDEX uk_gis_file_meta_active_storage
     ON ocean_gis.gis_file_meta (storage_type, storage_key)

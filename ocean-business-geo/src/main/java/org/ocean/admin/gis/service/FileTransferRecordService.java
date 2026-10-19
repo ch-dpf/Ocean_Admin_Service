@@ -96,6 +96,7 @@ public class FileTransferRecordService {
     private final GisFileMetaMapper fileMetaMapper;
     private final GisFileTransferRecordItemMapper recordItemMapper;
     private final GisDataSetMapper dataSetMapper;
+    private final DataSetService dataSetService;
 
     public GisFileTransferRecord findImportRecordByRequestId(String requestId) {
         if (requestId == null || requestId.isBlank()) {
@@ -345,6 +346,7 @@ public class FileTransferRecordService {
         if (fileMetaMapper.insert(fileMeta) != 1) {
             throw new IllegalStateException("文件元数据写入失败: " + fileMeta.getOriginalName());
         }
+        dataSetService.updateTotalSize(null, fileMeta);
         item.setFileMetaId(fileMeta.getId());
         item.captureFileMetaSnapshot(fileMeta);
         item.setUpdateTime(now);

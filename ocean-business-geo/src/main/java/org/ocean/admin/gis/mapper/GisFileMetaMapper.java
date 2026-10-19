@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
+import org.ocean.admin.gis.vo.GisDataSetVO;
 import org.ocean.admin.gis.dto.GisFileQuery;
 
 import java.time.LocalDateTime;
@@ -18,6 +19,10 @@ import java.util.List;
  */
 @Mapper
 public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
+
+    List<GisDataSetVO.FileSummary> selectDataSetFileSummaries(@Param("ids") List<Long> ids);
+
+    List<GisDataSetVO.FilePoint> selectDataSetFilePoints(@Param("ids") List<Long> ids);
 
     Page<GisFileMetaVO> selectFilePage(Page<GisFileMetaVO> page,
             @Param("q") GisFileQuery query, @Param("deleted") int deleted);

@@ -65,6 +65,12 @@ public class GisFileMeta {
     private String metadataErrorMessage;
     private LocalDateTime metadataExtractedAt;
 
+    /** 元数据完成时保存的文件代表点（EPSG:4326），失效时与来源信息一并清空。 */
+    private Double representativeLongitude;
+    private Double representativeLatitude;
+    private String representativeLayerKey;
+    private String representativeExtentKind;
+
     /** 上传时间 */
     private LocalDateTime createTime;
 

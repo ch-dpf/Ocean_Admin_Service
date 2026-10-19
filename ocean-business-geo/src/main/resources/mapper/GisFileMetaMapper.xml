@@ -4,6 +4,29 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="org.ocean.admin.gis.mapper.GisFileMetaMapper">
 
+    <select id="selectDataSetFileSummaries" resultType="org.ocean.admin.gis.vo.GisDataSetVO$FileSummary">
+        SELECT fm.data_set_id, COUNT(*) AS managed_file_count,
+               COUNT(*) FILTER (WHERE fm.metadata_status = 'COMPLETED') AS footprint_file_count,
+               COUNT(*) FILTER (WHERE fm.metadata_status IN ('QUEUED', 'RUNNING')) AS pending_metadata_file_count,
+               COUNT(*) FILTER (WHERE fm.metadata_status = 'FAILED') AS failed_metadata_file_count,
+               COUNT(*) FILTER (WHERE fm.metadata_status = 'NOT_APPLICABLE') AS not_applicable_file_count
+        FROM ocean_gis.gis_file_meta fm
+        WHERE fm.deleted = 0 AND fm.upload_status = 'READY' AND fm.data_set_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        GROUP BY fm.data_set_id
+    </select>
+
+    <select id="selectDataSetFilePoints" resultType="org.ocean.admin.gis.vo.GisDataSetVO$FilePoint">
+        SELECT data_set_id, id AS file_id, original_name AS file_name,
+               representative_longitude AS longitude, representative_latitude AS latitude,
+               representative_layer_key AS layer_key, representative_extent_kind AS extent_kind
+        FROM ocean_gis.gis_file_meta
+        WHERE deleted = 0 AND upload_status = 'READY' AND metadata_status = 'COMPLETED'
+          AND data_set_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY data_set_id, id
+    </select>
+
     <sql id="queryEnvelope">
         <choose>
             <when test="q.west &gt; q.east">
@@ -73,6 +96,7 @@
         FROM ocean_gis.gis_file_meta
         WHERE id = #{id}
           AND deleted = 1
+        FOR UPDATE
     </select>
 
     <update id="restoreDeletedById">

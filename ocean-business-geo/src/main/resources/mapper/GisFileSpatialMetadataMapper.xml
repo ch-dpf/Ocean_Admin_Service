@@ -1,6 +1,47 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper">
+    <!-- 先选最高维度，再按实际面积/长度选主要分块；相同值按图层键和分块序号固定选择。 -->
+    <select id="selectRepresentativePoint" resultType="org.ocean.admin.gis.entity.GisFileMeta">
+        SELECT ST_X(chosen.point) AS representative_longitude,
+               ST_Y(chosen.point) AS representative_latitude,
+               chosen.layer_key AS representative_layer_key,
+               chosen.extent_kind AS representative_extent_kind
+        FROM (
+            SELECT sm.layer_key, sm.extent_kind,
+                   CASE WHEN ST_Dimension(part.geom) = 1
+                        THEN ST_LineInterpolatePoint(part.geom, 0.5)
+                        ELSE ST_PointOnSurface(part.geom)
+                   END AS point
+            FROM ocean_gis.gis_file_spatial_metadata sm
+            CROSS JOIN LATERAL ST_Dump(sm.geographic_extent) AS part
+            WHERE sm.file_meta_id = #{id} AND NOT ST_IsEmpty(part.geom)
+            ORDER BY ST_Dimension(part.geom) DESC,
+                     CASE ST_Dimension(part.geom)
+                         WHEN 2 THEN ST_Area(part.geom::geography)
+                         WHEN 1 THEN ST_Length(part.geom::geography)
+                         ELSE 0
+                     END DESC,
+                     sm.layer_key COLLATE "C", part.path
+            LIMIT 1
+        ) chosen
+    </select>
+    <select id="selectDataSetFootprints" resultType="org.ocean.admin.gis.vo.GisDataSetVO$FootprintRow">
+        SELECT sm.id, fm.data_set_id, fm.id AS file_id, fm.original_name AS file_name,
+               sm.layer_key, sm.extent_kind,
+               ST_AsGeoJSON(ST_ForcePolygonCCW(
+                   <choose>
+                       <when test="tolerance > 0">ST_SimplifyPreserveTopology(sm.geographic_extent, #{tolerance})</when>
+                       <otherwise>sm.geographic_extent</otherwise>
+                   </choose>
+               ), 15, 0) AS geo_json
+        FROM ocean_gis.gis_file_spatial_metadata sm
+        JOIN ocean_gis.gis_file_meta fm ON fm.id = sm.file_meta_id
+        WHERE fm.deleted = 0 AND fm.upload_status = 'READY' AND fm.metadata_status = 'COMPLETED'
+          AND fm.data_set_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY fm.data_set_id, fm.id, sm.layer_key
+    </select>
     <sql id="eligible">
         deleted = 0 AND upload_status = 'READY'
         AND (metadata_status = 'QUEUED'
@@ -14,6 +55,8 @@
     <select id="claim" resultType="org.ocean.admin.gis.entity.GisFileMeta" affectData="true" flushCache="true">
         UPDATE ocean_gis.gis_file_meta
         SET metadata_status = 'RUNNING', metadata_version = metadata_version + 1,
+            representative_longitude = NULL, representative_latitude = NULL,
+            representative_layer_key = NULL, representative_extent_kind = NULL,
             metadata_lease_expires_at = #{leaseExpiresAt}, update_time = CURRENT_TIMESTAMP
         WHERE id = #{id} AND <include refid="eligible"/>
         RETURNING *
@@ -44,6 +87,8 @@
         ), queued AS (
             UPDATE ocean_gis.gis_file_meta fm
             SET metadata_status = 'QUEUED', metadata_version = fm.metadata_version + 1,
+                representative_longitude = NULL, representative_latitude = NULL,
+                representative_layer_key = NULL, representative_extent_kind = NULL,
                 metadata_lease_expires_at = NULL, metadata_error_code = NULL,
                 metadata_error_message = NULL, metadata_extracted_at = NULL,
                 update_time = CURRENT_TIMESTAMP
