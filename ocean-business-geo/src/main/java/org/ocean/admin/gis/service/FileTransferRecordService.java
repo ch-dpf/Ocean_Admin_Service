@@ -4,20 +4,26 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileTransferRecord;
 import org.ocean.admin.gis.entity.GisFileTransferRecordItem;
-import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.dto.TaskStatus;
-import org.ocean.admin.gis.mapper.GisDataSetMapper;
+import org.ocean.admin.gis.dto.TaskStage;
+import org.ocean.admin.gis.dto.TaskProgressUnit;
+import org.ocean.admin.gis.dto.TaskProgressUpdate;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordItemMapper;
+import org.ocean.admin.gis.mapper.GisVectorMapper;
+import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.gis.vo.GisFileTransferRecordVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -31,6 +37,7 @@ import java.util.Set;
  * @since 2026-09-16
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class FileTransferRecordService {
     private static final String UPLOAD_CLEANUP_PENDING = "UPLOAD_CLEANUP_PENDING";
@@ -95,8 +102,129 @@ public class FileTransferRecordService {
     private final GisFileTransferRecordMapper recordMapper;
     private final GisFileMetaMapper fileMetaMapper;
     private final GisFileTransferRecordItemMapper recordItemMapper;
-    private final GisDataSetMapper dataSetMapper;
     private final DataSetService dataSetService;
+    private final GisVectorMapper vectorMapper;
+    private final AsyncTaskService progress;
+    private final FileUploadUtil files;
+
+    public GisFileTransferRecord requireImportRecord(String recordNo) {
+        String name = trimToNull(recordNo);
+        if (name == null || name.length() > 64) throw new IllegalArgumentException("导入批次编号不合法");
+        GisFileTransferRecord record = recordMapper.selectOne(new LambdaQueryWrapper<GisFileTransferRecord>()
+                .eq(GisFileTransferRecord::getRecordNo, name).eq(GisFileTransferRecord::getOperationType, "IMPORT"));
+        if (record == null) throw new IllegalArgumentException("导入批次不存在");
+        return record;
+    }
+
+    public GisFileTransferRecordItem runningImportItem(Long fileId) {
+        return recordItemMapper.selectOne(new LambdaQueryWrapper<GisFileTransferRecordItem>()
+                .eq(GisFileTransferRecordItem::getFileMetaId, fileId)
+                .eq(GisFileTransferRecordItem::getOperationStatus, "RUNNING"));
+    }
+
+    public void attachVectorImport(Long itemId, Long taskId) {
+        if (recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
+                .eq("id", itemId).eq("operation_status", "RUNNING").isNull("vector_import_task_id")
+                .set("vector_import_task_id", taskId).set("update_time", LocalDateTime.now())) != 1) {
+            throw new IllegalStateException("矢量任务关联失败");
+        }
+    }
+
+    private GisFileTransferRecordItem vectorImportItem(Long taskId) {
+        return recordItemMapper.selectOne(new LambdaQueryWrapper<GisFileTransferRecordItem>()
+                .eq(GisFileTransferRecordItem::getVectorImportTaskId, taskId));
+    }
+
+    public GisFileTransferRecord vectorImportRecord(Long taskId) {
+        GisFileTransferRecordItem item = vectorImportItem(taskId);
+        return item == null ? null : recordMapper.selectById(item.getRecordId());
+    }
+
+    /** 与矢量任务终态、图层可见性在同一事务内提交；文件统计已在上传登记时更新。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void completeVectorImport(Long taskId, boolean successful, String error) {
+        GisFileTransferRecordItem item = vectorImportItem(taskId);
+        if (item == null) return;
+        GisFileTransferRecord record = recordMapper.lockById(item.getRecordId());
+        if (record == null || !"RUNNING".equals(item.getOperationStatus())) throw new IllegalStateException("矢量导入明细状态不一致");
+        if (recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
+                .eq("id", item.getId()).eq("operation_status", "RUNNING")
+                .set("operation_status", successful ? "SUCCESS" : "FAILED")
+                .set("error_message", error).set("update_time", LocalDateTime.now())) != 1) {
+            throw new IllegalStateException("矢量导入结果提交失败");
+        }
+        publishImportProgress(refreshImportRecord(record));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void reopenVectorImport(Long taskId) {
+        GisFileTransferRecordItem item = vectorImportItem(taskId);
+        if (item != null) reopenImportItem(item);
+    }
+
+    /** 元数据失败重试复用原上传明细，提取成功后可继续自动生成图层。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void reopenMetadataImport(Long fileId) {
+        List<GisFileTransferRecordItem> items = recordItemMapper.selectList(new LambdaQueryWrapper<GisFileTransferRecordItem>()
+                .eq(GisFileTransferRecordItem::getFileMetaId, fileId)
+                .in(GisFileTransferRecordItem::getOperationStatus, "RUNNING", "FAILED")
+                .eq(GisFileTransferRecordItem::getUploadStatus, "READY"));
+        for (GisFileTransferRecordItem item : items) {
+            if (item.getVectorImportTaskId() != null) throw new IllegalStateException("文件已进入矢量入库阶段，请通过原导入批次重试");
+            if ("FAILED".equals(item.getOperationStatus())) reopenImportItem(item);
+        }
+    }
+
+    private void reopenImportItem(GisFileTransferRecordItem item) {
+        GisFileTransferRecord record = recordMapper.lockById(item.getRecordId());
+        if (record == null || !"IMPORT".equals(record.getOperationType())) throw new IllegalStateException("原导入批次不可用");
+        if (recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
+                .eq("id", item.getId()).eq("operation_status", "FAILED")
+                .set("operation_status", "RUNNING").set("error_message", null).set("update_time", LocalDateTime.now())) != 1) {
+            throw new IllegalStateException("导入明细已变化，请重新加载");
+        }
+        publishImportProgress(refreshImportRecord(record));
+    }
+
+    /** 通知仅在事务提交后发送，始终重新读取批次，避免并发文件的旧快照回退计数。 */
+    public void publishImportProgress(GisFileTransferRecord snapshot) {
+        if (snapshot == null) return;
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { publishCurrentImportProgress(snapshot); }
+            });
+        } else publishCurrentImportProgress(snapshot);
+    }
+
+    private void publishCurrentImportProgress(GisFileTransferRecord snapshot) {
+        synchronized (FileUploadService.requestLock(snapshot.getRequestId())) {
+            try {
+                GisFileTransferRecord record = findImportRecordByRequestId(snapshot.getRequestId());
+                if (record == null) return;
+                if (progress.getTaskInfo(record.getRecordNo()) == null) {
+                    if (record.getRecordStatus() != TaskStatus.RUNNING) return;
+                    progress.registerTask(record.getRecordNo(), record.getRequestId(), "GIS数据导入",
+                            record.getTotalCount(), "GIS_UPLOAD", TaskProgressUnit.FILE);
+                }
+                String message = switch (record.getCurrentStage()) {
+                    case "IMPORTING_VECTOR" -> "正在导入矢量要素";
+                    case "EXTRACTING_METADATA" -> "正在提取空间元数据";
+                    case "UPLOADING" -> "正在上传文件";
+                    default -> "GIS数据导入结束";
+                };
+                progress.updateProgress(record.getRecordNo(),
+                        TaskProgressUpdate.resultChanged(record.getCompletedCount(), record.getFailedCount()),
+                        TaskProgressUpdate.stageChanged(TaskStage.indeterminate(record.getCurrentStage(), message)));
+                if (record.getRecordStatus() != TaskStatus.RUNNING) {
+                    files.deleteEmptyBatchDirectory(record.getRecordNo());
+                    progress.finalizeTaskResult(record.getRecordNo(), "导入结束，成功" + record.getCompletedCount()
+                            + "个，失败" + record.getFailedCount() + "个");
+                }
+            } catch (RuntimeException ex) {
+                log.warn("导入进度通知失败，数据库结果已保留: recordNo={}, reason={}", snapshot.getRecordNo(), ex.getMessage());
+            }
+        }
+    }
 
     public GisFileTransferRecord findImportRecordByRequestId(String requestId) {
         if (requestId == null || requestId.isBlank()) {
@@ -331,7 +459,7 @@ public class FileTransferRecordService {
         return recordMapper.selectById(recordId);
     }
 
-    /** 文件传输完成后登记解析待办；导入成功计数由元数据结果推进。 */
+    /** 文件传输完成后登记解析待办；矢量文件继续等待要素入库。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public GisFileTransferRecord stageImportFile(
             Long recordId,
@@ -346,7 +474,7 @@ public class FileTransferRecordService {
         if (fileMetaMapper.insert(fileMeta) != 1) {
             throw new IllegalStateException("文件元数据写入失败: " + fileMeta.getOriginalName());
         }
-        dataSetService.updateTotalSize(null, fileMeta);
+        dataSetService.updateFileStatistics(null, fileMeta);
         item.setFileMetaId(fileMeta.getId());
         item.captureFileMetaSnapshot(fileMeta);
         item.setUpdateTime(now);
@@ -381,25 +509,18 @@ public class FileTransferRecordService {
                         .eq(GisFileTransferRecordItem::getFileMetaId, fileMeta.getId())
                         .eq(GisFileTransferRecordItem::getOperationStatus, "RUNNING"));
         if (items.isEmpty()) {
-            if (successful && "COMPLETED".equals(fileMeta.getMetadataStatus())) incrementAvailableFiles(fileMeta.getDataSetId());
             return null;
         }
         GisFileTransferRecordItem item = items.getFirst();
         GisFileTransferRecord record = recordMapper.lockById(item.getRecordId());
         if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) return null;
+        if (successful && item.getVectorImportTaskId() != null) return refreshImportRecord(record);
         int updated = recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
                 .eq("id", item.getId()).eq("operation_status", "RUNNING")
                 .set("operation_status", successful ? "SUCCESS" : "FAILED")
                 .set("error_message", fileMeta.getMetadataErrorMessage()).set("update_time", LocalDateTime.now()));
-        if (updated == 1 && successful && "COMPLETED".equals(fileMeta.getMetadataStatus())) incrementAvailableFiles(fileMeta.getDataSetId());
+        if (updated != 1) throw new IllegalStateException("空间元数据导入结果提交失败");
         return refreshImportRecord(record);
-    }
-
-    private void incrementAvailableFiles(Long dataSetId) {
-        if (dataSetMapper.update(null, new UpdateWrapper<GisDataSet>().eq("id", dataSetId)
-                .setSql("file_count = file_count + 1").set("update_time", LocalDateTime.now())) != 1) {
-            throw new IllegalStateException("数据集文件数更新失败: " + dataSetId);
-        }
     }
 
     private GisFileTransferRecord refreshImportRecord(GisFileTransferRecord record) {
@@ -410,11 +531,14 @@ public class FileTransferRecordService {
         boolean terminal = completed + failed == record.getTotalCount();
         TaskStatus state = !terminal ? TaskStatus.RUNNING : failed == 0 ? TaskStatus.COMPLETED
                 : completed == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED;
+        boolean metadataPending = items.stream().anyMatch(i -> "RUNNING".equals(i.getOperationStatus()) && i.getVectorImportTaskId() == null);
+        String stage = terminal ? state.name() : transferred < record.getTotalCount() ? "UPLOADING"
+                : metadataPending ? "EXTRACTING_METADATA" : "IMPORTING_VECTOR";
         recordMapper.update(null, new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", record.getId())
                 .set("completed_count", completed).set("failed_count", failed)
                 .set("record_status", state.name())
-                .set("current_stage", terminal ? state.name() : transferred == record.getTotalCount() ? "EXTRACTING_METADATA" : "UPLOADING")
+                .set("current_stage", stage)
                 .set("error_message", items.stream().filter(i -> "FAILED".equals(i.getOperationStatus()))
                         .map(GisFileTransferRecordItem::getErrorMessage).filter(java.util.Objects::nonNull).findFirst().orElse(null))
                 .set("finish_time", terminal ? LocalDateTime.now() : null)
@@ -518,8 +642,11 @@ public class FileTransferRecordService {
         }
     }
 
-    private GisFileTransferRecordVO.FileItemVO toFileItemVO(
+    public GisFileTransferRecordVO.FileItemVO toFileItemVO(
             GisFileTransferRecordItem item) {
+        var vectorTask = item.getVectorImportTaskId() == null ? null : vectorMapper.findTaskById(item.getVectorImportTaskId());
+        List<String> layerIds = vectorTask == null ? List.of() : vectorMapper.taskLayers(vectorTask.getId()).stream()
+                .map(layer -> layer.getId().toString()).toList();
         return new GisFileTransferRecordVO.FileItemVO(
                 item.getId(),
                 item.getFileMetaId(),
@@ -537,7 +664,10 @@ public class FileTransferRecordService {
                 item.getCleanupStatus(),
                 item.getErrorMessage(),
                 item.getCreateTime(),
-                item.getUpdateTime());
+                item.getUpdateTime(),
+                vectorTask == null ? null : vectorTask.getTaskNo(),
+                vectorTask == null ? null : vectorTask.getTaskStatus(),
+                layerIds);
     }
 
     private String trimToNull(String value) {

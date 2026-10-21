@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.kernel.common.PageResult;
@@ -37,60 +38,41 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DataSetService {
 
+    private final GisVectorMapper vectorMapper;
+
     private final GisDataSetMapper gisDataSetMapper;
     private final GisFileMetaMapper gisFileMetaMapper;
     private final GisFileSpatialMetadataMapper spatialMetadataMapper;
     private final FileUploadUtil fileUploadUtil;
     private final ObjectMapper objectMapper;
 
-    /** 调用方必须在文件写入事务内提供变更前后快照；元数据解析状态不参与大小计算。 */
+    /** 调用方必须在文件写入事务内提供变更前后快照；文件数与大小均只统计未删除的 READY 文件。 */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void updateTotalSize(GisFileMeta before, GisFileMeta after) {
-        Map<Long, Long> deltas = new TreeMap<>();
-        if (before != null) deltas.merge(before.getDataSetId(), -sizeContribution(before), Math::addExact);
-        if (after != null) deltas.merge(after.getDataSetId(), sizeContribution(after), Math::addExact);
+    public void updateFileStatistics(GisFileMeta before, GisFileMeta after) {
+        Map<Long, FileStatisticsDelta> deltas = new TreeMap<>();
+        if (before != null && contributesToStatistics(before)) {
+            deltas.merge(before.getDataSetId(), new FileStatisticsDelta(-1, -before.getSizeBytes()), FileStatisticsDelta::add);
+        }
+        if (after != null && contributesToStatistics(after)) {
+            deltas.merge(after.getDataSetId(), new FileStatisticsDelta(1, after.getSizeBytes()), FileStatisticsDelta::add);
+        }
         // 涉及多个数据集时按 ID 顺序更新，避免相反方向的迁移产生锁顺序冲突。
         for (var entry : deltas.entrySet()) {
-            if (entry.getValue() != 0 && gisDataSetMapper.adjustTotalSize(entry.getKey(), entry.getValue()) != 1) {
-                throw new IllegalStateException("数据集总大小更新失败或统计值异常: " + entry.getKey());
+            FileStatisticsDelta delta = entry.getValue();
+            if ((delta.count() != 0 || delta.sizeBytes() != 0)
+                    && gisDataSetMapper.adjustFileStatistics(entry.getKey(), delta.count(), delta.sizeBytes()) != 1) {
+                throw new IllegalStateException("数据集文件统计更新失败或统计值异常: " + entry.getKey());
             }
         }
     }
 
-    private long sizeContribution(GisFileMeta file) {
-        return Integer.valueOf(0).equals(file.getDeleted()) && "READY".equals(file.getUploadStatus())
-                ? file.getSizeBytes() : 0;
+    private boolean contributesToStatistics(GisFileMeta file) {
+        return Integer.valueOf(0).equals(file.getDeleted()) && "READY".equals(file.getUploadStatus());
     }
 
-    public void incrementFileCount(Long dataSetId, long increment) {
-        if (increment <= 0) {
-            return;
-        }
-        int updated = gisDataSetMapper.update(
-                null,
-                new LambdaUpdateWrapper<GisDataSet>()
-                        .eq(GisDataSet::getId, dataSetId)
-                        .setSql("file_count = file_count + " + increment)
-                        .set(GisDataSet::getUpdateTime, LocalDateTime.now())
-        );
-        if (updated != 1) {
-            throw new IllegalStateException("数据集文件数量更新失败: " + dataSetId);
-        }
-    }
-
-    public void decrementFileCount(Long dataSetId, long decrement) {
-        if (decrement <= 0) {
-            return;
-        }
-        int updated = gisDataSetMapper.update(
-                null,
-                new LambdaUpdateWrapper<GisDataSet>()
-                        .eq(GisDataSet::getId, dataSetId)
-                        .setSql("file_count = GREATEST(file_count - " + decrement + ", 0)")
-                        .set(GisDataSet::getUpdateTime, LocalDateTime.now())
-        );
-        if (updated != 1) {
-            throw new IllegalStateException("数据集文件数量更新失败: " + dataSetId);
+    private record FileStatisticsDelta(int count, long sizeBytes) {
+        private FileStatisticsDelta add(FileStatisticsDelta other) {
+            return new FileStatisticsDelta(Math.addExact(count, other.count), Math.addExact(sizeBytes, other.sizeBytes));
         }
     }
 
@@ -205,6 +187,9 @@ public class DataSetService {
         }
         if (gisFileMetaMapper.countAllByDataSetId(id) > 0) {
             throw new IllegalStateException("数据集下仍存在文件，请先彻底删除全部文件");
+        }
+        if (vectorMapper.countDataSetReferences(id) > 0) {
+            throw new IllegalStateException("数据集下仍存在矢量图层，请先删除全部图层");
         }
         if (gisDataSetMapper.deleteById(id) != 1) {
             throw new IllegalStateException("数据集删除失败: " + id);

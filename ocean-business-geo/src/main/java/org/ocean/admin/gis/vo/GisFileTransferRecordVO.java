@@ -59,6 +59,9 @@ public class GisFileTransferRecordVO {
             String cleanupStatus,
             String errorMessage,
             LocalDateTime createTime,
-            LocalDateTime updateTime) {
+            LocalDateTime updateTime,
+            String vectorTaskId,
+            String vectorImportStatus,
+            List<String> vectorLayerIds) {
     }
 }

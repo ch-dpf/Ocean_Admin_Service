@@ -18,6 +18,7 @@ import org.ocean.admin.gis.entity.GisFileTransferRecord;
 import org.ocean.admin.gis.entity.GisFileTransferRecordItem;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
+import org.ocean.admin.gis.vo.GisFileTransferRecordVO;
 import org.ocean.admin.kernel.audit.CurrentOperator;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -69,9 +70,30 @@ public class FileUploadService {
     private final FileUploadUtil fileUploadUtil;
     private final AsyncTaskService asyncTaskService;
     private final FileTransferRecordService fileTransferRecordService;
+    private final FileMetaService fileMetaService;
+    private final VectorImportService vectorImports;
     private final FileUploadConfig uploadConfig;
     private final Object capacityMonitor = new Object();
 
+    /** 只重试已完整上传的失败文件；批次内成功文件及已编辑的图层不重新导入。 */
+    public GisFileTransferRecordVO retryImport(String recordNo) {
+        GisFileTransferRecord snapshot = fileTransferRecordService.requireImportRecord(recordNo);
+        synchronized (requestLock(snapshot.getRequestId())) {
+            GisFileTransferRecord record = fileTransferRecordService.requireImportRecord(recordNo);
+            validateBatchOwner(record);
+            var failed = fileTransferRecordService.getImportItems(record.getId()).stream()
+                    .filter(item -> "FAILED".equals(item.getOperationStatus()) && "READY".equals(item.getUploadStatus())
+                            && item.getFileMetaId() != null).toList();
+            if (failed.isEmpty() && record.getRecordStatus() != TaskStatus.RUNNING) {
+                throw new IllegalStateException("批次没有可重试的已上传文件；传输失败的文件需要重新上传");
+            }
+            for (var item : failed) {
+                if (item.getVectorImportTaskId() == null) fileMetaService.retryMetadata(item.getFileMetaId());
+                else vectorImports.retryUploadTask(item.getVectorImportTaskId());
+            }
+            return fileTransferRecordService.getRecordDetail(recordNo);
+        }
+    }
     /**
      * 接收一个上传分块。首块创建服务端任务，后续请求通过 requestId 继续同一批次。
      *
@@ -388,11 +410,10 @@ public class FileUploadService {
                     taskId,
                     TaskProgressUpdate.resultChanged(
                             record.getCompletedCount(), record.getFailedCount()),
-                    TaskProgressUpdate.stageChanged(createByteStage(
-                            record.getCurrentStage(),
-                            "EXTRACTING_METADATA".equals(record.getCurrentStage()) ? "正在提取空间元数据" : "等待上传数据",
-                            record.getUploadedBytes(),
-                            record.getTotalBytes())),
+                    TaskProgressUpdate.stageChanged("UPLOADING".equals(record.getCurrentStage())
+                            ? createByteStage("UPLOADING", "等待上传数据", record.getUploadedBytes(), record.getTotalBytes())
+                            : TaskStage.indeterminate(record.getCurrentStage(),
+                                    "IMPORTING_VECTOR".equals(record.getCurrentStage()) ? "正在导入矢量要素" : "正在提取空间元数据")),
                     TaskProgressUpdate.overallProgressChanged(progressPercent(
                             record.getUploadedBytes(), record.getTotalBytes())));
             return;
@@ -635,6 +656,13 @@ public class FileUploadService {
         result.put("completedCount", record.getCompletedCount());
         result.put("failedCount", record.getFailedCount());
         result.put("status", record.getRecordStatus());
+        if (item != null) {
+            var fileResult = fileTransferRecordService.toFileItemVO(item);
+            result.put("fileMetaId", item.getFileMetaId());
+            result.put("vectorTaskId", fileResult.vectorTaskId());
+            result.put("vectorImportStatus", fileResult.vectorImportStatus());
+            result.put("vectorLayerIds", fileResult.vectorLayerIds());
+        }
         return result;
     }
 

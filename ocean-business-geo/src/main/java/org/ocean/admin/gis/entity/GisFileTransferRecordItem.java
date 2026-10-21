@@ -21,6 +21,9 @@ public class GisFileTransferRecordItem {
     /** 对应文件元数据；文件形成前失败时允许为空。 */
     private Long fileMetaId;
 
+    /** 自动矢量入库任务；上传批次在该任务完成后才计入成功。 */
+    private Long vectorImportTaskId;
+
     /** 文件在批次中的顺序。 */
     private Integer sequenceNo;
 

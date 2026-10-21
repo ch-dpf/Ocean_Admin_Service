@@ -14,8 +14,13 @@ import org.ocean.admin.gis.entity.GisDataSet;
 public interface GisDataSetMapper extends BaseMapper<GisDataSet> {
     @Update("""
             UPDATE ocean_gis.gis_data_set
-            SET total_size_bytes = total_size_bytes + #{delta}, update_time = CURRENT_TIMESTAMP
-            WHERE id = #{id} AND deleted = 0 AND total_size_bytes + #{delta} >= 0
+            SET file_count = file_count + #{countDelta},
+                total_size_bytes = total_size_bytes + #{sizeDelta},
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = #{id} AND deleted = 0
+              AND file_count + #{countDelta} >= 0
+              AND total_size_bytes + #{sizeDelta} >= 0
             """)
-    int adjustTotalSize(@Param("id") Long id, @Param("delta") long delta);
+    int adjustFileStatistics(@Param("id") Long id, @Param("countDelta") int countDelta,
+            @Param("sizeDelta") long sizeDelta);
 }

@@ -38,7 +38,7 @@ public class GisDataSetVO {
     @Schema(description = "数据集编码", accessMode = Schema.AccessMode.READ_ONLY)
     private String dataSetCode;
 
-    @Schema(description = "已就绪文件数量", accessMode = Schema.AccessMode.READ_ONLY)
+    @Schema(description = "未删除且上传完整的管理文件数量，与总大小同口径", accessMode = Schema.AccessMode.READ_ONLY)
     private Integer fileCount;
 
     @Schema(description = "未删除且上传完整的管理文件总大小（字节），包含配套文件，与元数据提取状态无关",

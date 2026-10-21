@@ -80,26 +80,19 @@
     </update>
     <update id="invalidateDataSetRasters">
         WITH previous AS MATERIALIZED (
-            SELECT id, metadata_status, deleted FROM ocean_gis.gis_file_meta
+            SELECT id FROM ocean_gis.gis_file_meta
             WHERE data_set_id = #{dataSetId} AND upload_status = 'READY'
               AND extension IN ('tif', 'tiff')
             ORDER BY id FOR UPDATE
-        ), queued AS (
-            UPDATE ocean_gis.gis_file_meta fm
-            SET metadata_status = 'QUEUED', metadata_version = fm.metadata_version + 1,
-                representative_longitude = NULL, representative_latitude = NULL,
-                representative_layer_key = NULL, representative_extent_kind = NULL,
-                metadata_lease_expires_at = NULL, metadata_error_code = NULL,
-                metadata_error_message = NULL, metadata_extracted_at = NULL,
-                update_time = CURRENT_TIMESTAMP
-            FROM previous p WHERE fm.id = p.id
-            RETURNING p.metadata_status, p.deleted
         )
-        UPDATE ocean_gis.gis_data_set
-        SET file_count = GREATEST(file_count - (
-                SELECT COUNT(*) FROM queued WHERE metadata_status = 'COMPLETED' AND deleted = 0
-            ), 0), update_time = CURRENT_TIMESTAMP
-        WHERE id = #{dataSetId}
+        UPDATE ocean_gis.gis_file_meta fm
+        SET metadata_status = 'QUEUED', metadata_version = fm.metadata_version + 1,
+            representative_longitude = NULL, representative_latitude = NULL,
+            representative_layer_key = NULL, representative_extent_kind = NULL,
+            metadata_lease_expires_at = NULL, metadata_error_code = NULL,
+            metadata_error_message = NULL, metadata_extracted_at = NULL,
+            update_time = CURRENT_TIMESTAMP
+        FROM previous p WHERE fm.id = p.id
     </update>
     <insert id="insert">
         INSERT INTO ocean_gis.gis_file_spatial_metadata

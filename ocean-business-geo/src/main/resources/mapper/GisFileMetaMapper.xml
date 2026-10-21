@@ -42,10 +42,7 @@
         JOIN ocean_gis.gis_data_set ds ON ds.id = fm.data_set_id
         WHERE fm.deleted = #{deleted}
         <if test="deleted == 0">AND ds.deleted = 0</if>
-        <choose>
-            <when test="q.metadataStatus != null">AND fm.metadata_status = #{q.metadataStatus}</when>
-            <when test="deleted == 0">AND fm.metadata_status = 'COMPLETED'</when>
-        </choose>
+        <if test="q.metadataStatus != null">AND fm.metadata_status = #{q.metadataStatus}</if>
         <if test="q.dataSetId != null">AND fm.data_set_id = #{q.dataSetId}</if>
         <if test="q.categoryId != null">AND ds.category_id = #{q.categoryId}</if>
         <if test="q.originalName != null">AND fm.original_name LIKE CONCAT('%', #{q.originalName}, '%')</if>

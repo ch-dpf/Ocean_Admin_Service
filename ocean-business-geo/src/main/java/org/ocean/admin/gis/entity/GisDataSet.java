@@ -44,7 +44,7 @@ public class GisDataSet {
     private String description;
 
     /**
-     * 文件总数
+     * 未删除且上传状态为 READY 的管理文件数量
      */
     private Integer fileCount;
 

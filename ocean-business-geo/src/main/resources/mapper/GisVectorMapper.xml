@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisVectorMapper">
+    <sql id="layerColumns">
+        l.id, l.import_task_id, l.data_set_id, l.source_file_id, l.layer_key, l.layer_name,
+        l.layer_status, l.feature_count, l.geometry_types::text AS geometry_types,
+        ST_AsGeoJSON(l.geographic_extent, 15, 0) AS geographic_extent,
+        l.data_version, l.deleted, l.create_time, l.update_time
+    </sql>
+    <sql id="featureColumns">
+        f.id, f.layer_id, ST_AsGeoJSON(ST_ForcePolygonCCW(f.geom), 15, 0) AS geometry_json,
+        f.properties::text AS properties_json, f.source_feature_id::text AS source_feature_id,
+        f.source_feature_index, f.version, f.create_time, f.update_time
+    </sql>
+    <select id="lockSource" resultType="org.ocean.admin.gis.entity.GisFileMeta">
+        SELECT * FROM ocean_gis.gis_file_meta WHERE id = #{id} AND deleted = 0 FOR UPDATE
+    </select>
+    <select id="findTaskByRequest" resultType="org.ocean.admin.gis.entity.GisVectorImportTask">
+        SELECT * FROM ocean_gis.gis_vector_import_task WHERE request_id = #{requestId}
+    </select>
+    <select id="findTask" resultType="org.ocean.admin.gis.entity.GisVectorImportTask">
+        SELECT * FROM ocean_gis.gis_vector_import_task WHERE task_no = #{taskNo}
+    </select>
+    <select id="findTaskById" resultType="org.ocean.admin.gis.entity.GisVectorImportTask">
+        SELECT * FROM ocean_gis.gis_vector_import_task WHERE id = #{id}
+    </select>
+    <insert id="insertTask">
+        INSERT INTO ocean_gis.gis_vector_import_task
+            (id, task_no, request_id, source_file_id, data_set_id, source_storage_key,
+             source_sha256, source_size_bytes, source_metadata_version, layer_name, split_mode, operator_id)
+        VALUES (#{t.id}, #{t.taskNo}, #{t.requestId}, #{t.sourceFileId}, #{t.dataSetId},
+            #{t.sourceStorageKey}, #{t.sourceSha256}, #{t.sourceSizeBytes}, #{t.sourceMetadataVersion},
+            #{t.layerName}, #{t.splitMode}, #{t.operatorId})
+    </insert>
+    <insert id="insertLayer">
+        INSERT INTO ocean_gis.gis_vector_layer
+            (id, import_task_id, data_set_id, source_file_id, layer_key, layer_name)
+        VALUES (#{l.id}, #{l.importTaskId}, #{l.dataSetId}, #{l.sourceFileId}, #{l.layerKey}, #{l.layerName})
+    </insert>
+    <sql id="eligible">
+        (task_status = 'QUEUED' OR (task_status = 'RUNNING' AND lease_expires_at &lt; CURRENT_TIMESTAMP))
+    </sql>
+    <select id="candidates" resultType="long">
+        SELECT id FROM ocean_gis.gis_vector_import_task WHERE <include refid="eligible"/>
+        ORDER BY create_time, id LIMIT #{limit}
+    </select>
+    <select id="claim" resultType="org.ocean.admin.gis.entity.GisVectorImportTask" affectData="true" flushCache="true">
+        UPDATE ocean_gis.gis_vector_import_task
+        SET task_status = 'RUNNING', version = version + 1, start_time = CURRENT_TIMESTAMP,
+            lease_expires_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes',
+            processed_feature_count = 0, error_message = NULL, error_feature_index = NULL,
+            finish_time = NULL, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND <include refid="eligible"/> RETURNING *
+    </select>
+    <select id="lockClaim" resultType="org.ocean.admin.gis.entity.GisVectorImportTask" flushCache="true">
+        SELECT * FROM ocean_gis.gis_vector_import_task
+        WHERE id = #{id} AND version = #{version} AND task_status = 'RUNNING'
+          AND lease_expires_at &gt; CURRENT_TIMESTAMP FOR UPDATE
+    </select>
+    <update id="renewLease">
+        UPDATE ocean_gis.gis_vector_import_task
+        SET lease_expires_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes', update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND version = #{version} AND task_status = 'RUNNING'
+          AND lease_expires_at &gt; CURRENT_TIMESTAMP
+    </update>
+    <update id="updateProgress">
+        UPDATE ocean_gis.gis_vector_import_task
+        SET processed_feature_count = #{count}, lease_expires_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes',
+            update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND version = #{version} AND task_status = 'RUNNING'
+    </update>
+    <update id="finishTask">
+        UPDATE ocean_gis.gis_vector_import_task
+        SET task_status = #{status}, processed_feature_count = #{count}, lease_expires_at = NULL,
+            error_feature_index = #{errorIndex}, error_message = #{error},
+            finish_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND version = #{version} AND task_status = 'RUNNING'
+    </update>
+    <update id="retry">
+        UPDATE ocean_gis.gis_vector_import_task SET task_status = 'QUEUED', version = version + 1,
+            error_message = NULL, error_feature_index = NULL, finish_time = NULL, start_time = NULL,
+            processed_feature_count = 0, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND task_status = 'FAILED'
+    </update>
+    <select id="taskLayers" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
+        SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        WHERE l.import_task_id = #{taskId} AND l.deleted = 0 ORDER BY l.id
+    </select>
+    <update id="resetLayers">
+        UPDATE ocean_gis.gis_vector_layer SET layer_status = 'IMPORTING', feature_count = 0,
+            geographic_extent = NULL, geometry_types = '[]'::jsonb, update_time = CURRENT_TIMESTAMP
+        WHERE import_task_id = #{taskId} AND deleted = 0
+    </update>
+    <delete id="deleteImportedFeatures">
+        DELETE FROM ocean_gis.gis_vector_feature
+        WHERE layer_id IN (SELECT id FROM ocean_gis.gis_vector_layer WHERE import_task_id = #{taskId})
+    </delete>
+    <update id="setLayersStatus">
+        UPDATE ocean_gis.gis_vector_layer SET layer_status = #{status}, update_time = CURRENT_TIMESTAMP
+        WHERE import_task_id = #{taskId} AND deleted = 0
+    </update>
+    <select id="pageLayers" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
+        SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
+        WHERE l.deleted = 0
+        <if test="dataSetId != null">AND l.data_set_id = #{dataSetId}</if>
+        ORDER BY l.id DESC
+    </select>
+    <select id="layer" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
+        SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
+        WHERE l.id = #{id} AND l.deleted = 0
+    </select>
+    <select id="lockLayer" resultType="org.ocean.admin.gis.entity.GisVectorLayer" flushCache="true">
+        SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
+        WHERE l.id = #{id} AND l.deleted = 0 FOR UPDATE OF l
+    </select>
+    <update id="refreshLayer">
+        UPDATE ocean_gis.gis_vector_layer l SET
+            feature_count = s.total,
+            geographic_extent = CASE WHEN s.total = 0 THEN NULL ELSE ST_SetSRID(s.bounds::geometry,4326) END,
+            geometry_types = COALESCE(s.types, '[]'::jsonb),
+            data_version = l.data_version + 1, update_time = CURRENT_TIMESTAMP
+        FROM (SELECT count(*) AS total, ST_Extent(geom) AS bounds,
+                jsonb_agg(DISTINCT GeometryType(geom) ORDER BY GeometryType(geom)) AS types
+              FROM ocean_gis.gis_vector_feature WHERE layer_id = #{id} AND deleted = 0) s
+        WHERE l.id = #{id} AND l.deleted = 0
+    </update>
+    <update id="deleteLayer">
+        UPDATE ocean_gis.gis_vector_layer SET deleted = 1, source_file_id = NULL,
+            data_version = data_version + 1, update_time = CURRENT_TIMESTAMP WHERE id = #{id} AND deleted = 0
+    </update>
+    <select id="firstGeometryError" resultType="org.ocean.admin.gis.vo.GisVectorVO$GeometryError">
+        SELECT v.feature_index, ST_IsValidReason(v.geom) AS reason
+        FROM (VALUES
+            <foreach collection="items" item="f" separator=",">
+                (#{f.sourceFeatureIndex,jdbcType=BIGINT}, ST_GeomFromGeoJSON(#{f.geometryJson}))
+            </foreach>
+        ) v(feature_index, geom)
+        WHERE NOT ST_IsValid(v.geom) LIMIT 1
+    </select>
+    <insert id="insertFeatures">
+        INSERT INTO ocean_gis.gis_vector_feature
+            (id, layer_id, geom, properties, source_feature_id, source_feature_index)
+        VALUES
+        <foreach collection="items" item="f" separator=",">
+            (#{f.id}, #{f.layerId}, ST_GeomFromGeoJSON(#{f.geometryJson}),
+             CAST(#{f.propertiesJson} AS jsonb), CAST(#{f.sourceFeatureId,jdbcType=VARCHAR} AS jsonb),
+             #{f.sourceFeatureIndex,jdbcType=BIGINT})
+        </foreach>
+    </insert>
+    <select id="features" resultType="org.ocean.admin.gis.entity.GisVectorFeature">
+        WITH candidates AS (
+        SELECT <include refid="featureColumns"/> FROM ocean_gis.gis_vector_feature f
+        WHERE f.layer_id = #{layerId} AND f.deleted = 0 AND f.id &gt; #{afterId}
+        <if test="west != null">
+            <choose>
+                <when test="west &lt;= east">
+                    AND ST_Intersects(f.geom, ST_MakeEnvelope(#{west},#{south},#{east},#{north},4326))
+                </when>
+                <otherwise>
+                    AND (ST_Intersects(f.geom, ST_MakeEnvelope(#{west},#{south},180,#{north},4326))
+                     OR ST_Intersects(f.geom, ST_MakeEnvelope(-180,#{south},#{east},#{north},4326)))
+                </otherwise>
+            </choose>
+        </if>
+        ORDER BY f.id LIMIT #{limit}
+        ), sized AS (
+            SELECT *, octet_length(geometry_json) + COALESCE(octet_length(properties_json),4) + 256 AS row_bytes
+            FROM candidates
+        ), bounded AS (
+            SELECT *, sum(row_bytes) OVER (ORDER BY id ROWS UNBOUNDED PRECEDING) AS total_bytes FROM sized
+        )
+        SELECT * FROM bounded WHERE total_bytes - row_bytes &lt; 8388608 ORDER BY id
+    </select>
+    <select id="feature" resultType="org.ocean.admin.gis.entity.GisVectorFeature">
+        SELECT <include refid="featureColumns"/> FROM ocean_gis.gis_vector_feature f
+        WHERE f.layer_id = #{layerId} AND f.id = #{id} AND f.deleted = 0
+    </select>
+    <update id="updateFeature">
+        UPDATE ocean_gis.gis_vector_feature SET geom = ST_GeomFromGeoJSON(#{f.geometryJson}),
+            properties = CAST(#{f.propertiesJson} AS jsonb), version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE layer_id = #{f.layerId} AND id = #{f.id} AND version = #{expected} AND deleted = 0
+    </update>
+    <update id="deleteFeature">
+        UPDATE ocean_gis.gis_vector_feature SET deleted = 1, version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE layer_id = #{layerId} AND id = #{id} AND version = #{expected} AND deleted = 0
+    </update>
+    <select id="countSourceReferences" resultType="long">
+        SELECT (SELECT count(*) FROM ocean_gis.gis_vector_layer WHERE source_file_id = #{fileId} AND deleted = 0)
+             + (SELECT count(*) FROM ocean_gis.gis_vector_import_task
+                WHERE source_file_id = #{fileId} AND task_status IN ('QUEUED','RUNNING'))
+    </select>
+    <select id="countDataSetReferences" resultType="long">
+        SELECT count(*) FROM ocean_gis.gis_vector_layer WHERE data_set_id = #{dataSetId} AND deleted = 0
+    </select>
+</mapper>

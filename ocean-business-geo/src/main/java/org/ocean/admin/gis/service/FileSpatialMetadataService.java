@@ -7,10 +7,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.geotools.referencing.CRS;
 import org.locationtech.jts.geom.*;
 import org.locationtech.jts.io.WKTWriter;
-import org.ocean.admin.gis.dto.TaskProgressUnit;
-import org.ocean.admin.gis.dto.TaskProgressUpdate;
-import org.ocean.admin.gis.dto.TaskStage;
-import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileSpatialMetadata;
 import org.ocean.admin.gis.entity.GisFileTransferRecord;
@@ -18,6 +14,7 @@ import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
+import org.ocean.admin.gis.util.GeoJsonFeatureReader;
 import org.ocean.admin.gis.util.RasterFootprintBuilder;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.springframework.stereotype.Service;
@@ -41,11 +38,12 @@ public class FileSpatialMetadataService {
     private static final Set<String> ATTACHMENTS = Set.of("prj", "tfw", "aux", "xml", "shx", "dbf", "cpg", "sbn", "sbx");
     private final GisFileSpatialMetadataMapper spatialMapper;
     private final RasterSpatialMetadataExtractor rasterExtractor;
+    private final GeoJsonFeatureReader geoJsonReader;
     private final GisFileMetaMapper fileMapper;
     private final GisDataSetMapper dataSetMapper;
     private final FileTransferRecordService transferService;
     private final FileUploadUtil files;
-    private final AsyncTaskService tasks;
+    private final VectorImportService vectors;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactions;
 
@@ -102,9 +100,10 @@ public class FileSpatialMetadataService {
             if (updated != 1) throw new IllegalStateException("空间元数据结果提交失败: " + fileId);
             locked.setMetadataStatus(result);
             locked.setMetadataErrorMessage(abbreviate(message));
+            if (extracted != null) vectors.enqueueUploadedSource(locked);
             return transferService.completeMetadataExtraction(locked, code == null);
         });
-        if (record != null) publish(record);
+        transferService.publishImportProgress(record);
     }
 
     /** 来源变更及人工重试共用同一失效操作；旧空间记录立即退出查询。 */
@@ -145,37 +144,6 @@ public class FileSpatialMetadataService {
 
     private JsonNode json(String value) {
         return value == null ? null : objectMapper.readTree(value);
-    }
-
-    private void publish(GisFileTransferRecord completedSnapshot) {
-        synchronized (FileUploadService.requestLock(completedSnapshot.getRequestId())) {
-            // 多文件并行完成时，按批次串行读取最新结果，不能用提交先后不定的旧快照回退计数。
-            GisFileTransferRecord record = transferService.findImportRecordByRequestId(completedSnapshot.getRequestId());
-            if (record == null) return;
-            publishCurrent(record);
-        }
-    }
-
-    private void publishCurrent(GisFileTransferRecord record) {
-        try {
-            if (tasks.getTaskInfo(record.getRecordNo()) == null) {
-                if (record.getRecordStatus() != TaskStatus.RUNNING) return;
-                tasks.registerTask(record.getRecordNo(), record.getRequestId(), "GIS数据导入",
-                        record.getTotalCount(), "GIS_UPLOAD", TaskProgressUnit.FILE);
-            }
-            tasks.updateProgress(record.getRecordNo(),
-                    TaskProgressUpdate.resultChanged(record.getCompletedCount(), record.getFailedCount()),
-                    TaskProgressUpdate.stageChanged(TaskStage.indeterminate(record.getCurrentStage(),
-                            record.getRecordStatus() == TaskStatus.RUNNING ? "正在导入GIS数据" : "GIS数据导入结束")));
-            if (record.getRecordStatus() != TaskStatus.RUNNING) {
-                files.deleteEmptyBatchDirectory(record.getRecordNo());
-                tasks.finalizeTaskResult(record.getRecordNo(), "导入结束，成功" + record.getCompletedCount()
-                        + "个，失败" + record.getFailedCount() + "个");
-            }
-        } catch (RuntimeException ex) {
-            // 实时通知失败不回滚已提交的导入结果，查询接口以数据库为准。
-            log.warn("发布空间元数据提取结果失败: recordNo={}", record.getRecordNo(), ex);
-        }
     }
 
     private Runnable leaseHeartbeat(GisFileMeta claim) {
@@ -229,7 +197,11 @@ public class FileSpatialMetadataService {
                 "lowerCorner", new double[]{bounds.extent.getMinX(), bounds.extent.getMinY()},
                 "upperCorner", new double[]{bounds.extent.getMaxX(), bounds.extent.getMaxY()})));
         metadata.setGeographicExtent(new WKTWriter().write(GEOMETRIES.toGeometry(bounds.extent)));
-        metadata.setExtraMetadata(objectMapper.writeValueAsString(Map.of("featureCount", bounds.features, "geometryTypes", bounds.types)));
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("featureCount", bounds.features);
+        extra.put("geometryTypes", bounds.types);
+        if (bounds.declaredCrs != null) extra.put("declaredCrs", bounds.declaredCrs);
+        metadata.setExtraMetadata(objectMapper.writeValueAsString(extra));
     }
 
     /** 流式读取几何坐标，跳过属性，不把整个大型 GeoJSON 加载进内存。 */
@@ -246,7 +218,14 @@ public class FileSpatialMetadataService {
                     if (value != JsonToken.VALUE_STRING) throw new MetadataException("INVALID_GEOJSON", "GeoJSON type 必须为字符串");
                     type = parser.getString();
                 }
-                case "crs" -> throw new MetadataException("UNSUPPORTED_CRS", "首期仅支持 RFC 7946 GeoJSON，请先转换为 WGS84 经度/纬度坐标");
+                case "crs" -> {
+                    try {
+                        if (depth == 0 && bounds.declaredCrs != null) throw new IllegalArgumentException("文件顶层 crs 不能重复");
+                        bounds.declaredCrs = geoJsonReader.readSourceCrs(parser, depth);
+                    } catch (IllegalArgumentException ex) {
+                        throw new MetadataException("UNSUPPORTED_CRS", ex.getMessage());
+                    }
+                }
                 case "features", "geometries" -> {
                     members.add(name);
                     if (value != JsonToken.START_ARRAY) throw new MetadataException("INVALID_GEOJSON", name + " 必须为数组");
@@ -318,6 +297,7 @@ public class FileSpatialMetadataService {
         private final Envelope extent = new Envelope();
         private final Set<String> types = new TreeSet<>();
         private long features;
+        private String declaredCrs;
     }
 
     private static final class MetadataException extends IllegalArgumentException {

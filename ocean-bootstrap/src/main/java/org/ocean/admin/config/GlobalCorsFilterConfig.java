@@ -24,7 +24,7 @@ public class GlobalCorsFilterConfig {
         config.setAllowedMethods(Arrays.asList(
                 "GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(Collections.singletonList("*"));
-        config.setExposedHeaders(Collections.singletonList("*"));
+        config.setExposedHeaders(Arrays.asList("*", "ETag"));
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
