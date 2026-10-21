@@ -334,6 +334,25 @@ CREATE TABLE ocean_gis.gis_vector_layer (
 CREATE INDEX idx_gis_vector_layer_dataset ON ocean_gis.gis_vector_layer(data_set_id, id) WHERE deleted = 0;
 CREATE INDEX idx_gis_vector_layer_source ON ocean_gis.gis_vector_layer(source_file_id) WHERE deleted = 0;
 
+CREATE TABLE ocean_gis.gis_vector_style (
+    id BIGINT PRIMARY KEY,
+    layer_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL CHECK (btrim(name) <> ''),
+    is_default BOOLEAN NOT NULL DEFAULT false,
+    definition JSONB NOT NULL,
+    version BIGINT NOT NULL DEFAULT 1 CHECK (version >= 1),
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (layer_id, name),
+    CHECK (jsonb_typeof(definition) = 'object'
+        AND definition @> '{"schemaVersion":1}'::jsonb
+        AND definition ? 'rules' AND jsonb_typeof(definition->'rules') = 'array')
+);
+CREATE UNIQUE INDEX uk_gis_vector_style_default ON ocean_gis.gis_vector_style(layer_id) WHERE is_default;
+COMMENT ON TABLE ocean_gis.gis_vector_style IS '图层样式方案及有序渲染规则，样式版本与要素数据版本独立';
+COMMENT ON COLUMN ocean_gis.gis_vector_style.definition IS 'schemaVersion=1；rules 按几何类别、属性及连续 zoom 匹配，首条命中生效';
+COMMENT ON COLUMN ocean_gis.gis_vector_style.is_default IS '同一图层至多一个默认方案，业务层保证默认方案不被删除';
+
 CREATE TABLE ocean_gis.gis_vector_feature (
     id BIGINT PRIMARY KEY,
     layer_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
@@ -360,6 +379,63 @@ COMMENT ON COLUMN ocean_gis.gis_vector_layer.geographic_extent IS '当前要素�
 COMMENT ON TABLE ocean_gis.gis_vector_feature IS '逐要素几何与属性；编辑不回写来源文件';
 COMMENT ON COLUMN ocean_gis.gis_vector_feature.geom IS 'SRID 4326，保留 XY 或 XYZ；空间索引和默认空间查询为二维';
 COMMENT ON COLUMN ocean_gis.gis_vector_feature.source_feature_index IS '来源文件内从零开始的要素序号；交互新增的要素为空';
+
+CREATE TABLE ocean_gis.gis_vector_generalization_build (
+    id BIGINT PRIMARY KEY,
+    layer_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
+    data_version BIGINT NOT NULL,
+    policy_version BIGINT NOT NULL,
+    policy JSONB NOT NULL,
+    build_status VARCHAR(20) NOT NULL DEFAULT 'QUEUED'
+        CHECK (build_status IN ('QUEUED','RUNNING','READY','FAILED','SUPERSEDED')),
+    attempt BIGINT NOT NULL DEFAULT 0,
+    completed_zoom INTEGER NOT NULL DEFAULT -1,
+    max_tile_bytes BIGINT NOT NULL DEFAULT 0,
+    error_message VARCHAR(1000),
+    lease_expires_at TIMESTAMP,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finish_time TIMESTAMP,
+    CHECK ((build_status = 'RUNNING') = (lease_expires_at IS NOT NULL)),
+    CHECK ((build_status IN ('READY','FAILED','SUPERSEDED')) = (finish_time IS NOT NULL))
+);
+CREATE UNIQUE INDEX uk_vector_generalization_pending ON ocean_gis.gis_vector_generalization_build(layer_id)
+    WHERE build_status = 'QUEUED';
+CREATE INDEX idx_vector_generalization_queue ON ocean_gis.gis_vector_generalization_build(build_status,lease_expires_at,create_time);
+
+CREATE TABLE ocean_gis.gis_vector_generalization (
+    layer_id BIGINT PRIMARY KEY REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
+    policy JSONB NOT NULL CHECK (jsonb_typeof(policy) = 'object'),
+    policy_version BIGINT NOT NULL DEFAULT 1 CHECK (policy_version > 0),
+    published_build_id BIGINT REFERENCES ocean_gis.gis_vector_generalization_build(id),
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE ocean_gis.gis_vector_generalized_feature (
+    build_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_generalization_build(id) ON DELETE CASCADE,
+    zoom INTEGER NOT NULL CHECK (zoom BETWEEN 0 AND 15),
+    representation_id VARCHAR(64) NOT NULL,
+    category VARCHAR(10) NOT NULL CHECK (category IN ('LINE','POLYGON')),
+    properties JSONB NOT NULL,
+    geom public.geometry(Geometry,3857) NOT NULL,
+    feature_count BIGINT NOT NULL CHECK (feature_count > 0),
+    PRIMARY KEY(build_id,zoom,representation_id),
+    CHECK (NOT public.ST_IsEmpty(geom) AND public.ST_IsValid(geom))
+);
+CREATE INDEX idx_vector_generalized_geom ON ocean_gis.gis_vector_generalized_feature USING GIST(geom);
+
+CREATE TABLE ocean_gis.gis_vector_generalized_member (
+    build_id BIGINT NOT NULL,
+    zoom INTEGER NOT NULL,
+    representation_id VARCHAR(64) NOT NULL,
+    feature_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_feature(id) ON DELETE CASCADE,
+    PRIMARY KEY(build_id,zoom,representation_id,feature_id),
+    FOREIGN KEY(build_id,zoom,representation_id)
+        REFERENCES ocean_gis.gis_vector_generalized_feature(build_id,zoom,representation_id) ON DELETE CASCADE
+);
+COMMENT ON TABLE ocean_gis.gis_vector_generalization IS '图层概化策略与原子发布指针；样式与原始要素独立';
+COMMENT ON TABLE ocean_gis.gis_vector_generalization_build IS '可恢复概化待办，固定源数据及策略版本；仅完整校验后发布';
+COMMENT ON TABLE ocean_gis.gis_vector_generalized_feature IS '显示用二维概化几何；不得作为原始要素编辑依据';
+COMMENT ON TABLE ocean_gis.gis_vector_generalized_member IS '概化对象到原始要素的去重成员关系';
 
 CREATE TABLE ocean_gis.gis_file_transfer_record_item (
     id                  BIGINT        PRIMARY KEY,

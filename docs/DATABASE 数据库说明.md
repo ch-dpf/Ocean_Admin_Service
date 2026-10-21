@@ -22,6 +22,7 @@ gis_file_spatial_metadata  文件各图层空间元数据（源 CRS、范围、�
 gis_vector_import_task  可恢复矢量导入任务、幂等请求及来源快照
 gis_vector_layer        可编辑矢量图层及当前要素数量、范围、数据版本
 gis_vector_feature      逐要素真实几何、JSONB属性与编辑版本
+gis_vector_style        图层样式方案、默认选择及独立版本，规则定义使用JSONB
 gis_processing_task     静态瓦片处理任务及完整参数快照
 gis_processing_input    处理输入快照（上传、受控工作空间、已管理文件）
 gis_tile_set            一次处理任务唯一生成的静态瓦片集
@@ -40,6 +41,8 @@ GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验
 `gis_file_transfer_record_item.vector_import_task_id` 以可空唯一外键关联自动矢量任务，和元数据结果在同一事务创建；非矢量文件及元数据失败文件为空。自动入库期间原明细维持 RUNNING，阶段为 IMPORTING_VECTOR；任务完成、图层 READY 及明细 SUCCESS 同事务提交，失败则明细 FAILED。批次按所有明细汇总成功、失败和部分失败。重试复用原明细与矢量任务，显式从已管理文件创建的任务不关联上传明细。
 
 要素更新通过 version 校验，服务层在图层行锁内执行修改，同事务重算数量、范围和几何类型并递增 data_version。最后一个要素删除后范围为空。图层逻辑删除后所有要素退出查询并解除来源文件引用；未删除图层及排队、执行中的任务会阻止来源文件删除或变更。任务中的来源快照保留，在文件最终删除时 source_file_id 允许置空。
+
+`gis_vector_style.layer_id` 外键关联矢量图层，物理删除图层时级联删除方案，(layer_id,name) 唯一。is_default 的部分唯一索引保证每层至多一个默认方案；业务在新图层事务内创建默认方案并禁止直接删除默认方案，切换时原方案与目标方案在同一事务更新。definition须为含 schemaVersion=1 和rules数组的JSONB对象，详细条件和符号约束由 `VectorStyleRules` 校验。样式 version 独立于 feature.version 和 layer.data_version，修改定义或默认选择均不影响要素数据、统计范围及游标有效性。
 
 `gis_file_meta.metadata_status` 为 QUEUED、RUNNING、COMPLETED、FAILED 或 NOT_APPLICABLE。metadata_version 和 metadata_lease_expires_at 用于领取与过期执行隔离。空间元数据与文件 COMPLETED 状态在同一事务提交；矢量 GeoJSON 的原导入批次成功计数推迟到要素图层 READY。数据集文件数不随元数据或矢量入库状态变化；图层可用性应查询矢量任务及图层状态。
 

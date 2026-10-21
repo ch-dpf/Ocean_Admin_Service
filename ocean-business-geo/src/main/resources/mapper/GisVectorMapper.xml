@@ -195,4 +195,162 @@
     <select id="countDataSetReferences" resultType="long">
         SELECT count(*) FROM ocean_gis.gis_vector_layer WHERE data_set_id = #{dataSetId} AND deleted = 0
     </select>
+    <select id="styles" resultType="org.ocean.admin.gis.entity.GisVectorStyle">
+        SELECT id, layer_id, name, is_default, version, create_time, update_time
+        FROM ocean_gis.gis_vector_style WHERE layer_id = #{layerId} ORDER BY is_default DESC, id
+    </select>
+    <select id="style" resultType="org.ocean.admin.gis.entity.GisVectorStyle">
+        SELECT id, layer_id, name, is_default, definition::text AS definition_json, version, create_time, update_time
+        FROM ocean_gis.gis_vector_style WHERE layer_id = #{layerId} AND id = #{id}
+    </select>
+    <select id="defaultStyle" resultType="org.ocean.admin.gis.entity.GisVectorStyle">
+        SELECT id, layer_id, name, is_default, definition::text AS definition_json, version, create_time, update_time
+        FROM ocean_gis.gis_vector_style WHERE layer_id = #{layerId} AND is_default
+    </select>
+    <insert id="insertStyle">
+        INSERT INTO ocean_gis.gis_vector_style(id, layer_id, name, is_default, definition)
+        VALUES(#{s.id}, #{s.layerId}, #{s.name}, #{s.isDefault}, CAST(#{s.definitionJson} AS jsonb))
+    </insert>
+    <update id="updateStyle">
+        UPDATE ocean_gis.gis_vector_style SET name = #{s.name}, definition = CAST(#{s.definitionJson} AS jsonb),
+            version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{s.id} AND layer_id = #{s.layerId} AND version = #{expected}
+    </update>
+    <update id="clearDefaultStyle">
+        UPDATE ocean_gis.gis_vector_style SET is_default = false, version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE layer_id = #{layerId} AND is_default
+    </update>
+    <update id="setDefaultStyle">
+        UPDATE ocean_gis.gis_vector_style SET is_default = true, version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND layer_id = #{layerId} AND version = #{expected}
+    </update>
+    <delete id="deleteStyle">
+        DELETE FROM ocean_gis.gis_vector_style
+        WHERE id = #{id} AND layer_id = #{layerId} AND version = #{expected} AND NOT is_default
+    </delete>
+    <select id="setTileQueryTimeout" resultType="string">
+        SELECT set_config('statement_timeout', CAST(#{milliseconds} AS text), true) || set_config('jit','off',true)
+    </select>
+
+    <!-- 所有显示坐标均为派生值；原始4326及XYZ几何不会被修改。网格对齐全世界，查询覆盖完整邻接网格。 -->
+    <sql id="vectorTileParts">
+        WITH layer_kinds AS MATERIALIZED (
+            SELECT jsonb_exists_any(geometry_types,ARRAY['POINT','MULTIPOINT','GEOMETRYCOLLECTION']) AS has_points,
+                jsonb_exists(geometry_types,'GEOMETRYCOLLECTION') AS has_collections
+            FROM ocean_gis.gis_vector_layer WHERE id=#{layerId}
+        ), settings AS NOT MATERIALIZED (
+            SELECT ST_TileEnvelope(#{z},#{x},#{y}) AS tile_box,
+                40075016.68557849 / (power(2.0,#{z}) * 256.0) AS resolution,
+                ST_MakeEnvelope(-180,-85.0511287798066,180,85.0511287798066,4326) AS world_geo,
+                ST_TileEnvelope(0,0,0) AS world_box
+        ), bounds AS NOT MATERIALIZED (
+            SELECT expanded.*, ST_Transform(query_box,4326) AS query_geo FROM (
+            SELECT *, ST_Intersection(ST_Expand(tile_box,
+                ceil(GREATEST(#{bufferPixels},#{gridPixels})::numeric / #{gridPixels}) * #{gridPixels} * resolution), world_box) AS query_box
+            FROM settings
+            ) expanded
+        ), candidates AS NOT MATERIALIZED (
+            SELECT f.id, f.properties, f.geom
+            FROM ocean_gis.gis_vector_feature f CROSS JOIN bounds b
+            WHERE f.layer_id = #{layerId} AND f.deleted = 0
+              AND f.geom &amp;&amp; b.query_geo
+        ), parts AS NOT MATERIALIZED (
+            SELECT id,properties,geom,'/geometry'::text AS geometry_path FROM candidates
+            WHERE ST_GeometryType(geom)!='ST_GeometryCollection'
+            UNION ALL
+            SELECT c.id,c.properties,child.geom,child.geometry_path FROM candidates c
+            CROSS JOIN LATERAL (
+                WITH RECURSIVE nested(geom,geometry_path) AS (
+                    SELECT c.geom,'/geometry'::text
+                    UNION ALL
+                    SELECT ST_GeometryN(p.geom,n),p.geometry_path || '/geometries/' || (n - 1)::text
+                    FROM nested p CROSS JOIN LATERAL generate_series(1,
+                        CASE WHEN ST_GeometryType(p.geom)='ST_GeometryCollection' THEN ST_NumGeometries(p.geom) ELSE 0 END) AS n
+                )
+                SELECT geom,geometry_path FROM nested WHERE ST_GeometryType(geom)!='ST_GeometryCollection'
+            ) child WHERE (SELECT has_collections FROM layer_kinds) AND ST_GeometryType(c.geom)='ST_GeometryCollection'
+        ), leaves AS NOT MATERIALIZED (
+            SELECT p.id,p.geometry_path,
+                CASE WHEN ST_Dimension(p.geom)=0 THEN 'POINT' WHEN ST_Dimension(p.geom)=1 THEN 'LINE' ELSE 'POLYGON' END AS category,
+                CASE WHEN jsonb_array_length(CAST(#{fieldsJson} AS jsonb))=0 THEN '{}'::jsonb
+                ELSE COALESCE((SELECT jsonb_object_agg(field.name,p.properties->field.name)
+                    FROM jsonb_array_elements_text(CAST(#{fieldsJson} AS jsonb)) AS field(name)
+                    WHERE jsonb_typeof(p.properties)='object' AND jsonb_exists(p.properties,field.name)), '{}'::jsonb) END AS props,
+                ST_Transform(CASE WHEN p.geom @ b.world_geo THEN ST_Force2D(p.geom)
+                    ELSE ST_CollectionExtract(ST_Intersection(ST_Force2D(p.geom),b.world_geo),ST_Dimension(p.geom)+1) END,3857) AS geom
+            FROM parts p CROSS JOIN bounds b
+        ), point_cells AS (
+            SELECT l.id,l.geometry_path,l.props,d.path::text AS point_path,d.geom,
+                LEAST((power(2.0,#{z}) * 256 / #{gridPixels})::bigint-1,
+                    GREATEST(0,floor((ST_X(d.geom)+20037508.342789244)/(b.resolution * #{gridPixels}))::bigint)) AS cell_x,
+                LEAST((power(2.0,#{z}) * 256 / #{gridPixels})::bigint-1,
+                    GREATEST(0,floor((20037508.342789244-ST_Y(d.geom))/(b.resolution * #{gridPixels}))::bigint)) AS cell_y
+            FROM leaves l CROSS JOIN bounds b CROSS JOIN LATERAL ST_DumpPoints(l.geom) d
+            WHERE (SELECT has_points FROM layer_kinds) AND l.category='POINT' AND ST_Intersects(d.geom,b.query_box)
+        )
+    </sql>
+
+    <sql id="vectorPointShapes">
+        , point_buckets AS (
+            SELECT *,CASE WHEN #{aggregate} THEN '' ELSE id::text || ':' || geometry_path || ':' || point_path END AS bucket
+            FROM point_cells
+        ), point_groups AS (
+            SELECT cell_x,cell_y,props,bucket,
+                min(id) AS feature_id,min(geometry_path) AS geometry_path,
+                count(*) AS point_count,count(DISTINCT id) AS feature_count,
+                ST_SetSRID(ST_MakePoint(avg(ST_X(geom)),avg(ST_Y(geom))),3857) AS geom
+            FROM point_buckets GROUP BY cell_x,cell_y,props,bucket
+        ), point_shapes AS (
+            SELECT *, CASE WHEN point_count &gt; 1 THEN #{z}::text || ':' || cell_x::text || ':' || cell_y::text || ':' ||
+                encode(sha256(convert_to(props::text,'UTF8')),'hex') END AS cluster_id FROM point_groups
+        )
+    </sql>
+
+    <select id="vectorTile" resultType="org.ocean.admin.gis.vo.GisVectorVO$TilePayload">
+        <include refid="vectorTileParts"/>
+        <include refid="vectorPointShapes"/>
+        , shapes AS (
+            SELECT CASE WHEN point_count &gt; 1 THEN 'cluster' ELSE 'feature' END AS "_vector_kind",
+                CASE WHEN point_count=1 THEN feature_id::text END AS "_vector_feature_id",
+                CASE WHEN point_count=1 THEN geometry_path END AS "_vector_geometry_path",
+                CASE WHEN point_count &gt; 1 THEN cluster_id ELSE feature_id::text || ':' || geometry_path || ':' || cell_x::text || ':' || cell_y::text || ':' || bucket END AS "_vector_part_id",
+                CASE WHEN point_count &gt; 1 THEN cluster_id END AS "_vector_cluster_id",
+                'POINT'::text AS "_vector_category",props::text AS "_vector_properties",
+                point_count::text AS "_vector_count",feature_count::text AS "_vector_feature_count",geom
+            FROM point_shapes
+            UNION ALL
+            SELECT 'feature',id::text,geometry_path,id::text || ':' || geometry_path,NULL,
+                category,props::text,NULL,NULL,
+                CASE WHEN category='LINE' THEN ST_SimplifyPreserveTopology(geom,b.resolution * 0.5)
+                    ELSE geom END
+            FROM leaves CROSS JOIN bounds b WHERE category!='POINT'
+        ), clipped AS (
+            SELECT s.*,m.tile_geom FROM shapes s CROSS JOIN bounds b
+            CROSS JOIN LATERAL (
+                <!-- OFFSET 0 阻止子查询展开，确保几何裁剪不会在输出及各过滤条件中重复执行。 -->
+                SELECT ST_AsMVTGeom(s.geom,b.tile_box,4096,#{bufferPixels} * 16,true) AS tile_geom OFFSET 0
+            ) m
+        ), encoded AS (
+            SELECT "_vector_kind","_vector_feature_id","_vector_geometry_path","_vector_part_id","_vector_cluster_id",
+                "_vector_category","_vector_properties","_vector_count","_vector_feature_count",tile_geom AS geom
+            FROM clipped WHERE NOT ST_IsEmpty(tile_geom) AND ST_GeometryType(tile_geom)!='ST_GeometryCollection'
+              AND ST_Dimension(tile_geom)=CASE "_vector_category" WHEN 'POINT' THEN 0 WHEN 'LINE' THEN 1 ELSE 2 END
+        ), tile AS (
+            SELECT COALESCE(ST_AsMVT(encoded,'features',4096,'geom'),''::bytea) AS body FROM encoded
+        )
+        SELECT CASE WHEN octet_length(body) &lt;= #{maxBytes} THEN body END AS body,octet_length(body)::bigint AS byte_size FROM tile
+    </select>
+
+    <select id="clusterMembers" resultType="org.ocean.admin.gis.entity.GisVectorFeature">
+        <include refid="vectorTileParts"/>
+        , members AS (
+            SELECT id FROM point_cells WHERE cell_x=#{clusterX} AND cell_y=#{clusterY}
+              AND encode(sha256(convert_to(props::text,'UTF8')),'hex')=#{propertyHash}
+        ), eligible AS (
+            SELECT DISTINCT id FROM members WHERE (SELECT count(*) FROM members) &gt; 1
+        )
+        SELECT f.id,f.properties::text AS properties_json,f.version
+        FROM eligible e JOIN ocean_gis.gis_vector_feature f ON f.id=e.id
+        WHERE f.id &gt; #{afterId} ORDER BY f.id LIMIT #{limit}
+    </select>
 </mapper>

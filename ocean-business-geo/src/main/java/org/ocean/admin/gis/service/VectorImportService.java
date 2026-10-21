@@ -49,6 +49,8 @@ public class VectorImportService {
     private final AsyncTaskService progress;
     private final TransactionTemplate transactions;
     private final FileTransferRecordService transfers;
+    private final VectorStyleService styles;
+    private final VectorGeneralizationService generalization;
 
     public GisVectorVO.ImportTask submit(GisVectorRequests.Import request) {
         if (request == null || request.fileMetaId() == null || request.fileMetaId() < 1
@@ -120,6 +122,7 @@ public class VectorImportService {
         layer.setLayerKey("default");
         layer.setLayerName(layerName);
         mapper.insertLayer(layer);
+        styles.createDefault(layer.getId());
         return task;
     }
 
@@ -196,6 +199,7 @@ public class VectorImportService {
                 validateSnapshot(claim);
                 mapper.refreshLayer(layerId);
                 mapper.setLayersStatus(taskId, "READY");
+                generalization.markDirty(layerId);
                 mapper.finishTask(taskId, claim.getVersion(), "COMPLETED", count, null, null);
                 transfers.completeVectorImport(taskId, true, null);
             });

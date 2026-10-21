@@ -5,7 +5,7 @@ server:
     context-path: /
   compression:
     enabled: true               # 开启GZIP压缩
-    mime-types: application/json,application/xml,text/html,text/xml,text/plain  # 压缩JSON等类型
+    mime-types: application/json,application/geo+json,application/vnd.mapbox-vector-tile,application/xml,text/html,text/xml,text/plain
     min-response-size: 1024
 
 spring:
@@ -84,6 +84,19 @@ knife4j:
 
 
 gis:
+  vector:
+    tiles:
+      grid-pixels: ${GIS_VECTOR_TILE_GRID_PIXELS:64}
+      max-zoom: ${GIS_VECTOR_TILE_MAX_ZOOM:22}
+      max-tile-bytes: ${GIS_VECTOR_TILE_MAX_BYTES:2097152}
+      max-concurrent-queries: ${GIS_VECTOR_TILE_MAX_CONCURRENT:4}
+      max-queued-queries: ${GIS_VECTOR_TILE_MAX_QUEUED:32}
+      queue-wait-ms: ${GIS_VECTOR_TILE_QUEUE_WAIT_MS:10000}
+      query-timeout-ms: ${GIS_VECTOR_TILE_QUERY_TIMEOUT_MS:10000}
+      context-ttl-seconds: ${GIS_VECTOR_CONTEXT_TTL_SECONDS:1800}
+      tile-cache-ttl-seconds: ${GIS_VECTOR_TILE_CACHE_TTL_SECONDS:120}
+      max-cached-tiles: ${GIS_VECTOR_TILE_MAX_CACHED:64}
+      generalization-query-timeout-ms: ${GIS_VECTOR_GENERALIZATION_QUERY_TIMEOUT_MS:120000}
   upload:
     base-path: ${GIS_UPLOAD_BASE_PATH:gis/uploads}
     max-file-size: ${GIS_UPLOAD_MAX_FILE_SIZE:25GB}

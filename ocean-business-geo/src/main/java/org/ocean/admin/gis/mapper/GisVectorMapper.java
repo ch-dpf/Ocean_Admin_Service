@@ -7,6 +7,7 @@ import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisVectorFeature;
 import org.ocean.admin.gis.entity.GisVectorImportTask;
 import org.ocean.admin.gis.entity.GisVectorLayer;
+import org.ocean.admin.gis.entity.GisVectorStyle;
 import org.ocean.admin.gis.vo.GisVectorVO;
 
 import java.util.List;
@@ -48,4 +49,22 @@ public interface GisVectorMapper {
     int deleteFeature(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
     long countSourceReferences(@Param("fileId") Long fileId);
     long countDataSetReferences(@Param("dataSetId") Long dataSetId);
+    List<GisVectorStyle> styles(@Param("layerId") Long layerId);
+    GisVectorStyle style(@Param("layerId") Long layerId, @Param("id") Long id);
+    GisVectorStyle defaultStyle(@Param("layerId") Long layerId);
+    int insertStyle(@Param("s") GisVectorStyle style);
+    int updateStyle(@Param("s") GisVectorStyle style, @Param("expected") long expected);
+    int clearDefaultStyle(@Param("layerId") Long layerId);
+    int setDefaultStyle(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
+    int deleteStyle(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
+    String setTileQueryTimeout(@Param("milliseconds") int milliseconds);
+    GisVectorVO.TilePayload vectorTile(@Param("layerId") Long layerId, @Param("z") int z,
+            @Param("x") int x, @Param("y") int y, @Param("fieldsJson") String fieldsJson,
+            @Param("gridPixels") int gridPixels, @Param("bufferPixels") int bufferPixels,
+            @Param("aggregate") boolean aggregate, @Param("maxBytes") int maxBytes);
+    List<GisVectorFeature> clusterMembers(@Param("layerId") Long layerId, @Param("z") int z,
+            @Param("x") int x, @Param("y") int y, @Param("fieldsJson") String fieldsJson,
+            @Param("gridPixels") int gridPixels, @Param("bufferPixels") int bufferPixels,
+            @Param("clusterX") long clusterX, @Param("clusterY") long clusterY,
+            @Param("propertyHash") String propertyHash, @Param("afterId") long afterId, @Param("limit") int limit);
 }

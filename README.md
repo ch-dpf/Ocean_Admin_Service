@@ -117,3 +117,98 @@ DELETE /api/gis/vector/layers/{layerId}/features/{featureId}
 
 后台默认每5秒扫描，使用独立的两个矢量执行线程；可通过 `gis.vector.poll-interval` 配置扫描间隔。持久化任务为权威状态，Redis/WebSocket仅用于实时进度。
 
+## 矢量图层样式方案
+
+SINGLE 导入模式保持不变。同一数据图层可以包含点、线、面，并关联多份样式方案。新建图层在同一事务内生成一份包含面、线、点基础规则的默认方案。样式保存在 `gis_vector_style.definition` JSONB 中，修改样式不改写几何、要素版本或图层 dataVersion，已有要素分页游标仍可继续使用。
+
+前端调用 `GET /api/gis/vector/layers/{layerId}/default-style` 获取默认方案，使用动态 MVT 浏览并本地应用规则；原始 GeoJSON 用于精确查询及编辑。也可从方案列表选择其他方案。后端不把样式混入 Feature.properties，样式层级不改变原始要素。点、线、面可以使用不同渲染层共享同一份数据。三维地图的相机高度或比例尺须由前端换算为双方约定的 zoom，服务端不把地形瓦片层级自动当作样式层级。
+
+```text
+GET    /api/gis/vector/layers/{layerId}/styles
+POST   /api/gis/vector/layers/{layerId}/styles
+GET    /api/gis/vector/layers/{layerId}/styles/{styleId}
+PUT    /api/gis/vector/layers/{layerId}/styles/{styleId}
+DELETE /api/gis/vector/layers/{layerId}/styles/{styleId}
+GET    /api/gis/vector/layers/{layerId}/default-style
+PUT    /api/gis/vector/layers/{layerId}/styles/{styleId}/default
+POST   /api/gis/vector/layers/{layerId}/styles/{styleId}/match
+```
+
+样式接口全部沿用 `{code,message,data}` 包装。列表返回摘要数组，包含 styleId、layerId、name、isDefault、version 和时间；单方案及默认方案详情另含 definition。创建返回 HTTP201，名称在同一图层内唯一、最多100字符；每层最多100份方案。新增方案不自动成为默认方案。
+
+创建、修改的完整请求示例：
+
+```json
+{
+  "name": "港口分级显示",
+  "definition": {
+    "schemaVersion": 1,
+    "rules": [
+      {
+        "id": "ports-medium",
+        "geometryType": "POINT",
+        "minZoom": 8,
+        "maxZoom": 12,
+        "filter": {"op": "eq", "field": "kind", "value": "port"},
+        "symbol": {"color": "#3388ff", "radius": 6}
+      },
+      {
+        "id": "ports-detail",
+        "geometryType": "POINT",
+        "minZoom": 12,
+        "filter": {"op": "eq", "field": "kind", "value": "port"},
+        "symbol": {"color": "#ff3333", "radius": 9}
+      }
+    ]
+  }
+}
+```
+
+该示例中，kind=port 的点在8级以下隐藏，8≤zoom<12显示蓝色，zoom≥12显示红色；其他要素无匹配规则时隐藏。定义最多128KiB、128条规则，空 rules 表示全部隐藏。协议只接受整数 schemaVersion=1，未知字段、运算符或符号字段返回400。规则 id 在方案内唯一，仅允许1至64个字母、数字、下划线或连字符。
+
+规则按数组顺序执行：几何、属性及层级同时满足时使用第一条匹配项。minZoom、maxZoom 可省略或为null；zoom及非空边界须为非负有限数值，可含小数，同时指定两端时须满足 minZoom<maxZoom，区间为 `[minZoom,maxZoom)`。visible 默认为true；visible=false 的匹配规则显式隐藏要素并终止匹配，其 symbol 可省略。
+
+geometryType 使用 POINT、LINE、POLYGON，分别包含对应的单部件及 Multi 几何。GeometryCollection 递归按子几何匹配，不拆成多条数据库要素。匹配结果保留原 featureId，并通过 `/geometry/geometries/0` 等路径定位子几何；Multi 几何作为整体匹配。
+
+filter 省略或为null时匹配全部属性。叶子条件为 `{"op":"eq","field":"kind","value":"port"}`；field 按 properties 的直接键名读取，含点的名称也按字面处理，不解释成路径或脚本。支持 eq、ne、gt、gte、lt、lte、in、exists；eq/ne/in 比较 JSON 类型，数字1和1.0相等，数字1与字符串"1"不同。数值大小比较只接受数值，不转换字符串。缺失字段在比较中不匹配，包括ne；显式null可用eq/ne比较。exists默认判断字段存在，显式null也算存在；`value:false` 判断字段缺失。in.value为1至100个JSON标量的数组。and/or使用 `conditions` 数组组合，每组1至32项，最多嵌套8层，整份方案最多512个条件节点。
+
+symbol 使用以下字段，保存时会补齐可选字段默认值，前端可直接使用返回定义：
+
+- POINT：color必填，radius默认6，opacity默认1，strokeColor默认同color，strokeWidth默认0。
+- LINE：color必填，width默认2，opacity默认1。
+- POLYGON：fillColor必填，fillOpacity默认0.25，strokeColor默认同fillColor，strokeWidth默认1，strokeOpacity默认1。
+
+颜色使用 `#RRGGBB`；透明度范围0至1；radius、width单位为屏幕像素，范围大于0且不超过1024；strokeWidth范围0至1024。不同几何类别的符号字段不混用。
+
+单方案详情、默认方案、创建及修改响应返回独立 `ETag`（例如 `"style-2110000000000000001-v1"`）。PUT、DELETE和切换默认方案必须携带相应方案最新的 If-Match；缺失返回428、版本过期返回412。切换默认时使用目标方案的ETag，原默认与新默认方案的版本同时递增；重复选择当前默认方案不会增加版本。默认方案不能直接删除，应先切换到其他方案。方案管理可在图层导入期间进行，匹配预览要求图层READY；已删除图层的样式接口返回404。
+
+匹配预览请求为 `{"featureId":"要素ID","zoom":9.5}`，返回 styleId、layerId、featureId、styleVersion、featureVersion、zoom 及 matches。matches 每项包含 geometryPath、geometryType、ruleId、visible、symbol；未匹配时 ruleId和symbol为空、visible为false。该接口用于样式编辑器校验和预览，地图交互时应在前端本地执行相同协议，避免每次缩放逐要素请求服务端。前端保存或切换样式后重新读取方案即可，无需重新导入文件。
+
+## 动态矢量瓦片与原始要素编辑
+
+制图浏览使用 EPSG:3857 的 XYZ MVT，保留 SINGLE 数据图层与混合几何。地图不再截取视窗中的前2000个要素。点默认按全球对齐的64像素网格聚合，可关闭聚合；线使用半像素容差简化，面使用一致的瓦片网格量化及裁剪，不逐面独立简化，避免破坏共享边界。原始 EPSG:4326 的 XY/XYZ 几何及属性不随瓦片生成改变。极区显示裁剪到 Web Mercator 纬度范围，原始要素仍可精确查询。
+
+调用顺序：
+
+1. 查询图层目录及默认样式，取得 layerId、dataVersion 和渲染规则。
+2. `POST /api/gis/vector/layers/{layerId}/render-contexts`，请求示例 `{"fields":["kind","rank"],"aggregatePoints":true,"bufferPixels":64}`。fields 必须包含所有规则引用的属性名（按字面取值，最多512项）；不需要完整属性。bufferPixels 为最大符号半径或半线宽加余量，范围0至2048。
+3. 从统一包装的 data 中取得 contextId、dataVersion、fields、aggregatePoints、gridPixels、bufferPixels、maxZoom 和 expiresAt。按地图视窗请求 `GET /api/gis/vector/layers/{layerId}/tiles/{z}/{x}/{y}.mvt?contextId=...`。响应为原始二进制 `application/vnd.mapbox-vector-tile`，空瓦片为200及零字节；瓦片尺寸固定256像素，MVT extent为4096。
+4. 点击普通瓦片要素，读取字符串 `_vector_feature_id` 后调用原有 `GET .../features/{featureId}` 获取完整 GeoJSON 和 ETag。点击聚合标记，调用 `GET .../clusters/{clusterId}/features?contextId=...&limit=50&cursor=...`；返回统一包装，data 含 members、hasMore、nextCursor、dataVersion。成员按原始要素ID去重，limit为1至100；游标绑定上下文与聚合。聚合计数是点位数量，featureCount 为不同原始要素数量。
+5. 编辑使用独立选中覆盖层，保留完整属性、集合结构和坐标维度。`PUT .../features/{featureId}` 或 `DELETE .../features/{featureId}` 使用详情的 If-Match。成功后刷新图层版本并重建渲染上下文；412保留草稿。XYZ 顶点可拖动，插入新顶点须显式提供高程。
+
+MVT 数据层名为 `features`。元数据包含 `_vector_kind`（feature/cluster）、`_vector_feature_id`、`_vector_geometry_path`、`_vector_part_id`、`_vector_cluster_id`、`_vector_category`（POINT/LINE/POLYGON）、`_vector_properties`、`_vector_count`、`_vector_feature_count`。ID和计数均为字符串，属性投影以JSON字符串编码，保留数字、布尔、null、缺失及嵌套值。GeometryCollection仅在显示通道递归拆分，原始要素ID及 `/geometry/geometries/...` 路径保留。客户端不得把瓦片片段当作可编辑原始几何或统计已加载要素总数。
+
+聚合按网格及所投影属性的完整JSON分组，确保同一组在任意连续zoom下使用相同规则；属性类别多时可能产生更多标记。颜色、透明度、规则值或层级变化可本地重绘；新增过滤字段、扩大符号缓冲、切换聚合方式或更改数据版本需要重建上下文。相邻瓦片缓冲中的同一聚合使用相同ID及完整成员。
+
+Redis保存上下文及有界瓦片缓存。缓存键绑定数据版本、字段清单、网格、缓冲及聚合选项；即使命中缓存，也先检查图层状态和版本。默认上下文存活1800秒，瓦片缓存120秒、最多64份，命中时更新最近访问顺序；单瓦片未压缩载荷上限2MiB。每个服务实例最多4个并发空间查询，另有32个有界排队位置，最长等待10秒，单次SQL超时10秒。同一实例内相同瓦片的并发请求合并为一次生成；排队不保留数据库连接，取得执行槽位后才建立只读事务，并重新校验图层版本。
+
+配置位于 `gis.vector.tiles`，支持 `GIS_VECTOR_TILE_GRID_PIXELS`（须整除256）、`GIS_VECTOR_TILE_MAX_ZOOM`、`GIS_VECTOR_TILE_MAX_BYTES`、`GIS_VECTOR_TILE_MAX_CONCURRENT`、`GIS_VECTOR_TILE_MAX_QUEUED`、`GIS_VECTOR_TILE_QUEUE_WAIT_MS`、`GIS_VECTOR_TILE_QUERY_TIMEOUT_MS`、`GIS_VECTOR_CONTEXT_TTL_SECONDS`、`GIS_VECTOR_TILE_CACHE_TTL_SECONDS` 和 `GIS_VECTOR_TILE_MAX_CACHED`。调大并发不能替代查询优化，队列等待及SQL预算调整后须同步核对前端瓦片HTTP超时（当前35秒）。
+
+前端以整个地理信息应用为范围限制最多2个真实瓦片HTTP在途请求，合并相同瓦片订阅，关闭瓦片GET的隐藏自动重试。取消尚未发送的请求会移出队列；已经发送的请求完成前继续占位，避免取消XHR后数据库仍计算、浏览器却继续补发。取消的订阅不会更新地图。图层范围之外及当前没有可见样式规则的图层不发瓦片请求。OpenLayers的渲染任务数仍独立受控，不将其直接当成HTTP并发数。
+
+SQL使用已维护的几何类型元数据跳过不需要的点聚合或集合分支，仅对GeometryCollection递归。空间包围盒使用现有GiST索引，常量查询范围不形成阻止索引估算的物化屏障；属性只读取规则需要的字段。原始大几何不进入全局递归物化结果，MVT裁剪每个片段只执行一次，点聚合以坐标均值计算中心，事务内关闭该类复杂SQL的JIT编译。原始要素、属性、集合路径及共享面边界语义保持不变。
+
+动态MVT本身不保证任意密度都能快速完整显示。2026-10-21本地真实数据抽样中，约37万条道路的一个Z10瓦片生成约286毫秒、755368字节，约16万个建筑轮廓的对应瓦片约106毫秒、175214字节；同一区域Z7道路瓦片约2.9秒但载荷达到11034143字节，会按预算明确返回422。这些是单次只读测量，并非吞吐量保证。密集道路和建筑应配置适合的最小显示层级；需要小比例尺概览时，应进一步建设多尺度概化或预生成成果。查询预算超限不会静默截断，也不应单纯提高字节或并发上限。
+
+错误处理：400为无效坐标或参数，409为数据版本变化或图层未就绪，410为上下文过期，422为瓦片内容过密，503为查询繁忙、超时或缓存服务不可用。前端409刷新图层和上下文，410重建上下文，422提示放大或开启聚合，其他错误提供重试。瓦片响应为 `Cache-Control: no-store`，由服务端版本缓存及当前前端source管理；网关应保留二进制内容、状态码与ETag。该能力需要 PostgreSQL/PostGIS 和 Redis，无需新增数据库表。
+

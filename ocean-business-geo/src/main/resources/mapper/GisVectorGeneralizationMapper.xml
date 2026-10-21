@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisVectorGeneralizationMapper">
+    <sql id="buildColumns">b.*,b.policy::text AS policy_json</sql>
+    <select id="config" resultType="org.ocean.admin.gis.vo.GisVectorVO$GeneralizationConfig" flushCache="true">
+        SELECT layer_id,policy::text AS policy_json,policy_version,published_build_id
+        FROM ocean_gis.gis_vector_generalization WHERE layer_id=#{layerId}
+    </select>
+    <insert id="insertConfig">
+        INSERT INTO ocean_gis.gis_vector_generalization(layer_id,policy) VALUES(#{layerId},CAST(#{policy} AS jsonb))
+        ON CONFLICT(layer_id) DO NOTHING
+    </insert>
+    <update id="updateConfig">
+        UPDATE ocean_gis.gis_vector_generalization SET policy=CAST(#{policy} AS jsonb),policy_version=policy_version+1,
+            update_time=CURRENT_TIMESTAMP WHERE layer_id=#{layerId} AND policy_version=#{expected}
+    </update>
+    <select id="build" resultType="org.ocean.admin.gis.entity.GisVectorGeneralizationBuild" flushCache="true">
+        SELECT <include refid="buildColumns"/> FROM ocean_gis.gis_vector_generalization_build b WHERE b.id=#{id}
+    </select>
+    <select id="latest" resultType="org.ocean.admin.gis.entity.GisVectorGeneralizationBuild" flushCache="true">
+        SELECT <include refid="buildColumns"/> FROM ocean_gis.gis_vector_generalization_build b WHERE layer_id=#{layerId}
+        ORDER BY create_time DESC,id DESC LIMIT 1
+    </select>
+    <insert id="enqueue">
+        INSERT INTO ocean_gis.gis_vector_generalization_build(id,layer_id,data_version,policy_version,policy)
+        SELECT #{id},l.id,l.data_version,c.policy_version,c.policy
+        FROM ocean_gis.gis_vector_layer l JOIN ocean_gis.gis_vector_generalization c ON c.layer_id=l.id
+        WHERE l.id=#{layerId} AND l.deleted=0 AND l.layer_status='READY' AND (c.policy->>'enabled')::boolean
+        ON CONFLICT(layer_id) WHERE build_status='QUEUED' DO UPDATE
+        SET data_version=EXCLUDED.data_version,policy_version=EXCLUDED.policy_version,policy=EXCLUDED.policy
+    </insert>
+    <select id="undiscovered" resultType="long">
+        SELECT l.id FROM ocean_gis.gis_vector_layer l JOIN ocean_gis.gis_data_set d ON d.id=l.data_set_id AND d.deleted=0
+        LEFT JOIN ocean_gis.gis_vector_generalization c ON c.layer_id=l.id
+        WHERE l.deleted=0 AND l.layer_status='READY' AND c.layer_id IS NULL ORDER BY l.id LIMIT #{limit}
+    </select>
+    <select id="candidates" resultType="long">
+        SELECT b.id FROM ocean_gis.gis_vector_generalization_build b
+        JOIN ocean_gis.gis_vector_layer l ON l.id=b.layer_id AND l.deleted=0 AND l.layer_status='READY'
+        WHERE b.build_status='QUEUED' OR (b.build_status='RUNNING' AND b.lease_expires_at&lt;CURRENT_TIMESTAMP)
+        ORDER BY b.create_time,b.id LIMIT #{limit}
+    </select>
+    <select id="claim" resultType="org.ocean.admin.gis.entity.GisVectorGeneralizationBuild" affectData="true" flushCache="true">
+        UPDATE ocean_gis.gis_vector_generalization_build b SET build_status='RUNNING',attempt=attempt+1,
+            completed_zoom=-1,lease_expires_at=CURRENT_TIMESTAMP+INTERVAL '5 minutes',error_message=NULL,finish_time=NULL
+        WHERE b.id=(SELECT id FROM ocean_gis.gis_vector_generalization_build WHERE id=#{id}
+            AND (build_status='QUEUED' OR (build_status='RUNNING' AND lease_expires_at&lt;CURRENT_TIMESTAMP)) FOR UPDATE SKIP LOCKED)
+        RETURNING b.*,b.policy::text AS policy_json
+    </select>
+    <select id="advisoryLock" resultType="boolean">SELECT pg_try_advisory_xact_lock(#{id})</select>
+    <update id="progress">
+        UPDATE ocean_gis.gis_vector_generalization_build SET completed_zoom=#{zoom},lease_expires_at=CURRENT_TIMESTAMP+INTERVAL '5 minutes'
+        WHERE id=#{id} AND attempt=#{attempt} AND build_status='RUNNING' AND lease_expires_at&gt;CURRENT_TIMESTAMP
+    </update>
+    <update id="finish">
+        UPDATE ocean_gis.gis_vector_generalization_build SET build_status=#{status},lease_expires_at=NULL,
+            finish_time=CURRENT_TIMESTAMP,max_tile_bytes=#{maxBytes},error_message=#{error}
+        WHERE id=#{id} AND attempt=#{attempt} AND build_status='RUNNING'
+    </update>
+    <update id="publish">
+        UPDATE ocean_gis.gis_vector_generalization c SET published_build_id=b.id,update_time=CURRENT_TIMESTAMP
+        FROM ocean_gis.gis_vector_generalization_build b JOIN ocean_gis.gis_vector_layer l ON l.id=b.layer_id
+        WHERE c.layer_id=#{layerId} AND b.id=#{id} AND b.layer_id=c.layer_id AND b.build_status='READY'
+          AND l.deleted=0 AND l.layer_status='READY' AND l.data_version=b.data_version
+          AND c.policy_version=b.policy_version AND (c.policy->>'enabled')::boolean
+    </update>
+    <delete id="removeUnpublished">
+        DELETE FROM ocean_gis.gis_vector_generalized_feature WHERE build_id=#{id}
+          AND NOT EXISTS(SELECT 1 FROM ocean_gis.gis_vector_generalization WHERE published_build_id=#{id})
+    </delete>
+    <delete id="removeOldGeometry">
+        DELETE FROM ocean_gis.gis_vector_generalized_feature f USING ocean_gis.gis_vector_generalization_build b
+        WHERE f.build_id=b.id AND b.layer_id=#{layerId} AND b.build_status IN ('READY','FAILED','SUPERSEDED')
+          AND NOT EXISTS(SELECT 1 FROM ocean_gis.gis_vector_generalization c WHERE c.published_build_id=b.id)
+    </delete>
+    <delete id="deleteZoom">DELETE FROM ocean_gis.gis_vector_generalized_feature WHERE build_id=#{id} AND zoom=#{z}</delete>
+
+    <sql id="sourceParts">
+        SELECT f.id,d.geom,f.properties FROM ocean_gis.gis_vector_feature f
+        CROSS JOIN LATERAL ST_Dump(ST_Force2D(f.geom)) d
+        WHERE f.layer_id=#{layerId} AND f.deleted=0 AND ST_Dimension(d.geom)&gt;0
+    </sql>
+    <select id="boundedProperties" resultType="boolean">
+        SELECT NOT EXISTS(SELECT 1 FROM ocean_gis.gis_vector_feature f WHERE f.layer_id=#{layerId} AND f.deleted=0
+          AND octet_length(COALESCE((SELECT jsonb_object_agg(k,f.properties->k)
+              FROM jsonb_array_elements_text(CAST(#{fieldsJson} AS jsonb)) k WHERE jsonb_exists(f.properties,k)),'{}'::jsonb)::text)&gt;4096)
+    </select>
+    <select id="validCoverage" resultType="boolean">
+        WITH source AS (<include refid="sourceParts"/>), edges AS (
+            SELECT ST_CoverageInvalidEdges(ST_Transform(geom,3857)) OVER() AS edge FROM source WHERE ST_Dimension(geom)=2)
+        SELECT COALESCE(bool_and(edge IS NULL OR ST_IsEmpty(edge)),true) FROM edges
+    </select>
+    <select id="extent" resultType="org.ocean.admin.gis.vo.GisVectorVO$GeneralizationExtent">
+        SELECT ST_XMin(g) AS west,ST_YMin(g) AS south,ST_XMax(g) AS east,ST_YMax(g) AS north
+        FROM (SELECT ST_Transform(ST_Intersection(geographic_extent,
+            ST_MakeEnvelope(-180,-85.0511287798066,180,85.0511287798066,4326)),3857) AS g
+            FROM ocean_gis.gis_vector_layer WHERE id=#{layerId} AND geographic_extent IS NOT NULL) s WHERE NOT ST_IsEmpty(g)
+    </select>
+
+    <insert id="buildZoom">
+        WITH settings AS (SELECT CAST(#{policy} AS jsonb) AS p,40075016.68557849/(256*power(2.0,#{z})) AS res),
+        source AS MATERIALIZED (<include refid="sourceParts"/>), projected AS MATERIALIZED (
+            SELECT s.id,ST_Dimension(s.geom) AS dim,
+                COALESCE((SELECT jsonb_object_agg(k,s.properties->k) FROM jsonb_array_elements_text(p->'groupFields') k
+                    WHERE jsonb_exists(s.properties,k)),'{}'::jsonb) AS props,
+                ST_Transform(ST_CollectionExtract(ST_Intersection(s.geom,
+                    ST_MakeEnvelope(-180,-85.0511287798066,180,85.0511287798066,4326)),ST_Dimension(s.geom)+1),3857) AS geom
+            FROM source s CROSS JOIN settings
+            WHERE ST_Dimension(s.geom)!=1 OR #{z}&gt;=COALESCE((p->'lineMinZoom'->>(s.properties->>(p->>'lineClassField')))::int,
+                (p->>'defaultLineMinZoom')::int)
+        ), processed AS (
+            SELECT id,dim,props,ST_SimplifyPreserveTopology(geom,res*(p->>'tolerancePixels')::double precision*#{factor}) AS geom
+            FROM projected CROSS JOIN settings WHERE dim=1 AND NOT ST_IsEmpty(geom)
+            UNION ALL
+            SELECT id,dim,props,
+                <choose><when test="polygonMode == 'COVERAGE'">
+                    ST_CoverageSimplify(geom,res*(p->>'tolerancePixels')::double precision*#{factor}) OVER()
+                </when><otherwise>
+                    ST_SimplifyPreserveTopology(geom,res*(p->>'tolerancePixels')::double precision*#{factor})
+                </otherwise></choose>
+            FROM projected CROSS JOIN settings WHERE dim=2 AND NOT ST_IsEmpty(geom)
+              AND (p->>'polygonMode' IN ('BUILDINGS','COVERAGE') OR ST_Area(geom)&gt;=res*res*(p->>'minPolygonPixels')::double precision)
+        ), located AS (
+            SELECT *,CASE WHEN dim=2 AND p->>'polygonMode'='BUILDINGS' AND #{z}&lt;=8 THEN res*8
+                ELSE res*(p->>'cellPixels')::int*#{factor} END AS cell_size FROM processed CROSS JOIN settings
+        ), bucketed AS (
+            SELECT *,floor((ST_X(ST_PointOnSurface(geom))+20037508.342789244)/cell_size)::bigint AS cx,
+                floor((ST_Y(ST_PointOnSurface(geom))+20037508.342789244)/cell_size)::bigint AS cy,
+                CASE WHEN dim=2 AND p->>'polygonMode'='COVERAGE' THEN id::text ELSE '' END AS identity_key
+            FROM located WHERE NOT ST_IsEmpty(geom)
+        ), grouped AS MATERIALIZED (
+            SELECT dim,props,cx,cy,identity_key,cell_size,array_agg(DISTINCT id) AS ids,
+                ST_Collect(geom) AS geom FROM bucketed GROUP BY dim,props,cx,cy,identity_key,cell_size
+        ), shapes AS (
+            SELECT md5(dim::text||':'||props::text||':'||cx||':'||cy||':'||identity_key) AS rid,
+                CASE WHEN dim=1 THEN 'LINE' ELSE 'POLYGON' END AS category,props,ids,
+                CASE WHEN dim=1 THEN ST_LineMerge(geom)
+                  WHEN p->>'polygonMode'='COVERAGE' THEN geom
+                  WHEN p->>'polygonMode'='BUILDINGS' AND #{z}&lt;=8 THEN
+                    ST_MakeEnvelope(cx*cell_size-20037508.342789244,cy*cell_size-20037508.342789244,
+                        (cx+1)*cell_size-20037508.342789244,(cy+1)*cell_size-20037508.342789244,3857)
+                  WHEN p->>'polygonMode'='BUILDINGS' THEN ST_SimplifyPreserveTopology(
+                    ST_Buffer(ST_UnaryUnion(ST_Buffer(geom,res*(p->>'aggregationPixels')::double precision/2)),
+                        -res*(p->>'aggregationPixels')::double precision/2),res*(p->>'tolerancePixels')::double precision*#{factor})
+                  ELSE ST_UnaryUnion(geom) END AS geom
+            FROM grouped CROSS JOIN settings
+        ), stored AS (
+            INSERT INTO ocean_gis.gis_vector_generalized_feature(build_id,zoom,representation_id,category,properties,geom,feature_count)
+            SELECT #{id},#{z},rid,category,props,geom,cardinality(ids) FROM shapes
+            WHERE NOT ST_IsEmpty(geom) RETURNING representation_id
+        )
+        INSERT INTO ocean_gis.gis_vector_generalized_member(build_id,zoom,representation_id,feature_id)
+        SELECT #{id},#{z},s.rid,m FROM shapes s JOIN stored t ON t.representation_id=s.rid CROSS JOIN LATERAL unnest(s.ids) m
+    </insert>
+
+    <select id="tile" resultType="org.ocean.admin.gis.vo.GisVectorVO$TilePayload">
+        <include refid="org.ocean.admin.gis.mapper.GisVectorMapper.vectorTileParts"/>
+        <include refid="org.ocean.admin.gis.mapper.GisVectorMapper.vectorPointShapes"/>
+        , shapes AS (
+            SELECT CASE WHEN point_count&gt;1 THEN 'cluster' ELSE 'feature' END AS "_vector_kind",
+                CASE WHEN point_count=1 THEN feature_id::text END AS "_vector_feature_id",
+                CASE WHEN point_count=1 THEN geometry_path END AS "_vector_geometry_path",
+                CASE WHEN point_count&gt;1 THEN cluster_id END AS "_vector_cluster_id",NULL::text AS "_vector_representation_id",
+                'POINT'::text AS "_vector_category",props::text AS "_vector_properties",
+                point_count::text AS "_vector_count",feature_count::text AS "_vector_feature_count",geom
+            FROM point_shapes
+            UNION ALL
+            SELECT 'aggregate',NULL,NULL,NULL,#{z}::text||':'||f.representation_id,f.category,
+                COALESCE((SELECT jsonb_object_agg(k,f.properties->k) FROM jsonb_array_elements_text(CAST(#{fieldsJson} AS jsonb)) k
+                    WHERE jsonb_exists(f.properties,k)),'{}'::jsonb)::text,NULL,f.feature_count::text,f.geom
+            FROM ocean_gis.gis_vector_generalized_feature f CROSS JOIN bounds b
+            WHERE f.build_id=#{buildId} AND f.zoom=#{z} AND f.geom &amp;&amp; b.query_box
+        ), clipped AS (
+            SELECT s.*,m.tile_geom FROM shapes s CROSS JOIN bounds b CROSS JOIN LATERAL (
+                SELECT ST_AsMVTGeom(s.geom,b.tile_box,4096,#{bufferPixels}*16,true) AS tile_geom OFFSET 0) m
+        ), encoded AS (
+            SELECT "_vector_kind","_vector_feature_id","_vector_geometry_path","_vector_cluster_id","_vector_representation_id",
+                "_vector_category","_vector_properties","_vector_count","_vector_feature_count",tile_geom AS geom
+            FROM clipped WHERE NOT ST_IsEmpty(tile_geom) AND ST_GeometryType(tile_geom)!='ST_GeometryCollection'
+                AND ST_Dimension(tile_geom)=CASE "_vector_category" WHEN 'POINT' THEN 0 WHEN 'LINE' THEN 1 ELSE 2 END
+        ), tile AS (SELECT COALESCE(ST_AsMVT(encoded,'features',4096,'geom'),''::bytea) AS body FROM encoded)
+        SELECT CASE WHEN octet_length(body)&lt;=#{maxBytes} THEN body END AS body,octet_length(body)::bigint AS byte_size FROM tile
+    </select>
+    <select id="members" resultType="org.ocean.admin.gis.entity.GisVectorFeature">
+        SELECT f.id,f.properties::text AS properties_json,f.version
+        FROM ocean_gis.gis_vector_generalized_member m JOIN ocean_gis.gis_vector_feature f ON f.id=m.feature_id
+        WHERE m.build_id=#{buildId} AND m.zoom=#{z} AND m.representation_id=#{representationId}
+          AND f.layer_id=#{layerId} AND f.deleted=0 AND f.id&gt;#{afterId}
+        ORDER BY f.id LIMIT #{limit}
+    </select>
+</mapper>

@@ -31,6 +31,7 @@ public class VectorLayerService {
     private final GisVectorMapper mapper;
     private final ObjectMapper json;
     private final GeoJsonFeatureReader reader;
+    private final VectorGeneralizationService generalization;
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResult<List<GisVectorVO.Layer>> page(Long dataSetId, int current, int size) {
@@ -79,6 +80,7 @@ public class VectorLayerService {
         validateTopology(feature);
         mapper.insertFeatures(List.of(feature));
         mapper.refreshLayer(layerId);
+        generalization.markDirty(layerId);
         return toFeature(requireFeature(layerId, feature.getId()));
     }
 
@@ -96,6 +98,7 @@ public class VectorLayerService {
         validateTopology(feature);
         if (mapper.updateFeature(feature, existing.getVersion()) != 1) throw preconditionFailed();
         mapper.refreshLayer(layerId);
+        generalization.markDirty(layerId);
         return toFeature(requireFeature(layerId, id));
     }
 
@@ -106,6 +109,7 @@ public class VectorLayerService {
         requireMatch(ifMatch, featureEtag(id, existing.getVersion()));
         if (mapper.deleteFeature(layerId, id, existing.getVersion()) != 1) throw preconditionFailed();
         mapper.refreshLayer(layerId);
+        generalization.markDirty(layerId);
     }
 
     @Transactional(rollbackFor = Exception.class)

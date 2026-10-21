@@ -10,6 +10,9 @@ import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisVectorRequests;
 import org.ocean.admin.gis.service.VectorImportService;
 import org.ocean.admin.gis.service.VectorLayerService;
+import org.ocean.admin.gis.service.VectorStyleService;
+import org.ocean.admin.gis.service.VectorTileService;
+import org.ocean.admin.gis.service.VectorGeneralizationService;
 import org.ocean.admin.gis.vo.GisVectorVO;
 import org.ocean.admin.gis.util.GeoJsonFeatureReader;
 import org.ocean.admin.kernel.audit.OperationLog;
@@ -35,6 +38,130 @@ public class VectorController {
     private final VectorImportService imports;
     private final VectorLayerService layers;
     private final GeoJsonFeatureReader reader;
+    private final VectorStyleService styles;
+    private final VectorTileService tiles;
+    private final VectorGeneralizationService generalization;
+
+    @GetMapping("/layers/{layerId}/generalization")
+    @Operation(summary="读取概化策略、构建状态和发布版本")
+    public ResponseEntity<ResponseResult<GisVectorVO.Generalization>> generalization(@PathVariable Long layerId) {
+        return generalizationResponse(generalization.detail(layerId),HttpStatus.OK);
+    }
+
+    @PutMapping("/layers/{layerId}/generalization")
+    @Operation(summary="保存概化策略并异步构建",description="携带策略If-Match；只影响派生显示数据")
+    @OperationLog(module="GIS_VECTOR",type=OperationType.UPDATE,description="修改矢量概化策略")
+    public ResponseEntity<ResponseResult<GisVectorVO.Generalization>> saveGeneralization(@PathVariable Long layerId,
+            @RequestHeader(value="If-Match",required=false) String ifMatch,@Valid @RequestBody GisVectorRequests.Generalization body) {
+        return generalizationResponse(generalization.save(layerId,ifMatch,body.policy()),HttpStatus.ACCEPTED);
+    }
+
+    @PostMapping("/layers/{layerId}/generalization/builds")
+    @Operation(summary="提交概化重建",description="排队中的同图层构建自动合并；携带策略If-Match")
+    @OperationLog(module="GIS_VECTOR",type=OperationType.SUBMIT,description="重建矢量概览")
+    public ResponseEntity<ResponseResult<GisVectorVO.Generalization>> rebuildGeneralization(@PathVariable Long layerId,
+            @RequestHeader(value="If-Match",required=false) String ifMatch) {
+        return generalizationResponse(generalization.rebuild(layerId,ifMatch),HttpStatus.ACCEPTED);
+    }
+
+    @GetMapping("/layers/{layerId}/representations/{representationId}/features")
+    @Operation(summary="分页查询概化对象的原始要素成员")
+    public ResponseResult<GisVectorVO.GeneralizationMembers> representationMembers(@PathVariable Long layerId,
+            @PathVariable String representationId,@RequestParam String contextId,@RequestParam(defaultValue="50") int limit,
+            @RequestParam(required=false) String cursor) {
+        return ResponseResult.success(tiles.getRepresentationFeatures(layerId,contextId,representationId,limit,cursor));
+    }
+
+    private ResponseEntity<ResponseResult<GisVectorVO.Generalization>> generalizationResponse(GisVectorVO.Generalization state,HttpStatus status) {
+        return ResponseEntity.status(status).eTag(VectorGeneralizationService.etag(Long.valueOf(state.layerId()),Long.parseLong(state.policyVersion())))
+                .body(ResponseResult.success(state));
+    }
+
+    @PostMapping("/layers/{layerId}/render-contexts")
+    @Operation(summary = "创建版本化矢量渲染上下文", description = "fields 按字面取属性；聚合以投影后的属性分组，保留 null 与缺失语义")
+    public ResponseResult<GisVectorVO.RenderContext> renderContext(@PathVariable Long layerId,
+            @Valid @RequestBody GisVectorRequests.RenderContext request) {
+        return ResponseResult.success(tiles.createContext(layerId,request));
+    }
+
+    @GetMapping(value = "/layers/{layerId}/tiles/{z}/{x}/{y}.mvt", produces = "application/vnd.mapbox-vector-tile")
+    @Operation(summary = "按层级读取显示用MVT矢量瓦片", description = "须携带contextId；旧数据版本409，上下文过期410；不截取任意前N个要素")
+    public ResponseEntity<byte[]> tile(@PathVariable Long layerId, @PathVariable int z, @PathVariable int x,
+            @PathVariable int y, @RequestParam String contextId) {
+        byte[] body = tiles.getTile(layerId,contextId,z,x,y);
+        return ResponseEntity.ok().header("Cache-Control","no-store").body(body);
+    }
+
+    @GetMapping("/layers/{layerId}/clusters/{clusterId}/features")
+    @Operation(summary = "分页查询聚合的原始要素成员", description = "计数按点位，成员按原始要素ID去重；编辑须再获取原始Feature及ETag")
+    public ResponseResult<GisVectorVO.ClusterMembers> clusterFeatures(@PathVariable Long layerId,
+            @PathVariable String clusterId, @RequestParam String contextId,
+            @RequestParam(defaultValue = "50") int limit, @RequestParam(required = false) String cursor) {
+        return ResponseResult.success(tiles.getClusterFeatures(layerId,contextId,clusterId,limit,cursor));
+    }
+
+    @GetMapping("/layers/{layerId}/styles")
+    @Operation(summary = "查询图层样式方案摘要", description = "样式定义通过单方案详情读取")
+    public ResponseResult<List<GisVectorVO.StyleSummary>> styles(@PathVariable Long layerId) {
+        return ResponseResult.success(styles.list(layerId));
+    }
+
+    @PostMapping("/layers/{layerId}/styles")
+    @Operation(summary = "创建图层样式方案", description = "definition.schemaVersion=1；rules 有序匹配，返回独立样式ETag")
+    @OperationLog(module = "GIS_VECTOR_STYLE", type = OperationType.INSERT, description = "创建矢量样式")
+    public ResponseEntity<ResponseResult<GisVectorVO.Style>> createStyle(@PathVariable Long layerId,
+            @Valid @RequestBody GisVectorRequests.Style request) {
+        return styleResponse(styles.create(layerId, request), HttpStatus.CREATED);
+    }
+
+    @GetMapping("/layers/{layerId}/styles/{styleId}")
+    @Operation(summary = "查询样式定义及ETag")
+    public ResponseEntity<ResponseResult<GisVectorVO.Style>> style(@PathVariable Long layerId, @PathVariable Long styleId) {
+        return styleResponse(styles.detail(layerId, styleId), HttpStatus.OK);
+    }
+
+    @GetMapping("/layers/{layerId}/default-style")
+    @Operation(summary = "读取图层默认样式及ETag", description = "样式与GeoJSON分别读取，前端依据协议本地渲染")
+    public ResponseEntity<ResponseResult<GisVectorVO.Style>> defaultStyle(@PathVariable Long layerId) {
+        return styleResponse(styles.defaultStyle(layerId), HttpStatus.OK);
+    }
+
+    @PutMapping("/layers/{layerId}/styles/{styleId}")
+    @Operation(summary = "完整替换样式方案", description = "If-Match 须来自该样式详情；不修改要素数据版本")
+    @OperationLog(module = "GIS_VECTOR_STYLE", type = OperationType.UPDATE, description = "编辑矢量样式")
+    public ResponseEntity<ResponseResult<GisVectorVO.Style>> updateStyle(@PathVariable Long layerId, @PathVariable Long styleId,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch, @Valid @RequestBody GisVectorRequests.Style request) {
+        return styleResponse(styles.update(layerId, styleId, ifMatch, request), HttpStatus.OK);
+    }
+
+    @PutMapping("/layers/{layerId}/styles/{styleId}/default")
+    @Operation(summary = "切换图层默认样式", description = "If-Match 使用目标方案的ETag；原默认与新默认方案的版本同时更新")
+    @OperationLog(module = "GIS_VECTOR_STYLE", type = OperationType.UPDATE, description = "切换矢量默认样式")
+    public ResponseEntity<ResponseResult<GisVectorVO.Style>> setDefaultStyle(@PathVariable Long layerId, @PathVariable Long styleId,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch) {
+        return styleResponse(styles.setDefault(layerId, styleId, ifMatch), HttpStatus.OK);
+    }
+
+    @DeleteMapping("/layers/{layerId}/styles/{styleId}")
+    @Operation(summary = "删除非默认样式方案", description = "须携带最新If-Match；默认方案须先切换再删除")
+    @OperationLog(module = "GIS_VECTOR_STYLE", type = OperationType.DELETE, description = "删除矢量样式")
+    public ResponseResult<Void> deleteStyle(@PathVariable Long layerId, @PathVariable Long styleId,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch) {
+        styles.delete(layerId, styleId, ifMatch);
+        return ResponseResult.success();
+    }
+
+    @PostMapping("/layers/{layerId}/styles/{styleId}/match")
+    @Operation(summary = "预览指定要素在某层级的样式匹配", description = "提供 featureId、zoom；GeometryCollection 按路径返回结果，保留原要素ID")
+    public ResponseResult<GisVectorVO.StyleMatch> matchStyle(@PathVariable Long layerId, @PathVariable Long styleId,
+            @Valid @RequestBody GisVectorRequests.StyleMatch request) {
+        return ResponseResult.success(styles.match(layerId, styleId, request));
+    }
+
+    private ResponseEntity<ResponseResult<GisVectorVO.Style>> styleResponse(GisVectorVO.Style style, HttpStatus status) {
+        return ResponseEntity.status(status).eTag(VectorStyleService.etag(style.styleId(), style.version()))
+                .body(ResponseResult.success(style));
+    }
 
     @PostMapping("/layers/import")
     @Operation(summary = "从已上传GeoJSON导入矢量图层", description = "首期 SINGLE 模式；异步执行，重复requestId返回原任务")
