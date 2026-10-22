@@ -13,10 +13,6 @@ public final class GisVectorVO {
             String layerName, String status, long featureCount, JsonNode extent,
             JsonNode geometryTypes, long dataVersion, LocalDateTime createTime, LocalDateTime updateTime) { }
 
-    public record ImportTask(String taskId, String requestId, String status, long processedFeatureCount,
-            Long errorFeatureIndex, String errorMessage, List<Layer> layers,
-            LocalDateTime createTime, LocalDateTime finishTime) { }
-
     public record Feature(String type, String id, JsonNode geometry, JsonNode properties,
             long version, String layerId) { }
 

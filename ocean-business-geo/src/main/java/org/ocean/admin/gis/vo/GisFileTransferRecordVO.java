@@ -60,8 +60,6 @@ public class GisFileTransferRecordVO {
             String errorMessage,
             LocalDateTime createTime,
             LocalDateTime updateTime,
-            String vectorTaskId,
-            String vectorImportStatus,
             List<String> vectorLayerIds) {
     }
 }

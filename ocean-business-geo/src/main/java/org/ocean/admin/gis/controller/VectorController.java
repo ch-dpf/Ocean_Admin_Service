@@ -8,7 +8,6 @@ import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisVectorRequests;
-import org.ocean.admin.gis.service.VectorImportService;
 import org.ocean.admin.gis.service.VectorLayerService;
 import org.ocean.admin.gis.service.VectorStyleService;
 import org.ocean.admin.gis.service.VectorTileService;
@@ -33,9 +32,8 @@ import java.io.IOException;
 @RestController
 @RequestMapping("/api/gis/vector")
 @RequiredArgsConstructor
-@Tag(name = "GIS矢量要素管理", description = "GeoJSON导入、图层管理、空间查询与要素编辑")
+@Tag(name = "GIS矢量要素管理", description = "图层管理、空间查询与要素编辑")
 public class VectorController {
-    private final VectorImportService imports;
     private final VectorLayerService layers;
     private final GeoJsonFeatureReader reader;
     private final VectorStyleService styles;
@@ -161,26 +159,6 @@ public class VectorController {
     private ResponseEntity<ResponseResult<GisVectorVO.Style>> styleResponse(GisVectorVO.Style style, HttpStatus status) {
         return ResponseEntity.status(status).eTag(VectorStyleService.etag(style.styleId(), style.version()))
                 .body(ResponseResult.success(style));
-    }
-
-    @PostMapping("/layers/import")
-    @Operation(summary = "从已上传GeoJSON导入矢量图层", description = "首期 SINGLE 模式；异步执行，重复requestId返回原任务")
-    @OperationLog(module = "GIS_VECTOR", type = OperationType.SUBMIT, description = "导入矢量图层", recordResponse = true)
-    public ResponseEntity<ResponseResult<GisVectorVO.ImportTask>> submit(@Valid @RequestBody GisVectorRequests.Import request) {
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(ResponseResult.success(imports.submit(request)));
-    }
-
-    @GetMapping("/imports/{taskId}")
-    @Operation(summary = "查询矢量导入任务状态及图层结果")
-    public ResponseResult<GisVectorVO.ImportTask> importDetail(@PathVariable String taskId) {
-        return ResponseResult.success(imports.detail(taskId));
-    }
-
-    @PostMapping("/imports/{taskId}/retry")
-    @Operation(summary = "重试失败的矢量导入任务")
-    @OperationLog(module = "GIS_VECTOR", type = OperationType.SUBMIT, description = "重试矢量导入")
-    public ResponseEntity<ResponseResult<GisVectorVO.ImportTask>> retry(@PathVariable String taskId) {
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(ResponseResult.success(imports.retry(taskId)));
     }
 
     @GetMapping("/layers")

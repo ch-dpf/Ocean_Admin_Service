@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="org.ocean.admin.gis.mapper.GisVectorMapper">
     <sql id="layerColumns">
-        l.id, l.import_task_id, l.data_set_id, l.source_file_id, l.layer_key, l.layer_name,
+        l.id, l.data_set_id, l.source_file_id, l.layer_key, l.layer_name,
         l.layer_status, l.feature_count, l.geometry_types::text AS geometry_types,
         ST_AsGeoJSON(l.geographic_extent, 15, 0) AS geographic_extent,
         l.data_version, l.deleted, l.create_time, l.update_time
@@ -12,109 +12,39 @@
         f.properties::text AS properties_json, f.source_feature_id::text AS source_feature_id,
         f.source_feature_index, f.version, f.create_time, f.update_time
     </sql>
-    <select id="lockSource" resultType="org.ocean.admin.gis.entity.GisFileMeta">
-        SELECT * FROM ocean_gis.gis_file_meta WHERE id = #{id} AND deleted = 0 FOR UPDATE
-    </select>
-    <select id="findTaskByRequest" resultType="org.ocean.admin.gis.entity.GisVectorImportTask">
-        SELECT * FROM ocean_gis.gis_vector_import_task WHERE request_id = #{requestId}
-    </select>
-    <select id="findTask" resultType="org.ocean.admin.gis.entity.GisVectorImportTask">
-        SELECT * FROM ocean_gis.gis_vector_import_task WHERE task_no = #{taskNo}
-    </select>
-    <select id="findTaskById" resultType="org.ocean.admin.gis.entity.GisVectorImportTask">
-        SELECT * FROM ocean_gis.gis_vector_import_task WHERE id = #{id}
-    </select>
-    <insert id="insertTask">
-        INSERT INTO ocean_gis.gis_vector_import_task
-            (id, task_no, request_id, source_file_id, data_set_id, source_storage_key,
-             source_sha256, source_size_bytes, source_metadata_version, layer_name, split_mode, operator_id)
-        VALUES (#{t.id}, #{t.taskNo}, #{t.requestId}, #{t.sourceFileId}, #{t.dataSetId},
-            #{t.sourceStorageKey}, #{t.sourceSha256}, #{t.sourceSizeBytes}, #{t.sourceMetadataVersion},
-            #{t.layerName}, #{t.splitMode}, #{t.operatorId})
-    </insert>
     <insert id="insertLayer">
         INSERT INTO ocean_gis.gis_vector_layer
-            (id, import_task_id, data_set_id, source_file_id, layer_key, layer_name)
-        VALUES (#{l.id}, #{l.importTaskId}, #{l.dataSetId}, #{l.sourceFileId}, #{l.layerKey}, #{l.layerName})
+            (id, data_set_id, source_file_id, layer_key, layer_name)
+        VALUES (#{l.id}, #{l.dataSetId}, #{l.sourceFileId}, #{l.layerKey}, #{l.layerName})
     </insert>
-    <sql id="eligible">
-        (task_status = 'QUEUED' OR (task_status = 'RUNNING' AND lease_expires_at &lt; CURRENT_TIMESTAMP))
-    </sql>
-    <select id="candidates" resultType="long">
-        SELECT id FROM ocean_gis.gis_vector_import_task WHERE <include refid="eligible"/>
-        ORDER BY create_time, id LIMIT #{limit}
-    </select>
-    <select id="claim" resultType="org.ocean.admin.gis.entity.GisVectorImportTask" affectData="true" flushCache="true">
-        UPDATE ocean_gis.gis_vector_import_task
-        SET task_status = 'RUNNING', version = version + 1, start_time = CURRENT_TIMESTAMP,
-            lease_expires_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes',
-            processed_feature_count = 0, error_message = NULL, error_feature_index = NULL,
-            finish_time = NULL, update_time = CURRENT_TIMESTAMP
-        WHERE id = #{id} AND <include refid="eligible"/> RETURNING *
-    </select>
-    <select id="lockClaim" resultType="org.ocean.admin.gis.entity.GisVectorImportTask" flushCache="true">
-        SELECT * FROM ocean_gis.gis_vector_import_task
-        WHERE id = #{id} AND version = #{version} AND task_status = 'RUNNING'
-          AND lease_expires_at &gt; CURRENT_TIMESTAMP FOR UPDATE
-    </select>
-    <update id="renewLease">
-        UPDATE ocean_gis.gis_vector_import_task
-        SET lease_expires_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes', update_time = CURRENT_TIMESTAMP
-        WHERE id = #{id} AND version = #{version} AND task_status = 'RUNNING'
-          AND lease_expires_at &gt; CURRENT_TIMESTAMP
-    </update>
-    <update id="updateProgress">
-        UPDATE ocean_gis.gis_vector_import_task
-        SET processed_feature_count = #{count}, lease_expires_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes',
-            update_time = CURRENT_TIMESTAMP
-        WHERE id = #{id} AND version = #{version} AND task_status = 'RUNNING'
-    </update>
-    <update id="finishTask">
-        UPDATE ocean_gis.gis_vector_import_task
-        SET task_status = #{status}, processed_feature_count = #{count}, lease_expires_at = NULL,
-            error_feature_index = #{errorIndex}, error_message = #{error},
-            finish_time = CURRENT_TIMESTAMP, update_time = CURRENT_TIMESTAMP
-        WHERE id = #{id} AND version = #{version} AND task_status = 'RUNNING'
-    </update>
-    <update id="retry">
-        UPDATE ocean_gis.gis_vector_import_task SET task_status = 'QUEUED', version = version + 1,
-            error_message = NULL, error_feature_index = NULL, finish_time = NULL, start_time = NULL,
-            processed_feature_count = 0, update_time = CURRENT_TIMESTAMP
-        WHERE id = #{id} AND task_status = 'FAILED'
-    </update>
-    <select id="taskLayers" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
-        SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
-        WHERE l.import_task_id = #{taskId} AND l.deleted = 0 ORDER BY l.id
-    </select>
-    <update id="resetLayers">
-        UPDATE ocean_gis.gis_vector_layer SET layer_status = 'IMPORTING', feature_count = 0,
-            geographic_extent = NULL, geometry_types = '[]'::jsonb, update_time = CURRENT_TIMESTAMP
-        WHERE import_task_id = #{taskId} AND deleted = 0
-    </update>
-    <delete id="deleteImportedFeatures">
-        DELETE FROM ocean_gis.gis_vector_feature
-        WHERE layer_id IN (SELECT id FROM ocean_gis.gis_vector_layer WHERE import_task_id = #{taskId})
+    <delete id="deleteExtractingLayersBySource">
+        DELETE FROM ocean_gis.gis_vector_layer
+        WHERE source_file_id = #{fileId} AND layer_status = 'IMPORTING'
     </delete>
-    <update id="setLayersStatus">
+    <select id="layersBySource" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
+        SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        WHERE l.source_file_id = #{fileId} AND l.deleted = 0 ORDER BY l.id
+    </select>
+    <update id="setLayerStatus">
         UPDATE ocean_gis.gis_vector_layer SET layer_status = #{status}, update_time = CURRENT_TIMESTAMP
-        WHERE import_task_id = #{taskId} AND deleted = 0
+        WHERE id = #{id} AND deleted = 0
     </update>
     <select id="pageLayers" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
         SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
         JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
-        WHERE l.deleted = 0
+        WHERE l.deleted = 0 AND l.layer_status = 'READY'
         <if test="dataSetId != null">AND l.data_set_id = #{dataSetId}</if>
         ORDER BY l.id DESC
     </select>
     <select id="layer" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
         SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
         JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
-        WHERE l.id = #{id} AND l.deleted = 0
+        WHERE l.id = #{id} AND l.deleted = 0 AND l.layer_status = 'READY'
     </select>
     <select id="lockLayer" resultType="org.ocean.admin.gis.entity.GisVectorLayer" flushCache="true">
         SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
         JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
-        WHERE l.id = #{id} AND l.deleted = 0 FOR UPDATE OF l
+        WHERE l.id = #{id} AND l.deleted = 0 AND l.layer_status = 'READY' FOR UPDATE OF l
     </select>
     <update id="refreshLayer">
         UPDATE ocean_gis.gis_vector_layer l SET
@@ -188,9 +118,7 @@
         WHERE layer_id = #{layerId} AND id = #{id} AND version = #{expected} AND deleted = 0
     </update>
     <select id="countSourceReferences" resultType="long">
-        SELECT (SELECT count(*) FROM ocean_gis.gis_vector_layer WHERE source_file_id = #{fileId} AND deleted = 0)
-             + (SELECT count(*) FROM ocean_gis.gis_vector_import_task
-                WHERE source_file_id = #{fileId} AND task_status IN ('QUEUED','RUNNING'))
+        SELECT count(*) FROM ocean_gis.gis_vector_layer WHERE source_file_id = #{fileId} AND deleted = 0
     </select>
     <select id="countDataSetReferences" resultType="long">
         SELECT count(*) FROM ocean_gis.gis_vector_layer WHERE data_set_id = #{dataSetId} AND deleted = 0

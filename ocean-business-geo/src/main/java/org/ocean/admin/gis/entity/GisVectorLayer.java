@@ -7,7 +7,6 @@ import java.time.LocalDateTime;
 @Data
 public class GisVectorLayer {
     private Long id;
-    private Long importTaskId;
     private Long dataSetId;
     private Long sourceFileId;
     private String layerKey;

@@ -116,53 +116,7 @@ public class FileTransferRecordService {
         return record;
     }
 
-    public GisFileTransferRecordItem runningImportItem(Long fileId) {
-        return recordItemMapper.selectOne(new LambdaQueryWrapper<GisFileTransferRecordItem>()
-                .eq(GisFileTransferRecordItem::getFileMetaId, fileId)
-                .eq(GisFileTransferRecordItem::getOperationStatus, "RUNNING"));
-    }
-
-    public void attachVectorImport(Long itemId, Long taskId) {
-        if (recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
-                .eq("id", itemId).eq("operation_status", "RUNNING").isNull("vector_import_task_id")
-                .set("vector_import_task_id", taskId).set("update_time", LocalDateTime.now())) != 1) {
-            throw new IllegalStateException("矢量任务关联失败");
-        }
-    }
-
-    private GisFileTransferRecordItem vectorImportItem(Long taskId) {
-        return recordItemMapper.selectOne(new LambdaQueryWrapper<GisFileTransferRecordItem>()
-                .eq(GisFileTransferRecordItem::getVectorImportTaskId, taskId));
-    }
-
-    public GisFileTransferRecord vectorImportRecord(Long taskId) {
-        GisFileTransferRecordItem item = vectorImportItem(taskId);
-        return item == null ? null : recordMapper.selectById(item.getRecordId());
-    }
-
-    /** 与矢量任务终态、图层可见性在同一事务内提交；文件统计已在上传登记时更新。 */
-    @Transactional(rollbackFor = Exception.class)
-    public void completeVectorImport(Long taskId, boolean successful, String error) {
-        GisFileTransferRecordItem item = vectorImportItem(taskId);
-        if (item == null) return;
-        GisFileTransferRecord record = recordMapper.lockById(item.getRecordId());
-        if (record == null || !"RUNNING".equals(item.getOperationStatus())) throw new IllegalStateException("矢量导入明细状态不一致");
-        if (recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
-                .eq("id", item.getId()).eq("operation_status", "RUNNING")
-                .set("operation_status", successful ? "SUCCESS" : "FAILED")
-                .set("error_message", error).set("update_time", LocalDateTime.now())) != 1) {
-            throw new IllegalStateException("矢量导入结果提交失败");
-        }
-        publishImportProgress(refreshImportRecord(record));
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void reopenVectorImport(Long taskId) {
-        GisFileTransferRecordItem item = vectorImportItem(taskId);
-        if (item != null) reopenImportItem(item);
-    }
-
-    /** 元数据失败重试复用原上传明细，提取成功后可继续自动生成图层。 */
+    /** 文件提取失败重试复用原上传明细。 */
     @Transactional(rollbackFor = Exception.class)
     public void reopenMetadataImport(Long fileId) {
         List<GisFileTransferRecordItem> items = recordItemMapper.selectList(new LambdaQueryWrapper<GisFileTransferRecordItem>()
@@ -170,7 +124,6 @@ public class FileTransferRecordService {
                 .in(GisFileTransferRecordItem::getOperationStatus, "RUNNING", "FAILED")
                 .eq(GisFileTransferRecordItem::getUploadStatus, "READY"));
         for (GisFileTransferRecordItem item : items) {
-            if (item.getVectorImportTaskId() != null) throw new IllegalStateException("文件已进入矢量入库阶段，请通过原导入批次重试");
             if ("FAILED".equals(item.getOperationStatus())) reopenImportItem(item);
         }
     }
@@ -207,8 +160,7 @@ public class FileTransferRecordService {
                             record.getTotalCount(), "GIS_UPLOAD", TaskProgressUnit.FILE);
                 }
                 String message = switch (record.getCurrentStage()) {
-                    case "IMPORTING_VECTOR" -> "正在导入矢量要素";
-                    case "EXTRACTING_METADATA" -> "正在提取空间元数据";
+                    case "EXTRACTING_METADATA" -> "正在提取文件空间元数据与内容";
                     case "UPLOADING" -> "正在上传文件";
                     default -> "GIS数据导入结束";
                 };
@@ -514,7 +466,6 @@ public class FileTransferRecordService {
         GisFileTransferRecordItem item = items.getFirst();
         GisFileTransferRecord record = recordMapper.lockById(item.getRecordId());
         if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) return null;
-        if (successful && item.getVectorImportTaskId() != null) return refreshImportRecord(record);
         int updated = recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
                 .eq("id", item.getId()).eq("operation_status", "RUNNING")
                 .set("operation_status", successful ? "SUCCESS" : "FAILED")
@@ -531,9 +482,8 @@ public class FileTransferRecordService {
         boolean terminal = completed + failed == record.getTotalCount();
         TaskStatus state = !terminal ? TaskStatus.RUNNING : failed == 0 ? TaskStatus.COMPLETED
                 : completed == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED;
-        boolean metadataPending = items.stream().anyMatch(i -> "RUNNING".equals(i.getOperationStatus()) && i.getVectorImportTaskId() == null);
         String stage = terminal ? state.name() : transferred < record.getTotalCount() ? "UPLOADING"
-                : metadataPending ? "EXTRACTING_METADATA" : "IMPORTING_VECTOR";
+                : "EXTRACTING_METADATA";
         recordMapper.update(null, new UpdateWrapper<GisFileTransferRecord>()
                 .eq("id", record.getId())
                 .set("completed_count", completed).set("failed_count", failed)
@@ -644,8 +594,7 @@ public class FileTransferRecordService {
 
     public GisFileTransferRecordVO.FileItemVO toFileItemVO(
             GisFileTransferRecordItem item) {
-        var vectorTask = item.getVectorImportTaskId() == null ? null : vectorMapper.findTaskById(item.getVectorImportTaskId());
-        List<String> layerIds = vectorTask == null ? List.of() : vectorMapper.taskLayers(vectorTask.getId()).stream()
+        List<String> layerIds = item.getFileMetaId() == null ? List.of() : vectorMapper.layersBySource(item.getFileMetaId()).stream()
                 .map(layer -> layer.getId().toString()).toList();
         return new GisFileTransferRecordVO.FileItemVO(
                 item.getId(),
@@ -664,10 +613,7 @@ public class FileTransferRecordService {
                 item.getCleanupStatus(),
                 item.getErrorMessage(),
                 item.getCreateTime(),
-                item.getUpdateTime(),
-                vectorTask == null ? null : vectorTask.getTaskNo(),
-                vectorTask == null ? null : vectorTask.getTaskStatus(),
-                layerIds);
+                item.getUpdateTime(), layerIds);
     }
 
     private String trimToNull(String value) {

@@ -30,10 +30,6 @@ public final class TaskNoGenerator {
         return generate("archive", LocalDateTime.now());
     }
 
-    public static String generateVectorImportTaskNo() {
-        return generate("vector_import", LocalDateTime.now());
-    }
-
     public static String generateProcessingTaskNo(GisProcessingType type) {
         if (type == null) {
             throw new IllegalArgumentException("GIS 处理类型不能为空");

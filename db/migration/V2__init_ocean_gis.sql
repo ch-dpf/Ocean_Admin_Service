@@ -278,42 +278,8 @@ COMMENT ON COLUMN ocean_gis.gis_file_spatial_metadata.recommended_max_zoom IS '�
 -- GIS 文件操作逐文件明细
 -- =========================================================
 
--- 矢量任务可关联上传明细；图层就绪后才完成该文件的导入。
-CREATE TABLE ocean_gis.gis_vector_import_task (
-    id BIGINT PRIMARY KEY,
-    task_no VARCHAR(64) NOT NULL UNIQUE,
-    request_id VARCHAR(128) NOT NULL UNIQUE,
-    source_file_id BIGINT REFERENCES ocean_gis.gis_file_meta(id) ON DELETE SET NULL,
-    data_set_id BIGINT NOT NULL REFERENCES ocean_gis.gis_data_set(id),
-    source_storage_key VARCHAR(1000) NOT NULL,
-    source_sha256 VARCHAR(64),
-    source_size_bytes BIGINT NOT NULL CHECK (source_size_bytes >= 0),
-    source_metadata_version BIGINT NOT NULL,
-    layer_name VARCHAR(100) NOT NULL,
-    split_mode VARCHAR(32) NOT NULL DEFAULT 'SINGLE',
-    task_status VARCHAR(20) NOT NULL DEFAULT 'QUEUED'
-        CHECK (task_status IN ('QUEUED','RUNNING','COMPLETED','FAILED')),
-    processed_feature_count BIGINT NOT NULL DEFAULT 0 CHECK (processed_feature_count >= 0),
-    version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0),
-    lease_expires_at TIMESTAMP,
-    error_feature_index BIGINT CHECK (error_feature_index >= 0),
-    error_message VARCHAR(1000),
-    operator_id BIGINT,
-    start_time TIMESTAMP,
-    finish_time TIMESTAMP,
-    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CHECK ((task_status = 'RUNNING') = (lease_expires_at IS NOT NULL)),
-    CHECK ((task_status IN ('COMPLETED','FAILED')) = (finish_time IS NOT NULL))
-);
-CREATE INDEX idx_gis_vector_import_queue
-    ON ocean_gis.gis_vector_import_task(task_status, lease_expires_at, create_time)
-    WHERE task_status IN ('QUEUED','RUNNING');
-CREATE INDEX idx_gis_vector_import_source ON ocean_gis.gis_vector_import_task(source_file_id);
-
 CREATE TABLE ocean_gis.gis_vector_layer (
     id BIGINT PRIMARY KEY,
-    import_task_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_import_task(id),
     data_set_id BIGINT NOT NULL REFERENCES ocean_gis.gis_data_set(id),
     source_file_id BIGINT REFERENCES ocean_gis.gis_file_meta(id),
     layer_key VARCHAR(255) NOT NULL,
@@ -327,7 +293,8 @@ CREATE TABLE ocean_gis.gis_vector_layer (
     create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
-    UNIQUE (import_task_id, layer_key),
+    UNIQUE (source_file_id, layer_key),
+    CHECK (deleted = 1 OR source_file_id IS NOT NULL),
     CHECK (geographic_extent IS NULL OR
         (NOT public.ST_IsEmpty(geographic_extent) AND public.ST_IsValid(geographic_extent)))
 );
@@ -372,9 +339,8 @@ CREATE TABLE ocean_gis.gis_vector_feature (
 );
 CREATE INDEX idx_gis_vector_feature_layer ON ocean_gis.gis_vector_feature(layer_id, id) WHERE deleted = 0;
 CREATE INDEX idx_gis_vector_feature_geom ON ocean_gis.gis_vector_feature USING GIST(geom) WHERE deleted = 0;
-COMMENT ON TABLE ocean_gis.gis_vector_import_task IS '可恢复的矢量要素导入任务；split_mode 首期仅支持 SINGLE';
-COMMENT ON TABLE ocean_gis.gis_vector_layer IS '可编辑矢量图层；同一来源文件允许生成多个图层';
-COMMENT ON COLUMN ocean_gis.gis_vector_layer.layer_key IS '导入任务内稳定图层键；首期为 default';
+COMMENT ON TABLE ocean_gis.gis_vector_layer IS '从原始矢量文件提取的可编辑图层；同一来源文件允许生成多个图层';
+COMMENT ON COLUMN ocean_gis.gis_vector_layer.layer_key IS '来源文件内稳定图层键；首期为 default';
 COMMENT ON COLUMN ocean_gis.gis_vector_layer.geographic_extent IS '当前要素的二维包围范围；与来源文件范围独立维护';
 COMMENT ON TABLE ocean_gis.gis_vector_feature IS '逐要素几何与属性；编辑不回写来源文件';
 COMMENT ON COLUMN ocean_gis.gis_vector_feature.geom IS 'SRID 4326，保留 XY 或 XYZ；空间索引和默认空间查询为二维';
@@ -441,7 +407,6 @@ CREATE TABLE ocean_gis.gis_file_transfer_record_item (
     id                  BIGINT        PRIMARY KEY,
     record_id           BIGINT        NOT NULL,
     file_meta_id        BIGINT,
-    vector_import_task_id BIGINT UNIQUE REFERENCES ocean_gis.gis_vector_import_task(id),
     sequence_no         INTEGER       NOT NULL,
     original_name       VARCHAR(255)  NOT NULL,
     operation_status    VARCHAR(20)   NOT NULL,
@@ -471,7 +436,6 @@ CREATE TABLE ocean_gis.gis_file_transfer_record_item (
 
 COMMENT ON TABLE ocean_gis.gis_file_transfer_record_item IS 'GIS 文件上传下载批次的逐文件处理明细';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.file_meta_id IS '对应文件元数据；文件形成前失败时允许为空';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.vector_import_task_id IS '矢量自动入库任务；完成后才计入本文件导入成功，重试复用';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.operation_status IS '本次操作状态：PENDING、RUNNING、SUCCESS、FAILED';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.storage_name IS '操作发生时的系统存储文件名快照';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.storage_key IS '操作发生时的存储路径或对象存储 Key 快照';

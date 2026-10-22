@@ -46,7 +46,7 @@ mvn -pl ocean-bootstrap -am spring-boot:run
 
 ## GIS 空间元数据与范围查询
 
-原始文件传输完成后，导入任务仍处于 `RUNNING`，阶段为 `EXTRACTING_METADATA`。普通文件在元数据提交后计入导入成功；矢量数据集中的 GeoJSON 还会自动进入 `IMPORTING_VECTOR`，图层 READY 后才计入成功。批次内可继续上传下一文件，无需等待前一文件处理完成。
+原始文件传输完成后，导入批次仍处于 `RUNNING`，阶段为 `EXTRACTING_METADATA`。普通文件提取空间元数据；矢量数据集中的 GeoJSON 在同一文件提取阶段继续生成图层与要素，图层 READY 后该文件才计入成功。批次内可继续上传下一文件，无需等待前一文件处理完成。
 
 首期提取 GeoTIFF（`.tif/.tiff`）与 GeoJSON（`.geojson/.json`）。GeoJSON 必须使用 WGS84 经度、纬度顺序；默认按 RFC 7946 读取，文件顶层也接受下文列出的旧式 WGS84 命名 `crs` 声明。配套附件标记 `NOT_APPLICABLE`，其他主格式返回 `UNSUPPORTED_FORMAT`，原文件保留。
 
@@ -63,7 +63,7 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 `recommendedMaxZoom` 按文件所属数据集的默认处理类型估算，并限制为 0～22。影像使用 `WebMercatorQuad`、256×256 像素口径，以 3×3 位置采样的 EPSG:3857 像素间距最大值估算；向下取整前对距整数层级不超过 1e-7 的浮点误差归整，避免原生第 14 层被误判为第 13 层。地形使用 `WorldCRS84Quad`，按当前固定版本 mago-3d-terrainer 的源 X 像素间距及末级细分规则计算默认可用深度。查询 `requiredZoom` 时须同时选择对应的 `tileMatrixSetId`，两种矩阵不混比。矢量或无法估算的文件该值为空；未知层级不命中 `requiredZoom`。该值不代表显式修改处理参数后或多文件组合生成的成果实际层级。
 
-`POST /api/gis/filemeta/{id}/metadata/retry` 重新提交提取任务；重新提取期间旧空间记录退出检索。任务使用数据库待办、版本校验和 15 分钟租约，服务重启后自动恢复。扫描间隔由 `gis.metadata.poll-interval` 配置，默认 5000 毫秒；使用独立的两个执行线程。
+`POST /api/gis/filemeta/{id}/metadata/retry` 仅重新提交提取失败的文件；已成功生成且可能被编辑的矢量图层不会被覆盖。提取使用数据库待办、版本校验和 15 分钟租约，服务重启后自动恢复。扫描间隔由 `gis.metadata.poll-interval` 配置，默认 5000 毫秒；使用独立的两个执行线程。
 
 数据库须安装 PostGIS；部署镜像使用 `postgis/postgis:16-3.5-alpine`。业务表与索引统一维护在 `db/migration/V2__init_ocean_gis.sql`。已有开发库需先补齐最终结构，再依次执行 `mvn flyway:repair`、`mvn flyway:validate`；repair 本身不会修改业务表结构。
 
@@ -71,21 +71,13 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 向矢量数据集（`categoryId=2`）调用现有 `POST /api/gis/uploads/chunks` 上传 `.geojson/.json`，空间元数据完成后会自动生成可编辑图层，无需从已管理文件再次提交导入。默认每个文件一个 SINGLE 图层，名称取原文件名去扩展名并截取前100个字符。
 
-原上传批次持续展示 `UPLOADING → EXTRACTING_METADATA → IMPORTING_VECTOR → COMPLETED/FAILED/PARTIAL_FAILED`；多个文件可并行提取和入库，批次阶段反映当前尚未完成的工作。仅图层 READY 后，该文件的 `importCompleted` 才为 true、批次成功数量才增加。`fileCompleted=true` 仅表示文件已完整上传。
+原上传批次持续展示 `UPLOADING → EXTRACTING_METADATA → COMPLETED/FAILED/PARTIAL_FAILED`；多个文件可并行提取。矢量文件在 `EXTRACTING_METADATA` 阶段内流式写入图层和要素，仅图层 READY 后批次成功数量才增加。
 
-通过 `GET /api/gis/file-transfer-records/{taskId}` 查询原上传批次；`files[]` 中的 `vectorTaskId`、`vectorImportStatus`、`vectorLayerIds` 提供矢量任务及图层结果，图层 ID 为字符串数组，供后续扩展多图层。上传或重复分块响应也包含这些字段以及 `fileMetaId`；自动任务尚未创建时任务号为空、图层数组为空。自动入库共用原批次的 Redis/WebSocket 进度，不另创建一条实时任务。
+通过 `GET /api/gis/file-transfer-records/{taskId}` 查询原上传批次；`files[]` 中的 `vectorLayerIds` 返回由该原始文件提取的图层 ID。矢量提取共用原批次的 Redis/WebSocket 进度，不创建独立任务。
 
-`POST /api/gis/file-transfer-records/{taskId}/retry` 重试该批次中已完整上传的失败文件：元数据失败重新提取，要素入库失败复用原矢量任务和图层；成功文件及其编辑成果不重新导入。传输失败的文件需重新上传。矢量任务排队、执行或失败待重试时，元数据重试接口拒绝使来源快照失效，应通过原批次重试。任务中断后由数据库待办和租约自动恢复。
+`POST /api/gis/file-transfer-records/{taskId}/retry` 重试该批次中已完整上传但提取失败的文件。未完成矢量图层及要素会先清理后重新提取；成功文件及其编辑成果不会重新提取。传输失败的文件需重新上传。
 
-对已管理文件另行创建图层时，也可通过 `POST /api/gis/vector/layers/import` 显式提交。文件须属于矢量数据集，且为 `LOCAL`、`uploadStatus=READY`、`metadataStatus=COMPLETED`。
-
-```json
-{"fileMetaId":"文件ID","layerName":"海岛基础要素","requestId":"客户端唯一标识","splitMode":"SINGLE"}
-```
-
-接口返回 HTTP 202，`data.taskId` 为稳定任务号，`data.layers` 为图层数组。首期每次导入生成一个 `layerKey=default` 的图层，所有 Feature 进入该图层；MultiPolygon、GeometryCollection 不拆成多条要素。默认 `splitMode=SINGLE`，其他模式返回400。来源文件、导入任务与图层的关系允许后续扩展多个图层。
-
-同一 requestId 和相同参数复用原任务，不同参数返回409。通过 `GET /api/gis/vector/imports/{taskId}` 查询 `QUEUED/RUNNING/COMPLETED/FAILED`、已写入数量、失败要素序号及图层结果；失败任务可调用 `POST /api/gis/vector/imports/{taskId}/retry`。失败要素序号从0开始。导入采用流式解析、分批写入和数据库租约；任务中断后自动重新领取，清理未完成结果后从头执行。整次导入成功后图层才变为 READY；失败会清理已写入要素。
+首期每个 GeoJSON 文件生成一个 `layerKey=default` 的图层，所有 Feature 进入该图层；MultiPolygon、GeometryCollection 不拆成多条要素。文件、图层与要素通过 `gis_vector_layer.source_file_id` 和 `gis_vector_feature.layer_id` 直接关联。
 
 ```text
 GET    /api/gis/vector/layers?dataSetId=...&current=1&size=10

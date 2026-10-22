@@ -27,17 +27,6 @@ public class TaskExecutionConfig {
         return executor;
     }
 
-    @Bean("vectorExecutor")
-    public Executor vectorExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(2);
-        executor.setQueueCapacity(0);
-        executor.setThreadNamePrefix("geo-vector-");
-        executor.initialize();
-        return executor;
-    }
-
     @Bean("metadataExecutor")
     public Executor metadataExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

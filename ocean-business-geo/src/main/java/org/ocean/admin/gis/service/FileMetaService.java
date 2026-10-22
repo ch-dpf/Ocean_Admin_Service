@@ -67,7 +67,7 @@ public class FileMetaService {
     public void retryMetadata(Long id) {
         GisFileMeta meta = getRequiredForUpdate(id);
         if (!"READY".equals(meta.getUploadStatus())) throw new IllegalArgumentException("仅能重新提取传输完整的文件");
-        if ("RUNNING".equals(meta.getMetadataStatus())) throw new IllegalStateException("文件正在提取元数据");
+        if (!"FAILED".equals(meta.getMetadataStatus())) throw new IllegalStateException("仅提取失败的文件可以重试");
         fileTransferRecordService.reopenMetadataImport(id);
         spatialMetadataService.invalidate(id);
     }

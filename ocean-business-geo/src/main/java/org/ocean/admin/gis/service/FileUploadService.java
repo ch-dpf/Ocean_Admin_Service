@@ -71,7 +71,6 @@ public class FileUploadService {
     private final AsyncTaskService asyncTaskService;
     private final FileTransferRecordService fileTransferRecordService;
     private final FileMetaService fileMetaService;
-    private final VectorImportService vectorImports;
     private final FileUploadConfig uploadConfig;
     private final Object capacityMonitor = new Object();
 
@@ -87,10 +86,7 @@ public class FileUploadService {
             if (failed.isEmpty() && record.getRecordStatus() != TaskStatus.RUNNING) {
                 throw new IllegalStateException("批次没有可重试的已上传文件；传输失败的文件需要重新上传");
             }
-            for (var item : failed) {
-                if (item.getVectorImportTaskId() == null) fileMetaService.retryMetadata(item.getFileMetaId());
-                else vectorImports.retryUploadTask(item.getVectorImportTaskId());
-            }
+            for (var item : failed) fileMetaService.retryMetadata(item.getFileMetaId());
             return fileTransferRecordService.getRecordDetail(recordNo);
         }
     }
@@ -413,7 +409,7 @@ public class FileUploadService {
                     TaskProgressUpdate.stageChanged("UPLOADING".equals(record.getCurrentStage())
                             ? createByteStage("UPLOADING", "等待上传数据", record.getUploadedBytes(), record.getTotalBytes())
                             : TaskStage.indeterminate(record.getCurrentStage(),
-                                    "IMPORTING_VECTOR".equals(record.getCurrentStage()) ? "正在导入矢量要素" : "正在提取空间元数据")),
+                                    "正在提取文件空间元数据与内容")),
                     TaskProgressUpdate.overallProgressChanged(progressPercent(
                             record.getUploadedBytes(), record.getTotalBytes())));
             return;
@@ -659,8 +655,6 @@ public class FileUploadService {
         if (item != null) {
             var fileResult = fileTransferRecordService.toFileItemVO(item);
             result.put("fileMetaId", item.getFileMetaId());
-            result.put("vectorTaskId", fileResult.vectorTaskId());
-            result.put("vectorImportStatus", fileResult.vectorImportStatus());
             result.put("vectorLayerIds", fileResult.vectorLayerIds());
         }
         return result;

@@ -40,13 +40,13 @@ ocean-business-cloud
 
 GIS 文件传输与空间元数据提取分阶段执行。原始文件保存在文件存储，PostGIS 保存图层范围及源空间参考；普通文件在元数据完成后计入导入成功，矢量数据集的 GeoJSON 自动继续生成可编辑图层。后台任务使用数据库待办、版本与租约恢复，查询通过空间索引在同一图层上组合矩形与推荐层级条件。
 
-可编辑矢量业务位于 `ocean-business-geo`。`VectorImportService` 从已上传 GeoJSON 流式读取并分批写入真实要素，`VectorImportWorker` 通过独立线程池和数据库租约执行任务；仅整次导入成功后开放图层。导入任务、图层与要素独立建模，首期 SINGLE 模式为一文件生成一个图层，关系允许后续扩展多个图层。现有静态瓦片处理与发布流程继续负责静态成果。
+可编辑矢量业务位于 `ocean-business-geo`。`FileSpatialMetadataService` 在文件元数据领取周期内流式读取 GeoJSON、分批写入真实要素，并在完整成功后开放图层。首期一文件生成一个图层，文件、图层与要素直接关联，不建立独立矢量导入任务。现有静态瓦片处理与发布流程继续负责静态成果。
 
-`FileSpatialMetadataService` 在元数据提交事务中调用 `VectorImportService.enqueueUploadedSource` 创建任务并关联原上传明细，提交即具备可恢复的入库待办。矢量任务终态、图层 READY 和原明细成功状态在同一事务提交。`FileTransferRecordService` 汇总批次并在提交后推送统一进度；`FileUploadService.retryImport` 根据失败阶段重试，复用原文件、任务和图层，跳过成功文件。批次详情提供矢量任务号、状态及图层 ID 数组。已管理文件的显式入库继续复用相同矢量执行能力。
+`gis_file_meta` 的元数据状态、版本和租约是文件提取流程的唯一权威状态。矢量解析中断后重新领取同一文件，先清理未完成图层再从头提取；成功图层不会被元数据重试覆盖。图层 READY、文件元数据 COMPLETED 和原上传明细 SUCCESS 在同一事务提交。`FileTransferRecordService` 汇总批次并返回由文件直接关联的图层 ID。
 
-`VectorLayerService` 提供真实几何范围查询及要素编辑，以图层行锁维护数量、范围和数据版本，以要素版本及 HTTP If-Match 防止编辑覆盖。来源文件保持为导入时的数据依据；制图查询访问当前要素，编辑不回写原文件。空间响应使用 GeoJSON，图层及任务管理响应使用统一 ResponseResult。
+`VectorLayerService` 提供真实几何范围查询及要素编辑，以图层行锁维护数量、范围和数据版本，以要素版本及 HTTP If-Match 防止编辑覆盖。来源文件保持为提取时的数据依据；制图查询访问当前要素，编辑不回写原文件。空间响应使用 GeoJSON，图层管理响应使用统一 ResponseResult。
 
-`VectorStyleService` 管理图层关联的多份样式方案、默认选择及独立ETag版本。`VectorImportService` 创建图层时在同一事务创建默认样式；样式写操作锁定图层但不递增 dataVersion。默认切换同时更新原方案和目标方案版本，数据库以部分唯一索引阻止多个默认方案，业务禁止删除当前默认方案。逻辑删除图层后其样式不再可访问。
+`VectorStyleService` 管理图层关联的多份样式方案、默认选择及独立ETag版本。`FileSpatialMetadataService` 创建矢量图层时在同一事务创建默认样式；样式写操作锁定图层但不递增 dataVersion。默认切换同时更新原方案和目标方案版本，数据库以部分唯一索引阻止多个默认方案，业务禁止删除当前默认方案。逻辑删除图层后其样式不再可访问。
 
 `VectorStyleRules` 定义引擎无关的 schemaVersion=1 协议，负责有界规则校验、符号默认值补齐及几何/属性/连续zoom匹配。规则取首个匹配项，未匹配隐藏，GeometryCollection按子几何路径匹配并保留要素身份。后端提供持久化定义与匹配预览，前端读取定义后本地渲染；样式不改变要素查询、编辑语义或分页游标，也不作为数据访问权限。
 
