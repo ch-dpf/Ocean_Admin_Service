@@ -33,19 +33,7 @@ public final class GisVectorVO {
             long featureVersion, double zoom, List<RuleMatch> matches) { }
 
     public record RenderContext(String contextId, String layerId, String dataVersion, List<String> fields,
-            boolean aggregatePoints, int gridPixels, int bufferPixels, int maxZoom, Instant expiresAt,
-            String generalizationBuildId, String policyVersion, int overviewMaxZoom,
-            boolean overviewAvailable, String overviewStatus, String overviewMessage) { }
-
-    public record GeneralizationBuild(String buildId, String dataVersion, String policyVersion, String status,
-            int completedZoom, long maxTileBytes, String errorMessage, LocalDateTime createTime, LocalDateTime finishTime) { }
-    public record Generalization(String layerId, JsonNode policy, String policyVersion, String dataVersion,
-            GeneralizationBuild latestBuild, GeneralizationBuild publishedBuild) { }
-    public record GeneralizationMembers(String representationId, List<ClusterMember> members, boolean hasMore,
-            String nextCursor, String dataVersion) { }
-    /** 以下记录仅供概化持久化及服务内部协作。 */
-    public record GeneralizationConfig(Long layerId, String policyJson, long policyVersion, Long publishedBuildId) { }
-    public record GeneralizationExtent(double west, double south, double east, double north) { }
+            boolean aggregatePoints, int gridPixels, int bufferPixels, int maxZoom, Instant expiresAt) { }
 
     public record ClusterMember(String featureId, JsonNode properties, long version) { }
 

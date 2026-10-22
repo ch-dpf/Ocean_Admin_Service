@@ -16,17 +16,6 @@ import java.util.concurrent.Executor;
 @Configuration
 public class TaskExecutionConfig {
 
-    @Bean("generalizationExecutor")
-    public Executor generalizationExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(1);
-        executor.setQueueCapacity(0);
-        executor.setThreadNamePrefix("geo-generalization-");
-        executor.initialize();
-        return executor;
-    }
-
     @Bean("metadataExecutor")
     public Executor metadataExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

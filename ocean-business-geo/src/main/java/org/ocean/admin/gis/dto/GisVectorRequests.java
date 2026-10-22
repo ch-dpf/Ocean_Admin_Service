@@ -15,8 +15,6 @@ public final class GisVectorRequests {
 
     public record StyleMatch(@NotNull @Positive Long featureId, @NotNull Double zoom) { }
 
-    public record Generalization(@NotNull JsonNode policy) { }
-
     public record RenderContext(@NotNull @Size(max = 512) List<@NotBlank @Size(max = 255) String> fields,
             Boolean aggregatePoints, Integer bufferPixels) { }
 }

@@ -35,9 +35,6 @@ public class VectorTileProperties {
     private int tileCacheTtlSeconds = 120;
     @Positive
     private int maxCachedTiles = 64;
-    @Min(1000) @Max(240000)
-    private int generalizationQueryTimeoutMs = 120000;
-
     @AssertTrue(message = "gridPixels 必须整除256，以保证跨瓦片聚合网格一致")
     public boolean isGridAligned() { return gridPixels > 0 && 256 % gridPixels == 0; }
 }

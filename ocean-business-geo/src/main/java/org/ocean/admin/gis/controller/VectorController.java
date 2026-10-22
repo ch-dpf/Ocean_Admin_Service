@@ -11,7 +11,6 @@ import org.ocean.admin.gis.dto.GisVectorRequests;
 import org.ocean.admin.gis.service.VectorLayerService;
 import org.ocean.admin.gis.service.VectorStyleService;
 import org.ocean.admin.gis.service.VectorTileService;
-import org.ocean.admin.gis.service.VectorGeneralizationService;
 import org.ocean.admin.gis.vo.GisVectorVO;
 import org.ocean.admin.gis.util.GeoJsonFeatureReader;
 import org.ocean.admin.kernel.audit.OperationLog;
@@ -38,43 +37,6 @@ public class VectorController {
     private final GeoJsonFeatureReader reader;
     private final VectorStyleService styles;
     private final VectorTileService tiles;
-    private final VectorGeneralizationService generalization;
-
-    @GetMapping("/layers/{layerId}/generalization")
-    @Operation(summary="读取概化策略、构建状态和发布版本")
-    public ResponseEntity<ResponseResult<GisVectorVO.Generalization>> generalization(@PathVariable Long layerId) {
-        return generalizationResponse(generalization.detail(layerId),HttpStatus.OK);
-    }
-
-    @PutMapping("/layers/{layerId}/generalization")
-    @Operation(summary="保存概化策略并异步构建",description="携带策略If-Match；只影响派生显示数据")
-    @OperationLog(module="GIS_VECTOR",type=OperationType.UPDATE,description="修改矢量概化策略")
-    public ResponseEntity<ResponseResult<GisVectorVO.Generalization>> saveGeneralization(@PathVariable Long layerId,
-            @RequestHeader(value="If-Match",required=false) String ifMatch,@Valid @RequestBody GisVectorRequests.Generalization body) {
-        return generalizationResponse(generalization.save(layerId,ifMatch,body.policy()),HttpStatus.ACCEPTED);
-    }
-
-    @PostMapping("/layers/{layerId}/generalization/builds")
-    @Operation(summary="提交概化重建",description="排队中的同图层构建自动合并；携带策略If-Match")
-    @OperationLog(module="GIS_VECTOR",type=OperationType.SUBMIT,description="重建矢量概览")
-    public ResponseEntity<ResponseResult<GisVectorVO.Generalization>> rebuildGeneralization(@PathVariable Long layerId,
-            @RequestHeader(value="If-Match",required=false) String ifMatch) {
-        return generalizationResponse(generalization.rebuild(layerId,ifMatch),HttpStatus.ACCEPTED);
-    }
-
-    @GetMapping("/layers/{layerId}/representations/{representationId}/features")
-    @Operation(summary="分页查询概化对象的原始要素成员")
-    public ResponseResult<GisVectorVO.GeneralizationMembers> representationMembers(@PathVariable Long layerId,
-            @PathVariable String representationId,@RequestParam String contextId,@RequestParam(defaultValue="50") int limit,
-            @RequestParam(required=false) String cursor) {
-        return ResponseResult.success(tiles.getRepresentationFeatures(layerId,contextId,representationId,limit,cursor));
-    }
-
-    private ResponseEntity<ResponseResult<GisVectorVO.Generalization>> generalizationResponse(GisVectorVO.Generalization state,HttpStatus status) {
-        return ResponseEntity.status(status).eTag(VectorGeneralizationService.etag(Long.valueOf(state.layerId()),Long.parseLong(state.policyVersion())))
-                .body(ResponseResult.success(state));
-    }
-
     @PostMapping("/layers/{layerId}/render-contexts")
     @Operation(summary = "创建版本化矢量渲染上下文", description = "fields 按字面取属性；聚合以投影后的属性分组，保留 null 与缺失语义")
     public ResponseResult<GisVectorVO.RenderContext> renderContext(@PathVariable Long layerId,

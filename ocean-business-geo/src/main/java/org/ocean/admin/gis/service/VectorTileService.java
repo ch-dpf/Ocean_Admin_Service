@@ -3,7 +3,6 @@ package org.ocean.admin.gis.service;
 import org.ocean.admin.gis.config.VectorTileProperties;
 import org.ocean.admin.gis.dto.GisVectorRequests;
 import org.ocean.admin.gis.mapper.GisVectorMapper;
-import org.ocean.admin.gis.mapper.GisVectorGeneralizationMapper;
 import org.ocean.admin.gis.vo.GisVectorVO;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -37,9 +36,9 @@ import java.util.function.Supplier;
 /** 同一数据版本生成一致的显示瓦片；原始要素查询和编辑仍由图层服务负责。 */
 @Service
 public class VectorTileService {
-    private static final String CONTEXT_PREFIX = "gis:vector:context:v2:";
-    private static final String TILE_PREFIX = "gis:vector:tile:v2:";
-    private static final String CACHE_INDEX = "gis:vector:tile:v2:index";
+    private static final String CONTEXT_PREFIX = "gis:vector:context:v3:";
+    private static final String TILE_PREFIX = "gis:vector:tile:v3:";
+    private static final String CACHE_INDEX = "gis:vector:tile:v3:index";
     private static final DefaultRedisScript<Long> CACHE_WRITE = new DefaultRedisScript<>("""
             redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2])
             redis.call('ZADD',KEYS[2],ARGV[3],KEYS[1])
@@ -58,23 +57,18 @@ public class VectorTileService {
     private final VectorTileProperties properties;
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
-    private final VectorGeneralizationService generalization;
-    private final GisVectorGeneralizationMapper generalized;
     private final Semaphore queries;
     private final Semaphore admissions;
     private final TransactionTemplate reads;
     private final ConcurrentHashMap<String, CompletableFuture<byte[]>> inFlight = new ConcurrentHashMap<>();
 
     public VectorTileService(GisVectorMapper mapper, VectorLayerService layers, VectorTileProperties properties,
-            StringRedisTemplate redis, ObjectMapper json, PlatformTransactionManager transactions,
-            VectorGeneralizationService generalization, GisVectorGeneralizationMapper generalized) {
+            StringRedisTemplate redis, ObjectMapper json, PlatformTransactionManager transactions) {
         this.mapper = mapper;
         this.layers = layers;
         this.properties = properties;
         this.redis = redis;
         this.json = json;
-        this.generalization = generalization;
-        this.generalized = generalized;
         this.queries = new Semaphore(properties.getMaxConcurrentQueries(), true);
         this.admissions = new Semaphore(properties.getMaxConcurrentQueries() + properties.getMaxQueuedQueries(), true);
         this.reads = new TransactionTemplate(transactions);
@@ -97,13 +91,11 @@ public class VectorTileService {
         if (buffer < 0 || buffer > 2048) throw bad("bufferPixels 须为0至2048的整数");
         boolean aggregate = request.aggregatePoints() == null || request.aggregatePoints();
         String version = Long.toString(layer.dataVersion());
-        var overview = generalization.plan(layerId,layer.dataVersion(),fields,buffer);
         String signature = json.writeValueAsString(List.of(layer.layerId(),version,fields,aggregate,
-                properties.getGridPixels(),buffer,properties.getMaxZoom(),overview));
+                properties.getGridPixels(),buffer,properties.getMaxZoom()));
         String id = digest(signature);
         var context = new GisVectorVO.RenderContext(id,layer.layerId(),version,fields,aggregate,
-                properties.getGridPixels(),buffer,properties.getMaxZoom(),Instant.now().plusSeconds(properties.getContextTtlSeconds()),
-                overview.buildId(),overview.policyVersion(),overview.maxZoom(),overview.available(),overview.status(),overview.message());
+                properties.getGridPixels(),buffer,properties.getMaxZoom(),Instant.now().plusSeconds(properties.getContextTtlSeconds()));
         try {
             redis.opsForValue().set(CONTEXT_PREFIX + id,json.writeValueAsString(context),Duration.ofSeconds(properties.getContextTtlSeconds()));
         } catch (DataAccessException ex) { throw unavailable("渲染上下文存储暂不可用"); }
@@ -113,9 +105,6 @@ public class VectorTileService {
     public byte[] getTile(Long layerId, String contextId, int z, int x, int y) {
         var context = requireContext(layerId,contextId);
         requireTile(z,x,y,context.maxZoom());
-        if (z<=context.overviewMaxZoom() && !context.overviewAvailable()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,context.overviewMessage());
-        }
         String key = TILE_PREFIX + contextId + ':' + z + ':' + x + ':' + y;
         byte[] cached = cachedTile(key);
         if (cached != null) return cached;
@@ -129,11 +118,8 @@ public class VectorTileService {
                 byte[] existing = cachedTile(key);
                 if (existing != null) return existing;
                 mapper.setTileQueryTimeout(properties.getQueryTimeoutMs());
-                var payload = z<=context.overviewMaxZoom()
-                        ? generalized.tile(Long.valueOf(context.generalizationBuildId()),layerId,z,x,y,json.writeValueAsString(context.fields()),
-                            context.gridPixels(),context.bufferPixels(),context.aggregatePoints(),properties.getMaxTileBytes())
-                        : mapper.vectorTile(layerId,z,x,y,json.writeValueAsString(context.fields()),
-                            context.gridPixels(),context.bufferPixels(),context.aggregatePoints(),properties.getMaxTileBytes());
+                var payload = mapper.vectorTile(layerId,z,x,y,json.writeValueAsString(context.fields()),
+                        context.gridPixels(),context.bufferPixels(),context.aggregatePoints(),properties.getMaxTileBytes());
                 if (payload == null || payload.body() == null || payload.byteSize() > properties.getMaxTileBytes()) {
                     throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,"该区域显示内容过密，请放大地图或缩小显示范围");
                 }
@@ -182,28 +168,6 @@ public class VectorTileService {
         return layer;
     }
 
-    public GisVectorVO.GeneralizationMembers getRepresentationFeatures(Long layerId,String contextId,String representationId,int limit,String cursor) {
-        var context=requireContext(layerId,contextId);
-        if (!context.overviewAvailable() || representationId==null || !representationId.matches("[0-9]{1,2}:[a-f0-9]{32}")) throw bad("概化对象或上下文无效");
-        if (limit<1 || limit>100) throw bad("limit 须为1至100");
-        String[] parts=representationId.split(":");
-        int z=Integer.parseInt(parts[0]);
-        if (z>context.overviewMaxZoom()) throw bad("概化层级无效");
-        String prefix=contextId+":"+representationId+":";
-        long after=parseCursor(cursor,prefix);
-        return spatial(() -> {
-            requireContext(layerId,contextId);
-            mapper.setTileQueryTimeout(properties.getQueryTimeoutMs());
-            var rows=generalized.members(Long.valueOf(context.generalizationBuildId()),z,parts[1],layerId,after,limit+1);
-            if (rows.isEmpty() && after==0) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"概化对象不存在或成员已变化");
-            var page=rows.stream().limit(limit).map(row -> new GisVectorVO.ClusterMember(row.getId().toString(),
-                    row.getPropertiesJson()==null?null:json.readTree(row.getPropertiesJson()),row.getVersion())).toList();
-            boolean more=rows.size()>limit;
-            String next=more?Base64.getUrlEncoder().withoutPadding().encodeToString((prefix+page.getLast().featureId()).getBytes(StandardCharsets.UTF_8)):null;
-            return new GisVectorVO.GeneralizationMembers(representationId,page,more,next,context.dataVersion());
-        });
-    }
-
     private GisVectorVO.RenderContext requireContext(Long layerId, String id) {
         var layer = ready(layerId);
         if (id == null || !id.matches("[a-f0-9]{64}")) throw bad("contextId 无效");
@@ -215,10 +179,6 @@ public class VectorTileService {
         if (!context.layerId().equals(layer.layerId())) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"图层内不存在该渲染上下文");
         if (!context.dataVersion().equals(Long.toString(layer.dataVersion()))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,"图层已编辑，请刷新数据版本及渲染上下文");
-        }
-        var current=generalization.plan(layerId,layer.dataVersion(),context.fields(),context.bufferPixels());
-        if (!context.policyVersion().equals(current.policyVersion()) || !context.generalizationBuildId().equals(current.buildId())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,"概览版本已变化，请刷新渲染上下文");
         }
         if (context.expiresAt().isBefore(Instant.now())) throw new ResponseStatusException(HttpStatus.GONE,"渲染上下文已过期，请重新创建");
         return context;

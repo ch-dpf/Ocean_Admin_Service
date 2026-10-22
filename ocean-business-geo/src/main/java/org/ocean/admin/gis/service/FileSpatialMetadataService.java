@@ -49,7 +49,6 @@ public class FileSpatialMetadataService {
     private final FileUploadUtil files;
     private final GisVectorMapper vectorMapper;
     private final VectorStyleService vectorStyles;
-    private final VectorGeneralizationService vectorGeneralization;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactions;
 
@@ -102,7 +101,6 @@ public class FileSpatialMetadataService {
                         || vectorMapper.setLayerStatus(extractedLayerId, "READY") != 1) {
                     throw new IllegalStateException("矢量图层提取结果提交失败: " + fileId);
                 }
-                vectorGeneralization.markDirty(extractedLayerId);
             }
             String result = code != null ? "FAILED" : notApplicable ? "NOT_APPLICABLE" : "COMPLETED";
             int updated = fileMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()

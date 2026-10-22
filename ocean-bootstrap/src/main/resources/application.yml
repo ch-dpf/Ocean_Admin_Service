@@ -96,7 +96,6 @@ gis:
       context-ttl-seconds: ${GIS_VECTOR_CONTEXT_TTL_SECONDS:1800}
       tile-cache-ttl-seconds: ${GIS_VECTOR_TILE_CACHE_TTL_SECONDS:120}
       max-cached-tiles: ${GIS_VECTOR_TILE_MAX_CACHED:64}
-      generalization-query-timeout-ms: ${GIS_VECTOR_GENERALIZATION_QUERY_TIMEOUT_MS:120000}
   upload:
     base-path: ${GIS_UPLOAD_BASE_PATH:gis/uploads}
     max-file-size: ${GIS_UPLOAD_MAX_FILE_SIZE:25GB}
