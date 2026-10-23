@@ -12,6 +12,7 @@ public class GisVectorDataSetStyle {
     private Integer templateVersion;
     private Integer schemaVersion;
     private String definitionJson;
+    private String cartographyJson;
     private String templateChecksum;
     private Long styleVersion;
     private Long dataRevision;

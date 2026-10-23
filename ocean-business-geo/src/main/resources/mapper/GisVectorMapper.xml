@@ -123,6 +123,11 @@
             properties = CAST(#{f.propertiesJson} AS jsonb), version = version + 1, update_time = CURRENT_TIMESTAMP
         WHERE layer_id = #{f.layerId} AND id = #{f.id} AND version = #{expected} AND deleted = 0
     </update>
+    <update id="reclassifyFeature">
+        UPDATE ocean_gis.gis_vector_feature SET layer_id=#{targetLayerId},
+            classification_rule_key=#{ruleKey,jdbcType=VARCHAR}
+        WHERE id=#{id} AND layer_id=#{oldLayerId} AND deleted=0
+    </update>
     <update id="deleteFeature">
         UPDATE ocean_gis.gis_vector_feature SET deleted = 1, version = version + 1, update_time = CURRENT_TIMESTAMP
         WHERE layer_id = #{layerId} AND id = #{id} AND version = #{expected} AND deleted = 0
@@ -167,17 +172,23 @@
         WHERE id = #{id} AND layer_id = #{layerId} AND version = #{expected} AND NOT is_default
     </delete>
     <select id="setTileQueryTimeout" resultType="string">
-        SELECT set_config('statement_timeout', CAST(#{milliseconds} AS text), true) || set_config('jit','off',true)
+        SELECT set_config('statement_timeout', CAST(#{milliseconds} AS text), true) || set_config('jit','off',true) || set_config('plan_cache_mode','force_custom_plan',true)
     </select>
 
     <sql id="dataSetStyleColumns">
         s.id,s.data_set_id,s.template_id,s.template_version,s.schema_version,
-        s.definition::text AS definition_json,s.template_checksum,s.style_version,
+        s.definition::text AS definition_json,s.cartography::text AS cartography_json,s.template_checksum,s.style_version,
         s.data_revision,s.display_revision,s.create_time,s.update_time
     </sql>
     <select id="dataSetStyle" resultType="org.ocean.admin.gis.entity.GisVectorDataSetStyle">
         SELECT <include refid="dataSetStyleColumns"/> FROM ocean_gis.gis_vector_dataset_style s
         JOIN ocean_gis.gis_data_set ds ON ds.id=s.data_set_id AND ds.deleted=0 AND ds.category_id=2
+        WHERE s.data_set_id=#{dataSetId}
+    </select>
+    <select id="tileState" resultType="org.ocean.admin.gis.entity.GisVectorDataSetStyle">
+        SELECT s.data_set_id,s.schema_version,s.data_revision,s.template_checksum
+        FROM ocean_gis.gis_vector_dataset_style s JOIN ocean_gis.gis_data_set ds
+            ON ds.id=s.data_set_id AND ds.deleted=0 AND ds.category_id=2
         WHERE s.data_set_id=#{dataSetId}
     </select>
     <select id="lockDataSetStyle" resultType="org.ocean.admin.gis.entity.GisVectorDataSetStyle" flushCache="true">
@@ -186,8 +197,8 @@
         WHERE s.data_set_id=#{dataSetId} FOR UPDATE OF s
     </select>
     <insert id="insertDataSetStyle">
-        INSERT INTO ocean_gis.gis_vector_dataset_style(id,data_set_id,template_id,template_version,schema_version,definition,template_checksum)
-        VALUES(#{s.id},#{s.dataSetId},#{s.templateId},#{s.templateVersion},#{s.schemaVersion},CAST(#{s.definitionJson} AS jsonb),#{s.templateChecksum})
+        INSERT INTO ocean_gis.gis_vector_dataset_style(id,data_set_id,template_id,template_version,schema_version,definition,cartography,template_checksum)
+        VALUES(#{s.id},#{s.dataSetId},#{s.templateId},#{s.templateVersion},#{s.schemaVersion},CAST(#{s.definitionJson} AS jsonb),CAST(#{s.cartographyJson} AS jsonb),#{s.templateChecksum})
     </insert>
     <insert id="insertGroups">
         INSERT INTO ocean_gis.gis_vector_group(id,data_set_id,dataset_style_id,parent_id,group_key,group_name,
@@ -215,6 +226,7 @@
         UPDATE ocean_gis.gis_vector_dataset_style SET
             data_revision=data_revision+CASE WHEN #{data} THEN 1 ELSE 0 END,
             display_revision=display_revision+CASE WHEN #{display} THEN 1 ELSE 0 END,
+            style_version=style_version+CASE WHEN #{display} THEN 1 ELSE 0 END,
             update_time=CURRENT_TIMESTAMP WHERE data_set_id=#{dataSetId}
     </update>
     <update id="updatePresentation">
@@ -222,162 +234,120 @@
             enabled=#{l.enabled},style_mode=#{l.styleMode},presentation_version=presentation_version+1,
             update_time=CURRENT_TIMESTAMP WHERE id=#{l.id} AND presentation_version=#{expected} AND deleted=0 AND layer_status='READY'
     </update>
-    <select id="renderLayers" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
-        SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
-        WHERE l.data_set_id=#{dataSetId} AND l.deleted=0 AND l.layer_status='READY' AND l.enabled
-            AND l.style_mode!='UNCONFIGURED' AND l.group_id IN
-            <foreach collection="groupIds" item="id" open="(" close=")" separator=",">#{id}</foreach>
-        <if test="layerIds != null">
-            AND l.id IN <foreach collection="layerIds" item="id" open="(" close=")" separator=",">#{id}</foreach>
-        </if>
-        ORDER BY l.id LIMIT 1025
+    <select id="dataSetExtent" resultType="string">
+        SELECT ST_AsGeoJSON(ST_SetSRID(ST_Extent(geographic_extent)::geometry,4326))
+        FROM ocean_gis.gis_vector_layer WHERE data_set_id=#{dataSetId} AND deleted=0 AND layer_status='READY'
     </select>
-    <select id="defaultStyles" resultType="org.ocean.admin.gis.entity.GisVectorStyle">
-        SELECT s.id,s.layer_id,s.name,s.is_default,
-            CASE WHEN sum(octet_length(s.definition::text)) OVER() &lt;= 1048576 THEN s.definition::text END AS definition_json,s.version
-        FROM ocean_gis.gis_vector_style s JOIN ocean_gis.gis_vector_layer l ON l.id=s.layer_id
-        WHERE l.data_set_id=#{dataSetId} AND l.deleted=0 AND l.layer_status='READY' AND l.enabled AND l.style_mode='CUSTOM' AND s.is_default
-            AND l.id IN <foreach collection="layerIds" item="id" open="(" close=")" separator=",">#{id}</foreach>
+    <select id="groupCartography" resultType="string">
+        SELECT COALESCE(jsonb_object_agg(g.group_key,s.definition),'{}'::jsonb)::text
+        FROM ocean_gis.gis_vector_style s JOIN ocean_gis.gis_vector_group g ON s.group_id=g.id
+        WHERE g.data_set_id=#{dataSetId} AND s.scope='GROUP'
     </select>
+    <select id="layerCartography" resultType="string">
+        SELECT COALESCE(jsonb_object_agg(l.id::text,jsonb_build_object('enabled',l.enabled,
+            'automatic',l.assignment_mode='AUTO','configured',l.style_mode!='UNCONFIGURED',
+            'definition',CASE WHEN l.style_mode='CUSTOM' THEN s.definition END)),'{}'::jsonb)::text
+        FROM ocean_gis.gis_vector_layer l LEFT JOIN ocean_gis.gis_vector_style s ON s.layer_id=l.id AND s.is_default
+        WHERE l.data_set_id=#{dataSetId} AND l.deleted=0 AND l.layer_status='READY'
+    </select>
+    <select id="featureCartography" resultType="string">
+        SELECT COALESCE(jsonb_object_agg(f.id::text,s.definition),'{}'::jsonb)::text
+        FROM ocean_gis.gis_vector_feature f
+        JOIN ocean_gis.gis_vector_layer l ON l.id=f.layer_id AND l.deleted=0 AND l.layer_status='READY'
+        JOIN ocean_gis.gis_vector_style s ON s.feature_id=f.id AND s.scope='FEATURE'
+        WHERE l.data_set_id=#{dataSetId} AND f.deleted=0 AND f.id IN
+        <foreach collection="ids" item="id" open="(" close=")" separator=",">#{id}</foreach>
+    </select>
+    <select id="hasFeatureCartography" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM ocean_gis.gis_vector_style s
+            JOIN ocean_gis.gis_vector_feature f ON f.id=s.feature_id AND f.deleted=0
+            JOIN ocean_gis.gis_vector_layer l ON l.id=f.layer_id AND l.deleted=0 AND l.layer_status='READY'
+            WHERE s.scope='FEATURE' AND l.data_set_id=#{dataSetId})
+    </select>
+    <select id="featureKind" resultType="string">
+        SELECT l.geometry_type FROM ocean_gis.gis_vector_feature f
+        JOIN ocean_gis.gis_vector_layer l ON l.id=f.layer_id AND l.deleted=0 AND l.layer_status='READY'
+        WHERE l.data_set_id=#{dataSetId} AND f.id=#{featureId} AND f.deleted=0
+    </select>
+    <insert id="saveCartography">
+        INSERT INTO ocean_gis.gis_vector_style(id,scope,group_id,feature_id,name,definition)
+        VALUES(#{id},#{scope},
+            CASE WHEN #{scope}='GROUP' THEN #{targetId} ELSE NULL END,
+            CASE WHEN #{scope}='FEATURE' THEN #{targetId} ELSE NULL END,
+            'cartography',CAST(#{definition} AS jsonb))
+        ON CONFLICT (<choose><when test="scope == 'GROUP'">group_id</when><otherwise>feature_id</otherwise></choose>)
+        DO UPDATE SET definition=EXCLUDED.definition,version=gis_vector_style.version+1,update_time=CURRENT_TIMESTAMP
+    </insert>
+    <delete id="deleteFeatureCartography">
+        DELETE FROM ocean_gis.gis_vector_style WHERE feature_id=#{featureId} AND scope='FEATURE'
+    </delete>
 
-    <!-- 候选、预算规划和瓦片共享同一筛选语义；所有变换只作用于显示，不更新源几何。 -->
-    <sql id="displayCandidates">
-        WITH settings AS MATERIALIZED (
-            SELECT *,ST_Buffer(view_box,resolution*64,'join=mitre') AS render_box FROM (
-                SELECT 40075016.68557849/(power(2.0,#{ctx.displayZoom})*256.0) AS resolution,
-                    CAST(#{policyJson} AS jsonb) AS policy,
-                    ST_Transform(
-                        <choose>
-                            <when test="ctx.bbox[0] &lt; ctx.bbox[2]">
-                                ST_MakeEnvelope(#{ctx.bbox[0]},#{ctx.bbox[1]},#{ctx.bbox[2]},#{ctx.bbox[3]},4326)
-                            </when>
-                            <otherwise>
-                                ST_Collect(ST_MakeEnvelope(#{ctx.bbox[0]},#{ctx.bbox[1]},180,#{ctx.bbox[3]},4326),
-                                    ST_MakeEnvelope(-180,#{ctx.bbox[1]},#{ctx.bbox[2]},#{ctx.bbox[3]},4326))
-                            </otherwise>
-                        </choose>,3857) AS view_box,
-                    ST_MakeEnvelope(-180,-85.0511287798066,180,85.0511287798066,4326) AS world_geo
-            ) s
-        ), plans AS MATERIALIZED (
-            SELECT p AS plan,(p->>'layerId')::bigint AS layer_id,(p->>'groupId')::bigint AS group_id
-            FROM jsonb_array_elements(CAST(#{plansJson} AS jsonb)) p
-        ), matched AS MATERIALIZED (
-            SELECT f.id,f.layer_id,f.properties,f.geom,p.group_id,p.plan,r.rule
-            FROM plans p JOIN ocean_gis.gis_vector_feature f ON f.layer_id=p.layer_id AND f.deleted=0
-            CROSS JOIN LATERAL (
-                SELECT r.value AS rule FROM jsonb_array_elements(p.plan->'rules') WITH ORDINALITY r(value,seq)
-                WHERE ocean_gis.vector_filter_matches(f.properties,r.value->'filter',(p.plan->>'normalized')::boolean)
-                  AND (NOT (p.plan->>'zoomBeforeMatch')::boolean
-                    OR ((r.value->>'minZoom' IS NULL OR #{ctx.displayZoom} &gt;= (r.value->>'minZoom')::double precision)
-                    AND (r.value->>'maxZoom' IS NULL OR #{ctx.displayZoom} &lt; (r.value->>'maxZoom')::double precision)))
-                ORDER BY seq LIMIT 1
-            ) r
-            WHERE
-                <choose>
-                    <when test="ctx.bbox[0] &lt; ctx.bbox[2]">
-                        f.geom &amp;&amp; ST_MakeEnvelope(#{ctx.bbox[0]},#{ctx.bbox[1]},#{ctx.bbox[2]},#{ctx.bbox[3]},4326)
-                        AND ST_Intersects(f.geom,ST_MakeEnvelope(#{ctx.bbox[0]},#{ctx.bbox[1]},#{ctx.bbox[2]},#{ctx.bbox[3]},4326))
-                    </when>
-                    <otherwise>
-                        (ST_Intersects(f.geom,ST_MakeEnvelope(#{ctx.bbox[0]},#{ctx.bbox[1]},180,#{ctx.bbox[3]},4326))
-                         OR ST_Intersects(f.geom,ST_MakeEnvelope(-180,#{ctx.bbox[1]},#{ctx.bbox[2]},#{ctx.bbox[3]},4326)))
-                    </otherwise>
-                </choose>
-                AND COALESCE((r.rule->>'visible')::boolean,true)
-                AND (r.rule->>'minZoom' IS NULL OR #{ctx.displayZoom} &gt;= (r.rule->>'minZoom')::double precision)
-                AND (r.rule->>'maxZoom' IS NULL OR #{ctx.displayZoom} &lt; (r.rule->>'maxZoom')::double precision)
-
-        ), projected AS MATERIALIZED (
-            SELECT m.*,s.resolution,s.policy,s.view_box,s.render_box,
-                ST_CollectionExtract(ST_Transform(ST_Intersection(ST_Force2D(m.geom),s.world_geo),3857),
-                    CASE m.plan->>'kind' WHEN 'POINT' THEN 1 WHEN 'LINE' THEN 2 ELSE 3 END) AS source_geom
-            FROM matched m CROSS JOIN settings s
-        ), visible AS MATERIALIZED (
-            SELECT *,ST_CollectionExtract(ST_Intersection(source_geom,view_box),
-                CASE plan->>'kind' WHEN 'POINT' THEN 1 WHEN 'LINE' THEN 2 ELSE 3 END) AS view_geom
-            FROM projected
-        ), candidates AS MATERIALIZED (
-            SELECT *,plan->>'kind'='POINT' OR (plan->>'kind'='POLYGON' AND (plan->>'pixelExempt')::boolean) AS is_protected,
-                COALESCE((rule->>'minZoom')::double precision,0) AS priority,
-                CASE plan->>'kind' WHEN 'LINE' THEN ST_Length(view_geom)/resolution
-                    WHEN 'POLYGON' THEN sqrt(ST_Area(view_geom))/resolution ELSE 0 END AS pixel_size
-            FROM visible
-            WHERE NOT ST_IsEmpty(view_geom)
-              AND (plan->>'kind'!='POLYGON' OR (plan->>'pixelExempt')::boolean
-                    OR ST_Area(view_geom)/(resolution*resolution) &gt;= (policy->'pixelFilters'->>'polygonMinAreaPixels')::double precision)
-              AND (plan->>'kind'!='LINE' OR ST_Length(view_geom)/resolution &gt;= (policy->'pixelFilters'->>'lineMinProjectedLengthPixels')::double precision)
-        )
-    </sql>
-    <select id="displayPlan" resultType="org.ocean.admin.gis.vo.GisVectorVO$DisplayPlan">
-        <include refid="displayCandidates"/>
-        , stats AS (
-            SELECT count(*) AS candidate_count,count(*) FILTER(WHERE is_protected) AS protected_count FROM candidates
-        ), buckets AS (
-            SELECT priority,pixel_size,count(*) AS n FROM candidates WHERE NOT is_protected GROUP BY priority,pixel_size
-        ), ranked AS (
-            SELECT *,sum(n) OVER(ORDER BY priority,pixel_size DESC) AS cumulative FROM buckets
-        ), cutoff AS (
-            SELECT r.* FROM ranked r CROSS JOIN stats s
-            WHERE r.cumulative &gt; greatest(#{ctx.budget}-s.protected_count,0)
-            ORDER BY r.priority,r.pixel_size DESC LIMIT 1
-        )
-        SELECT s.candidate_count,
-            CASE WHEN c.priority IS NULL THEN s.candidate_count ELSE s.protected_count+c.cumulative-c.n END::bigint AS object_count,
-            c.priority AS cutoff_min_zoom,c.pixel_size AS cutoff_pixel_size
-        FROM stats s LEFT JOIN cutoff c ON true
-    </select>
+    <!-- 先筛选整数层级，再以图层+投影范围联合索引取数据；配图及临时显隐不参与。 -->
     <select id="dataSetTile" resultType="org.ocean.admin.gis.vo.GisVectorVO$TilePayload">
-        <include refid="displayCandidates"/>
-        , selected AS MATERIALIZED (
-            SELECT * FROM candidates
-            WHERE is_protected OR CAST(#{ctx.cutoffMinZoom,jdbcType=DOUBLE} AS double precision) IS NULL
-                OR priority &lt; #{ctx.cutoffMinZoom,jdbcType=DOUBLE}
-                OR (priority=#{ctx.cutoffMinZoom,jdbcType=DOUBLE} AND pixel_size &gt; #{ctx.cutoffPixelSize,jdbcType=DOUBLE})
+        WITH eligible_layers AS MATERIALIZED (
+            SELECT l.id,l.geometry_type,l.assignment_mode,g.id AS group_id,g.group_key,p.value AS rule
+            FROM jsonb_array_elements(CAST(#{policyJson} AS jsonb)->'groups') p(value)
+            JOIN ocean_gis.gis_vector_group g ON g.data_set_id=#{dataSetId} AND g.group_key=p.value->>'groupKey'
+            JOIN ocean_gis.gis_vector_layer l ON l.data_set_id=g.data_set_id AND l.group_id=g.id
+                AND l.deleted=0 AND l.layer_status='READY'
+            WHERE #{z} &gt;= (p.value->>'minZoom')::integer
         ), shapes AS MATERIALIZED (
-            SELECT *,CASE WHEN plan->>'kind'='POINT' THEN view_geom
-                ELSE ST_SimplifyPreserveTopology(source_geom,resolution*(policy->'generalization'->>'maxErrorPixels')::double precision)
-                END AS simplified_geom,
-                ST_PointOnSurface(source_geom) AS anchor,
-                CASE WHEN (plan->'labels'->>'enabled')::boolean AND #{ctx.displayZoom} &gt;= (plan->'labels'->>'minZoom')::double precision
-                    THEN nullif(left(COALESCE(properties->>(plan->'labels'->>'field'),properties->>(plan->'labels'->>'fallbackField')),200),'') END AS label
-            FROM selected
-        ), labels AS MATERIALIZED (
-            SELECT *,row_number() OVER(ORDER BY (plan->>'renderOrder')::integer,id) AS label_rank
-            FROM shapes WHERE label IS NOT NULL AND ST_Intersects(anchor,view_box)
+            SELECT f.id,f.layer_id,l.group_id,l.group_key,l.geometry_type,
+                jsonb_strip_nulls(jsonb_build_object('fclass',CASE WHEN jsonb_typeof(f.properties->'fclass') IN ('string','number','boolean') THEN f.properties->'fclass' END,'code',CASE WHEN jsonb_typeof(f.properties->'code') IN ('string','number','boolean') THEN f.properties->'code' END,'id',CASE WHEN jsonb_typeof(f.properties->'id') IN ('string','number','boolean') THEN f.properties->'id' END,'name',CASE WHEN jsonb_typeof(f.properties->'name') IN ('string','number','boolean') THEN f.properties->'name' END,'ref',CASE WHEN jsonb_typeof(f.properties->'ref') IN ('string','number','boolean') THEN f.properties->'ref' END)) AS properties,
+                to_jsonb(array_remove(ARRAY[CASE WHEN f.properties->'fclass'='null'::jsonb THEN 'fclass' END,CASE WHEN f.properties->'code'='null'::jsonb THEN 'code' END,CASE WHEN f.properties->'id'='null'::jsonb THEN 'id' END,CASE WHEN f.properties->'name'='null'::jsonb THEN 'name' END,CASE WHEN f.properties->'ref'='null'::jsonb THEN 'ref' END],NULL))::text AS null_fields,
+                CASE WHEN COALESCE((l.rule->>'preserveBoundary')::boolean,false) OR l.geometry_type='POINT' OR #{z}=18
+                    THEN f.display_geom
+                    WHEN l.geometry_type='LINE' THEN ST_Simplify(f.display_geom,
+                        40075016.68557849/(power(2.0,#{z})*512)*(CAST(#{policyJson} AS jsonb)->>'simplifyPixels')::double precision)
+                    ELSE ST_SimplifyPreserveTopology(f.display_geom,
+                        40075016.68557849/(power(2.0,#{z})*512)*(CAST(#{policyJson} AS jsonb)->>'simplifyPixels')::double precision)
+                    END AS shape,
+                CASE WHEN l.geometry_type='POLYGON' THEN ST_PointOnSurface(f.display_geom) END AS anchor
+            FROM eligible_layers l JOIN ocean_gis.gis_vector_feature f ON f.layer_id=l.id AND f.deleted=0
+            LEFT JOIN LATERAL (
+                SELECT r.value FROM jsonb_array_elements(l.rule->'overrides') WITH ORDINALITY r(value,seq)
+                WHERE jsonb_array_length(l.rule->'overrides')&gt;0 AND l.assignment_mode='AUTO'
+                    AND ocean_gis.vector_filter_matches(f.properties,r.value->'filter',true)
+                ORDER BY seq LIMIT 1
+            ) r ON true
+            WHERE #{z} &gt;= COALESCE((r.value->>'minZoom')::integer,(l.rule->>'minZoom')::integer)
+              AND f.display_geom &amp;&amp; ST_TileEnvelope(#{z},#{x},#{y},margin =&gt; 256.0/8192)
+              AND (COALESCE((l.rule->>'preserveBoundary')::boolean,false) OR #{z}=18 OR
+                CASE l.geometry_type
+                    WHEN 'POLYGON' THEN ST_Area(f.display_geom)/power(40075016.68557849/(power(2.0,#{z})*512),2)
+                        &gt;= (CAST(#{policyJson} AS jsonb)->>'polygonMinAreaPixels')::double precision
+                    WHEN 'LINE' THEN ST_Length(f.display_geom)/(40075016.68557849/(power(2.0,#{z})*512))
+                        &gt;= (CAST(#{policyJson} AS jsonb)->>'lineMinLengthPixels')::double precision
+                    ELSE true END)
         ), representations AS (
-            SELECT s.id,s.layer_id,s.group_id,s.rule,s.plan,
-                CASE WHEN s.plan->>'kind'='POLYGON' THEN 'FILL' ELSE 'GEOMETRY' END AS role,
-                s.plan->>'kind' AS category,s.rule->'symbol' AS symbol,NULL::text AS label,
-                ST_Intersection(s.simplified_geom,s.render_box) AS display_geom
-            FROM shapes s
+            SELECT id,layer_id,properties,null_fields,group_id,group_key,
+                CASE geometry_type WHEN 'POLYGON' THEN 'FILL' ELSE 'GEOMETRY' END AS role,
+                geometry_type AS category,shape AS display_geom FROM shapes
             UNION ALL
-            SELECT s.id,s.layer_id,s.group_id,s.rule,s.plan,'OUTLINE','LINE',
-                jsonb_build_object('color',s.rule->'symbol'->>'strokeColor','width',s.rule->'symbol'->'strokeWidth',
-                    'opacity',s.rule->'symbol'->'strokeOpacity'),NULL,
-                ST_Intersection(ST_SimplifyPreserveTopology(ST_Boundary(s.source_geom),
-                    s.resolution*(s.policy->'generalization'->>'maxErrorPixels')::double precision),s.render_box)
-            FROM shapes s WHERE s.plan->>'kind'='POLYGON' AND COALESCE((s.rule->'symbol'->>'strokeWidth')::double precision,0)&gt;0
+            -- 从真实面提取边界，再做瓦片裁剪，避免产生裁切边缘线。
+            SELECT id,layer_id,properties,null_fields,group_id,group_key,'OUTLINE','LINE',ST_Boundary(shape)
+                FROM shapes WHERE geometry_type='POLYGON'
             UNION ALL
-            SELECT l.id,l.layer_id,l.group_id,l.rule,l.plan,'LABEL','POINT',l.rule->'symbol',l.label,l.anchor
-            FROM labels l
-            WHERE l.label_rank &lt;= ceil((#{ctx.widthPixels}::double precision*#{ctx.heightPixels})/
-                    (l.policy->'labels'->>'pixelsPerLabel')::double precision)
-              AND least(power(2,#{z})-1,greatest(0,floor((ST_X(l.anchor)+20037508.342789244)/40075016.68557849*power(2,#{z}))))=#{x}
-              AND least(power(2,#{z})-1,greatest(0,floor((20037508.342789244-ST_Y(l.anchor))/40075016.68557849*power(2,#{z}))))=#{y}
+            SELECT id,layer_id,properties,null_fields,group_id,group_key,'LABEL','POINT',anchor
+                FROM shapes WHERE geometry_type='POLYGON'
+                  AND ST_X(anchor)&gt;=ST_XMin(ST_TileEnvelope(#{z},#{x},#{y}))
+                  AND ST_X(anchor)&lt;ST_XMax(ST_TileEnvelope(#{z},#{x},#{y}))
+                  AND ST_Y(anchor)&gt;ST_YMin(ST_TileEnvelope(#{z},#{x},#{y}))
+                  AND ST_Y(anchor)&lt;=ST_YMax(ST_TileEnvelope(#{z},#{x},#{y}))
         ), encoded AS (
-            SELECT o.id::text || ':' || o.role AS "_vector_representation_id",o.role AS "_vector_render_role",
-                o.id::text AS "_vector_feature_id",o.layer_id::text AS "_vector_layer_id",o.group_id::text AS "_vector_group_id",
-                o.rule->>'id' AS "_vector_rule_id",o.symbol::text AS "_vector_symbol",
-                o.category AS "_vector_category",1::bigint AS "_vector_feature_count",o.label AS "_vector_label",
-                (o.plan->>'renderOrder')::integer AS "_vector_render_order",g.geom
+            SELECT o.id::text || ':' || o.role AS "_vector_representation_id",
+                o.id::text AS "_vector_feature_id",o.layer_id::text AS "_vector_layer_id",
+                o.group_id::text AS "_vector_group_id",o.group_key AS "_vector_group_key",
+                o.role AS "_vector_render_role",o.category AS "_vector_category",
+                o.properties,o.null_fields AS "_vector_null_fields",g.geom
             FROM representations o CROSS JOIN LATERAL (
-                SELECT ST_AsMVTGeom(o.display_geom,ST_TileEnvelope(#{z},#{x},#{y}),4096,1024,true) AS geom OFFSET 0
+                SELECT ST_AsMVTGeom(o.display_geom,ST_TileEnvelope(#{z},#{x},#{y}),8192,256,true) AS geom OFFSET 0
             ) g
             WHERE NOT ST_IsEmpty(g.geom)
               AND ST_Dimension(g.geom)=CASE o.category WHEN 'POINT' THEN 0 WHEN 'LINE' THEN 1 ELSE 2 END
         ), tile AS (
-            SELECT COALESCE(ST_AsMVT(encoded,'features',4096,'geom'),''::bytea) AS body FROM encoded
+            SELECT COALESCE(ST_AsMVT(encoded,'features',8192,'geom' ORDER BY "_vector_representation_id"),''::bytea) AS body FROM encoded
         )
-        SELECT CASE WHEN octet_length(body) &lt;= #{maxBytes} THEN body END AS body,octet_length(body)::bigint AS byte_size FROM tile
+        SELECT CASE WHEN octet_length(body)&lt;=#{maxBytes} THEN body END AS body,octet_length(body)::bigint AS byte_size FROM tile
     </select>
 </mapper>

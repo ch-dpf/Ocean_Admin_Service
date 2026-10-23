@@ -33,6 +33,7 @@ public class VectorLayerService {
     private final ObjectMapper json;
     private final GeoJsonFeatureReader reader;
     private final VectorTemplateRules templateRules;
+    private final VectorDataSetStyleService dataSetStyles;
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResult<List<GisVectorVO.Layer>> page(Long dataSetId, Long groupId, Long sourceFileId, int current, int size) {
@@ -84,9 +85,10 @@ public class VectorLayerService {
         feature.setId(IdWorker.getId());
         validateTopology(feature);
         mapper.insertFeatures(List.of(feature));
+        Long targetId = reclassify(layer,feature);
         mapper.refreshLayer(layerId);
         mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
-        return toFeature(requireFeature(layerId, feature.getId()));
+        return toFeature(requireFeature(targetId, feature.getId()));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -103,9 +105,10 @@ public class VectorLayerService {
         if (coordinateDimension(oldGeometry) != coordinateDimension(body.get("geometry"))) throw badRequest("编辑须保留原要素的 XY/XYZ 坐标维度");
         validateTopology(feature);
         if (mapper.updateFeature(feature, existing.getVersion()) != 1) throw preconditionFailed();
+        Long targetId = reclassify(layer,feature);
         mapper.refreshLayer(layerId);
         mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
-        return toFeature(requireFeature(layerId, id));
+        return toFeature(requireFeature(targetId, id));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -156,6 +159,43 @@ public class VectorLayerService {
         if (layer == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "图层不存在或已删除");
         if (layer.getGroupId() == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "存量图层尚未分类，须单独迁移");
         return layer;
+    }
+
+    private Long reclassify(GisVectorLayer source, GisVectorFeature feature) {
+        if (!"AUTO".equals(source.getAssignmentMode())) return source.getId();
+        var original = mapper.group(source.getDataSetId(),source.getOriginalGroupId());
+        if (original != null && "UNKNOWN_CLASSIFICATION".equals(original.getNodeType())) return source.getId();
+        var template = dataSetStyles.compile(dataSetStyles.require(source.getDataSetId(),false));
+        var classification = templateRules.classify(template,json.readTree(feature.getPropertiesJson()),source.getGeometryType(),false);
+        var group = mapper.groups(source.getDataSetId()).stream()
+                .filter(g -> g.getGroupKey().equals(classification.groupKey())).findFirst().orElseThrow();
+        var target = source;
+        if (!group.getId().equals(source.getGroupId())) {
+            target = mapper.layersBySource(source.getSourceFileId()).stream()
+                    .filter(l -> group.getId().equals(l.getGroupId()) && "AUTO".equals(l.getAssignmentMode())
+                        && source.getGeometryType().equals(l.getGeometryType()) && "READY".equals(l.getLayerStatus()))
+                    .findFirst().orElse(null);
+            if (target == null) {
+                target = new GisVectorLayer();
+                target.setId(IdWorker.getId()); target.setDataSetId(source.getDataSetId());
+                target.setSourceFileId(source.getSourceFileId()); target.setGroupId(group.getId());
+                target.setOriginalGroupId(group.getId()); target.setGeometryType(source.getGeometryType());
+                target.setAssignmentMode("AUTO"); target.setLayerKey("edited-" + target.getId());
+                target.setLayerName(source.getLayerName());
+                boolean unknown = "UNKNOWN_CLASSIFICATION".equals(group.getNodeType());
+                target.setEnabled(!unknown);
+                target.setStyleMode(unknown ? "UNCONFIGURED" : "INHERIT_TARGET_GROUP");
+                mapper.insertLayer(target);
+                mapper.setLayerStatus(target.getId(),"READY");
+            }
+        }
+        if (mapper.reclassifyFeature(feature.getId(),source.getId(),target.getId(),classification.ruleKey()) != 1)
+            throw preconditionFailed();
+        if (!target.getId().equals(source.getId())) {
+            mapper.refreshLayer(target.getId());
+            mapper.bumpDataSetRevision(source.getDataSetId(),false,true);
+        }
+        return target.getId();
     }
 
     private void requireKind(GisVectorLayer layer, JsonNode body) {

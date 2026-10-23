@@ -25,9 +25,9 @@ public class VectorTileProperties {
     @Min(100) @Max(60000)
     private int queryTimeoutMs = 10000;
     @Positive
-    private int contextTtlSeconds = 1800;
-    @Positive
-    private int tileCacheTtlSeconds = 120;
+    private int tileCacheTtlSeconds = 300;
     @Positive
     private int maxCachedTiles = 64;
+    @Positive
+    private long maxLocalCacheBytes = 64L * 1024 * 1024;
 }

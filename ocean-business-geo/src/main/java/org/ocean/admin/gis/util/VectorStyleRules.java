@@ -174,10 +174,15 @@ public class VectorStyleRules {
         Set<String> names = switch (geometry) {
             case "POINT" -> Set.of("color", "radius", "opacity", "strokeColor", "strokeWidth");
             case "LINE" -> Set.of("color", "width", "opacity", "dashArray");
-            default -> Set.of("fillColor", "fillOpacity", "strokeColor", "strokeWidth", "strokeOpacity");
+            default -> Set.of("fillColor", "fillOpacity", "strokeColor", "strokeWidth", "strokeOpacity", "dashArray");
         };
         fields(symbol, names, "symbol");
         ObjectNode result = (ObjectNode) symbol;
+        if (symbol.has("dashArray")) {
+            var dash = symbol.path("dashArray");
+            if (!dash.isArray() || dash.isEmpty() || dash.size() > 16) throw invalid("dashArray须为1至16项数组");
+            for (var n : dash) if (!n.isNumber() || !Double.isFinite(n.asDouble()) || n.asDouble() <= 0 || n.asDouble() > 128) throw invalid("虚线长度无效");
+        }
         if ("POLYGON".equals(geometry)) {
             color(symbol.get("fillColor"));
             defaultColor(result, "strokeColor", symbol.get("fillColor").asText());
@@ -193,11 +198,6 @@ public class VectorStyleRules {
                 number(result, "strokeWidth", 0, 0, 1024, false);
             } else {
                 number(result, "width", 2, 0, 1024, true);
-                if (symbol.has("dashArray")) {
-                    var dash = symbol.path("dashArray");
-                    if (!dash.isArray() || dash.isEmpty() || dash.size() > 16) throw invalid("dashArray须为1至16项数组");
-                    for (var n : dash) if (!n.isNumber() || !Double.isFinite(n.asDouble()) || n.asDouble() <= 0 || n.asDouble() > 128) throw invalid("虚线长度无效");
-                }
             }
         }
     }

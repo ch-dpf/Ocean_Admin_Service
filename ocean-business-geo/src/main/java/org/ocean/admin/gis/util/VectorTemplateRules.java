@@ -25,11 +25,11 @@ public class VectorTemplateRules {
     public record GeometryPart(JsonNode geometry, String path, String kind) { }
 
     public Compiled compile(JsonNode definition) {
-        if (definition == null || !definition.isObject() || definition.path("schemaVersion").asInt() != 2
-                || !"VECTOR_DATASET_STYLE_TEMPLATE".equals(definition.path("kind").asText())) throw bad("须为数据集模板协议2");
+        if (definition == null || !definition.isObject() || definition.path("schemaVersion").asInt() != 3
+                || !"VECTOR_DATASET_STYLE_TEMPLATE".equals(definition.path("kind").asText())) throw bad("须为数据集模板协议3");
         key(definition.path("templateId").asText());
         if (definition.path("templateVersion").asInt() < 1) throw bad("模板版本须大于0");
-        Map<String, JsonNode> groups = index(definition.path("groups")), styles = index(definition.path("styles"));
+        Map<String, JsonNode> groups = index(definition.path("groups")), styles = index(definition.path("cartography").path("styles"));
         for (JsonNode group : groups.values()) {
             String parent = group.path("parentId").asText(null);
             Set<String> visited = new HashSet<>();
@@ -74,15 +74,14 @@ public class VectorTemplateRules {
             if (group == null || !group.path("geometryType").asText().equals(kind)
                     || !"UNKNOWN_CLASSIFICATION".equals(group.path("nodeType").asText())) throw bad("未知组兜底不完整");
         }
-        JsonNode policy = definition.path("renderPolicy"), budget = policy.path("densityBudget");
-        if (!policy.path("requireViewport").asBoolean() || !policy.path("requireZoom").asBoolean()
-                || policy.path("allowFullDatasetGeometryLoad").asBoolean(true)
-                || policy.path("allowFullSampleGeometryPreview").asBoolean(true)
-                || !"WHOLE_VIEWPORT_ACROSS_ALL_ENABLED_LAYERS".equals(budget.path("scope").asText())
-                || budget.path("pixelsPerObject").asInt() < 1 || budget.path("minObjects").asInt() < 1
-                || budget.path("maxObjects").asInt() < budget.path("minObjects").asInt()
-                || budget.path("maxObjects").asInt() > 600) throw bad("模板必须包含安全的全视窗显示预算");
-        if (policy.path("maxZoom").asInt() > 22 || policy.path("minZoom").asDouble() < 0) throw bad("显示策略无效");
+        JsonNode policy = definition.path("tilePolicy");
+        if (policy.path("nativeMaxZoom").asInt() != 18 || policy.path("displayMaxZoom").asInt() != 24
+                || policy.path("tileSize").asInt() != 512 || policy.path("extent").asInt() != 8192
+                || !policy.path("groups").isArray()) throw bad("瓦片策略无效");
+        for (JsonNode item : policy.path("groups")) {
+            if (!groups.containsKey(item.path("groupKey").asText())) throw bad("瓦片分类不存在");
+            bounds(item.path("minZoom").asDouble(), 25);
+        }
         return new Compiled(definition.deepCopy(), Map.copyOf(groups), Map.copyOf(styles));
     }
 
@@ -251,14 +250,14 @@ public class VectorTemplateRules {
         definition.set("rules", json.createArrayNode().add(rule));
         JsonNode validated = layerRules.validate(definition).path("rules").get(0).path("symbol");
         if (dash != null) {
-            if (!"LINE".equals(kind) || !dash.isArray() || dash.isEmpty() || dash.size() > 16) throw bad("虚线数组无效");
+            if ("POINT".equals(kind) || !dash.isArray() || dash.isEmpty() || dash.size() > 16) throw bad("虚线数组无效");
             for (JsonNode n : dash) if (!n.isNumber() || !Double.isFinite(n.asDouble()) || n.asDouble() <= 0 || n.asDouble() > 128) throw bad("虚线长度无效");
             ((ObjectNode) validated).set("dashArray", dash.deepCopy());
         }
         return validated;
     }
     public void bounds(double min, double max) {
-        if (!Double.isFinite(min) || !Double.isFinite(max) || min < 0 || min > 18 || max > 22 || min >= max) throw bad("显示范围须满足0≤开始级别≤18且开始级别<结束级别≤22");
+        if (!Double.isFinite(min) || !Double.isFinite(max) || min < 0 || min > 18 || max > 25 || min >= max) throw bad("显示范围须满足0≤开始级别≤18且开始级别<结束级别≤25");
     }
     private void key(String value) { if (!KEY.matcher(value).matches()) throw bad("模板业务键无效"); }
     private IllegalArgumentException bad(String message) { return new IllegalArgumentException(message); }

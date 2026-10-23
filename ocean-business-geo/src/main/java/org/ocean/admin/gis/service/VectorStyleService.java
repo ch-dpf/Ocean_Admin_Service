@@ -125,6 +125,86 @@ public class VectorStyleService {
                 request.zoom(), rules.match(json.readTree(style.getDefinitionJson()), feature.geometry(), feature.properties(), request.zoom()));
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public GisVectorVO.Cartography cartography(Long dataSetId) {
+        var snapshot = dataSetStyles.require(dataSetId, false);
+        var template = dataSetStyles.compile(snapshot);
+        var overrides = json.readTree(mapper.groupCartography(dataSetId));
+        var groups = mapper.groups(dataSetId);
+        var byId = groups.stream().collect(java.util.stream.Collectors.toMap(GisVectorGroup::getId, g -> g));
+        var result = json.createObjectNode();
+        for (var group : groups) {
+            boolean enabled = true;
+            var ancestor = group;
+            while (ancestor != null) {
+                enabled &= Boolean.TRUE.equals(ancestor.getEnabled());
+                ancestor = byId.get(ancestor.getParentId());
+            }
+            var node = json.createObjectNode().put("id",group.getId().toString()).put("enabled",enabled)
+                    .put("styleKey",group.getDefaultStyleKey());
+            node.set("override",overrides.path(group.getGroupKey()));
+            result.set(group.getGroupKey(),node);
+        }
+        var layerConfig = json.readTree(mapper.layerCartography(dataSetId));
+        if (json.writeValueAsBytes(layerConfig).length > 4 * 1024 * 1024)
+            throw error(HttpStatus.UNPROCESSABLE_CONTENT,"图层配图元数据超过4MiB，请拆分数据集");
+        return new GisVectorVO.Cartography(dataSetId.toString(), snapshot.getStyleVersion(), snapshot.getDisplayRevision(),
+                template.definition().path("cartography"), result, layerConfig, mapper.hasFeatureCartography(dataSetId));
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public JsonNode featureCartography(Long dataSetId, List<Long> ids) {
+        dataSetStyles.require(dataSetId, false);
+        if (ids == null || ids.isEmpty() || ids.size() > 256 || ids.stream().anyMatch(id -> id == null || id < 1))
+            throw error(HttpStatus.BAD_REQUEST,"每批须提供1至256个要素ID");
+        return json.readTree(mapper.featureCartography(dataSetId,ids));
+    }
+
+    /** 覆盖仅保存显式字段，未设置字段继承分组/属性规则，不污染几何版本。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void saveCartography(Long dataSetId, Long targetId, String scope, JsonNode patch, String ifMatch) {
+        var snapshot = dataSetStyles.require(dataSetId, true);
+        VectorDataSetStyleService.requireMatch(ifMatch, cartographyEtag(snapshot.getDataSetId(),snapshot.getStyleVersion()));
+        String kind;
+        if ("GROUP".equals(scope)) {
+            var group = mapper.group(dataSetId,targetId);
+            if (group == null || !Boolean.TRUE.equals(group.getAssignable())) throw error(HttpStatus.NOT_FOUND,"分类不存在或不可配图");
+            kind = group.getGeometryType();
+        } else {
+            kind = mapper.featureKind(dataSetId,targetId);
+            if (kind == null) throw error(HttpStatus.NOT_FOUND,"要素不属于当前数据集");
+        }
+        try {
+            if (patch == null || !patch.isObject() || !patch.path("symbol").isObject()
+                    || json.writeValueAsBytes(patch).length > 16384) throw new IllegalArgumentException("须提供不超过16KiB的symbol字段覆盖");
+            for (String field : patch.propertyNames())
+                if (!List.of("schemaVersion","symbol","visible").contains(field)) throw new IllegalArgumentException("不支持的配图字段: " + field);
+            if (patch.has("visible") && !patch.path("visible").isBoolean()) throw new IllegalArgumentException("visible须为布尔值");
+            var defaults = json.createObjectNode();
+            if ("POLYGON".equals(kind)) defaults.put("fillColor","#ffffff").put("fillOpacity",.5).put("strokeColor","#000000").put("strokeWidth",1).put("strokeOpacity",1);
+            else if ("LINE".equals(kind)) defaults.put("color","#000000").put("width",1).put("opacity",1);
+            else defaults.put("color","#000000").put("radius",6).put("opacity",1).put("strokeColor","#000000").put("strokeWidth",0);
+            templateRules.symbol(kind,templateRules.merge(defaults,patch.path("symbol")));
+            for (String field : List.of("radius","width","strokeWidth"))
+                if (patch.path("symbol").has(field) && patch.path("symbol").path(field).asDouble() > 12)
+                    throw new IllegalArgumentException("覆盖符号尺寸不能超过12 CSS像素");
+            var definition = (ObjectNode) patch.deepCopy();
+            definition.put("schemaVersion",1);
+            mapper.saveCartography(IdWorker.getId(),scope,targetId,json.writeValueAsString(definition));
+        } catch (IllegalArgumentException ex) { throw error(HttpStatus.BAD_REQUEST,ex.getMessage()); }
+        mapper.bumpDataSetRevision(dataSetId,false,true);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteFeatureCartography(Long dataSetId, Long featureId, String ifMatch) {
+        var snapshot = dataSetStyles.require(dataSetId,true);
+        VectorDataSetStyleService.requireMatch(ifMatch,cartographyEtag(dataSetId,snapshot.getStyleVersion()));
+        if (mapper.featureKind(dataSetId,featureId) == null) throw error(HttpStatus.NOT_FOUND,"要素不属于当前数据集");
+        if (mapper.deleteFeatureCartography(featureId) > 0) mapper.bumpDataSetRevision(dataSetId,false,true);
+    }
+
+    public static String cartographyEtag(Long id, long version) { return "\"cartography-2-" + id + "-s" + version + "\""; }
+
     public static String etag(String id, long version) { return "\"style-" + id + "-v" + version + "\""; }
 
     private GisVectorStyle parse(Long layerId, GisVectorRequests.Style request) {
@@ -152,6 +232,7 @@ public class VectorStyleService {
 
     private void validateKind(GisVectorLayer layer, GisVectorStyle style) {
         for (var rule : json.readTree(style.getDefinitionJson()).path("rules")) {
+            validateTileFields(rule.path("filter"));
             if (!layer.getGeometryType().equals(rule.path("geometryType").asText())) throw error(HttpStatus.BAD_REQUEST, "样式只能使用当前图层的几何类别");
             try {
                 templateRules.bounds(rule.path("minZoom").asDouble(0), rule.path("maxZoom").asDouble(22));
@@ -160,6 +241,15 @@ public class VectorStyleService {
                     if (size > 12 || size < ("strokeWidth".equals(name) ? 0 : .5)) throw new IllegalArgumentException("符号尺寸超出数据集允许范围");
                 }
             } catch (IllegalArgumentException ex) { throw error(HttpStatus.BAD_REQUEST, ex.getMessage()); }
+        }
+    }
+
+    private void validateTileFields(JsonNode filter) {
+        if (filter.isMissingNode() || filter.isNull()) return;
+        if (filter.has("conditions")) {
+            for (var child : filter.path("conditions")) validateTileFields(child);
+        } else if (!List.of("fclass","code","id","name","ref").contains(filter.path("field").asText())) {
+            throw error(HttpStatus.BAD_REQUEST,"地图配图条件仅支持瓦片属性: fclass、code、id、name、ref");
         }
     }
 
@@ -203,11 +293,13 @@ public class VectorStyleService {
         if (!custom && "UNKNOWN_CLASSIFICATION".equals(target.getNodeType())) throw error(HttpStatus.BAD_REQUEST, "未知组必须显式配置样式");
         if (custom) savePresentationStyle(layer, target, request.customStyle());
         else if (request.customStyle() != null) throw error(HttpStatus.BAD_REQUEST, "继承分组时不能同时提交自定义样式");
+        boolean regrouped = !target.getId().equals(layer.getGroupId()) || !"MANUAL".equals(layer.getAssignmentMode());
         layer.setGroupId(target.getId());
         layer.setAssignmentMode("MANUAL");
         layer.setStyleMode(request.styleMode());
         layer.setEnabled(Boolean.TRUE.equals(request.enabled()));
         touch(layer);
+        if (regrouped) mapper.bumpDataSetRevision(layer.getDataSetId(),true,false);
         return layers.detail(layerId);
     }
 

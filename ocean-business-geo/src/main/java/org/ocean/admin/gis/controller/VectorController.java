@@ -50,7 +50,7 @@ public class VectorController {
     @Operation(summary = "查询数据集分类树与统计", description = "图层通过分页接口按分类加载，不内嵌几何")
     public ResponseEntity<ResponseResult<List<GisVectorVO.Group>>> groups(@PathVariable Long dataSetId) {
         var tree = dataSetStyles.groupTree(dataSetId);
-        return ResponseEntity.ok().eTag(tree.etag()).body(ResponseResult.success(tree.groups()));
+        return ResponseEntity.ok().header("Cache-Control","private, no-cache").eTag(tree.etag()).body(ResponseResult.success(tree.groups()));
     }
 
     @PatchMapping("/datasets/{dataSetId}/groups/{groupId}/visibility")
@@ -74,19 +74,59 @@ public class VectorController {
                 .body(ResponseResult.success(layer));
     }
 
-    @PostMapping("/datasets/{dataSetId}/render-contexts")
-    @Operation(summary = "创建数据集视窗渲染上下文", description = "bbox、连续displayZoom及CSS宽高必填；全图层共用样式与密度预算")
-    public ResponseResult<GisVectorVO.RenderContext> renderContext(@PathVariable Long dataSetId,
-            @Valid @RequestBody GisVectorRequests.RenderContext request) {
-        return ResponseResult.success(tiles.createContext(dataSetId,request));
+    @GetMapping("/datasets/{dataSetId}/map-definition")
+    @Operation(summary = "查询稳定的XYZ瓦片数据契约")
+    public ResponseEntity<ResponseResult<GisVectorVO.MapDefinition>> mapDefinition(@PathVariable Long dataSetId) {
+        var definition = tiles.definition(dataSetId);
+        return ResponseEntity.ok().header("Cache-Control", "private, no-cache")
+                .eTag("\"map-" + definition.tileVersion() + "\"").body(ResponseResult.success(definition));
     }
 
-    @GetMapping(value = "/datasets/{dataSetId}/tiles/{z}/{x}/{y}.mvt", produces = "application/vnd.mapbox-vector-tile")
-    @Operation(summary = "按层级读取显示用MVT矢量瓦片", description = "须携带contextId；旧数据版本409，上下文过期410；不截取任意前N个要素")
-    public ResponseEntity<byte[]> tile(@PathVariable Long dataSetId, @PathVariable int z, @PathVariable int x,
-            @PathVariable int y, @RequestParam String contextId) {
-        byte[] body = tiles.getTile(dataSetId,contextId,z,x,y);
-        return ResponseEntity.ok().header("Cache-Control","no-store").body(body);
+    @GetMapping(value = "/datasets/{dataSetId}/tiles/{tileVersion}/{z}/{x}/{y}.mvt", produces = "application/vnd.mapbox-vector-tile")
+    @Operation(summary = "按数据版本和XYZ读取几何瓦片", description = "不含配图，不依赖视窗；旧版本缓存未命中返回410")
+    public ResponseEntity<byte[]> tile(@PathVariable Long dataSetId, @PathVariable String tileVersion,
+            @PathVariable int z, @PathVariable int x, @PathVariable int y,
+            @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
+        byte[] body = tiles.getTile(dataSetId,tileVersion,z,x,y);
+        String etag = "\"" + org.ocean.admin.gis.service.VectorRenderPlanner.digest(body) + "\"";
+        return ResponseEntity.status(etag.equals(ifNoneMatch) ? HttpStatus.NOT_MODIFIED : HttpStatus.OK)
+                .header("Cache-Control","private, max-age=300, immutable").eTag(etag)
+                .body(etag.equals(ifNoneMatch) ? null : body);
+    }
+
+    @GetMapping("/datasets/{dataSetId}/cartography")
+    public ResponseEntity<ResponseResult<GisVectorVO.Cartography>> cartography(@PathVariable Long dataSetId) {
+        var config = styles.cartography(dataSetId);
+        return ResponseEntity.ok().header("Cache-Control","private, no-cache")
+                .eTag(VectorStyleService.cartographyEtag(dataSetId,config.styleVersion())).body(ResponseResult.success(config));
+    }
+
+    @PutMapping("/datasets/{dataSetId}/groups/{groupId}/cartography")
+    public ResponseResult<Void> groupCartography(@PathVariable Long dataSetId, @PathVariable Long groupId,
+            @RequestHeader(value="If-Match",required=false) String ifMatch, @RequestBody JsonNode patch) {
+        styles.saveCartography(dataSetId,groupId,"GROUP",patch,ifMatch);
+        return ResponseResult.success();
+    }
+
+    @PostMapping("/datasets/{dataSetId}/feature-cartography/query")
+    public ResponseEntity<ResponseResult<JsonNode>> featureCartography(@PathVariable Long dataSetId,
+            @Valid @RequestBody GisVectorRequests.FeatureCartographyQuery query) {
+        return ResponseEntity.ok().header("Cache-Control","private, no-cache")
+                .body(ResponseResult.success(styles.featureCartography(dataSetId,query.featureIds())));
+    }
+
+    @PutMapping("/datasets/{dataSetId}/features/{featureId}/cartography")
+    public ResponseResult<Void> featureCartography(@PathVariable Long dataSetId, @PathVariable Long featureId,
+            @RequestHeader(value="If-Match",required=false) String ifMatch, @RequestBody JsonNode patch) {
+        styles.saveCartography(dataSetId,featureId,"FEATURE",patch,ifMatch);
+        return ResponseResult.success();
+    }
+
+    @DeleteMapping("/datasets/{dataSetId}/features/{featureId}/cartography")
+    public ResponseResult<Void> deleteFeatureCartography(@PathVariable Long dataSetId, @PathVariable Long featureId,
+            @RequestHeader(value="If-Match",required=false) String ifMatch) {
+        styles.deleteFeatureCartography(dataSetId,featureId,ifMatch);
+        return ResponseResult.success();
     }
 
     @GetMapping("/layers/{layerId}/styles")
@@ -110,7 +150,7 @@ public class VectorController {
     }
 
     @GetMapping("/layers/{layerId}/default-style")
-    @Operation(summary = "读取图层有效样式及ETag", description = "返回继承或自定义配置供面板展示；地图渲染须使用数据集视窗上下文和MVT")
+    @Operation(summary = "读取图层有效样式及ETag", description = "返回继承或自定义配置供面板展示；地图渲染使用独立配图及版本化MVT")
     public ResponseEntity<ResponseResult<GisVectorVO.EffectiveStyle>> defaultStyle(@PathVariable Long layerId) {
         var style = styles.defaultStyle(layerId);
         return ResponseEntity.ok().eTag("\"effective-" + layerId + "-p" + style.presentationVersion() + "-s" + style.version() + "\"")
@@ -231,7 +271,7 @@ public class VectorController {
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ResponseResult<Void>> handleVectorError(ResponseStatusException exception) {
-        return ResponseEntity.status(exception.getStatusCode()).contentType(MediaType.APPLICATION_JSON)
+        return ResponseEntity.status(exception.getStatusCode()).header("Cache-Control","no-store").contentType(MediaType.APPLICATION_JSON)
                 .body(ResponseResult.error(exception.getStatusCode().value(), exception.getReason()));
     }
 

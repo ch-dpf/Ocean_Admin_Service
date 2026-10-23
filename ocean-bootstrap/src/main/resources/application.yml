@@ -91,9 +91,9 @@ gis:
       max-queued-queries: ${GIS_VECTOR_TILE_MAX_QUEUED:32}
       queue-wait-ms: ${GIS_VECTOR_TILE_QUEUE_WAIT_MS:10000}
       query-timeout-ms: ${GIS_VECTOR_TILE_QUERY_TIMEOUT_MS:10000}
-      context-ttl-seconds: ${GIS_VECTOR_CONTEXT_TTL_SECONDS:1800}
-      tile-cache-ttl-seconds: ${GIS_VECTOR_TILE_CACHE_TTL_SECONDS:120}
+      tile-cache-ttl-seconds: ${GIS_VECTOR_TILE_CACHE_TTL_SECONDS:300}
       max-cached-tiles: ${GIS_VECTOR_TILE_MAX_CACHED:64}
+      max-local-cache-bytes: ${GIS_VECTOR_TILE_LOCAL_CACHE_BYTES:67108864}
   upload:
     base-path: ${GIS_UPLOAD_BASE_PATH:gis/uploads}
     max-file-size: ${GIS_UPLOAD_MAX_FILE_SIZE:25GB}

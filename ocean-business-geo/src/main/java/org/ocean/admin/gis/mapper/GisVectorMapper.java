@@ -22,6 +22,7 @@ public interface GisVectorMapper {
     Page<GisVectorLayer> pageLayers(Page<GisVectorLayer> page, @Param("dataSetId") Long dataSetId,
             @Param("groupId") Long groupId, @Param("sourceFileId") Long sourceFileId);
     GisVectorDataSetStyle dataSetStyle(@Param("dataSetId") Long dataSetId);
+    GisVectorDataSetStyle tileState(@Param("dataSetId") Long dataSetId);
     GisVectorDataSetStyle lockDataSetStyle(@Param("dataSetId") Long dataSetId);
     int insertDataSetStyle(@Param("s") GisVectorDataSetStyle style);
     int insertGroups(@Param("groups") List<GisVectorGroup> groups);
@@ -30,9 +31,6 @@ public interface GisVectorMapper {
     int setGroupEnabled(@Param("id") Long id, @Param("enabled") boolean enabled);
     int bumpDataSetRevision(@Param("dataSetId") Long dataSetId, @Param("data") boolean data, @Param("display") boolean display);
     int updatePresentation(@Param("l") GisVectorLayer layer, @Param("expected") long expected);
-    List<GisVectorLayer> renderLayers(@Param("dataSetId") Long dataSetId, @Param("groupIds") List<Long> groupIds,
-            @Param("layerIds") List<Long> layerIds);
-    List<GisVectorStyle> defaultStyles(@Param("dataSetId") Long dataSetId, @Param("layerIds") List<Long> layerIds);
     GisVectorLayer layer(@Param("id") Long id);
     GisVectorLayer lockLayer(@Param("id") Long id);
     int refreshLayer(@Param("id") Long id);
@@ -44,6 +42,8 @@ public interface GisVectorMapper {
             @Param("east") Double east, @Param("north") Double north);
     GisVectorFeature feature(@Param("layerId") Long layerId, @Param("id") Long id);
     int updateFeature(@Param("f") GisVectorFeature feature, @Param("expected") long expected);
+    int reclassifyFeature(@Param("id") Long id, @Param("oldLayerId") Long oldLayerId,
+            @Param("targetLayerId") Long targetLayerId, @Param("ruleKey") String ruleKey);
     int deleteFeature(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
     long countSourceReferences(@Param("fileId") Long fileId);
     long countDataSetReferences(@Param("dataSetId") Long dataSetId);
@@ -55,10 +55,16 @@ public interface GisVectorMapper {
     int clearDefaultStyle(@Param("layerId") Long layerId);
     int setDefaultStyle(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
     int deleteStyle(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
+    String dataSetExtent(@Param("dataSetId") Long dataSetId);
+    String groupCartography(@Param("dataSetId") Long dataSetId);
+    String layerCartography(@Param("dataSetId") Long dataSetId);
+    String featureCartography(@Param("dataSetId") Long dataSetId, @Param("ids") List<Long> ids);
+    boolean hasFeatureCartography(@Param("dataSetId") Long dataSetId);
+    String featureKind(@Param("dataSetId") Long dataSetId, @Param("featureId") Long featureId);
+    int saveCartography(@Param("id") Long id, @Param("scope") String scope, @Param("targetId") Long targetId, @Param("definition") String definition);
+    int deleteFeatureCartography(@Param("featureId") Long featureId);
     String setTileQueryTimeout(@Param("milliseconds") int milliseconds);
-    GisVectorVO.DisplayPlan displayPlan(@Param("ctx") GisVectorVO.RenderContext context, @Param("plansJson") String plans,
-            @Param("policyJson") String policy);
-    GisVectorVO.TilePayload dataSetTile(@Param("ctx") GisVectorVO.RenderContext context, @Param("plansJson") String plans,
+    GisVectorVO.TilePayload dataSetTile(@Param("dataSetId") Long dataSetId,
             @Param("policyJson") String policy, @Param("z") int z, @Param("x") int x,
             @Param("y") int y, @Param("maxBytes") int maxBytes);
 }

@@ -1,5 +1,6 @@
 CREATE SCHEMA IF NOT EXISTS ocean_gis;
 CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 
 -- =========================================================
 -- GIS 数据集
@@ -55,8 +56,9 @@ CREATE TABLE ocean_gis.gis_vector_dataset_style (
     data_set_id BIGINT NOT NULL UNIQUE REFERENCES ocean_gis.gis_data_set(id),
     template_id VARCHAR(100) NOT NULL,
     template_version INTEGER NOT NULL CHECK (template_version > 0),
-    schema_version INTEGER NOT NULL CHECK (schema_version = 2),
-    definition JSONB NOT NULL CHECK (definition @> '{"schemaVersion":2,"kind":"VECTOR_DATASET_STYLE_TEMPLATE"}'::jsonb),
+    schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+    definition JSONB NOT NULL CHECK (definition->>'kind' = 'VECTOR_DATASET_STYLE_TEMPLATE' AND (definition->>'schemaVersion')::integer = schema_version),
+    cartography JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(cartography)='object'),
     template_checksum VARCHAR(64) NOT NULL,
     style_version BIGINT NOT NULL DEFAULT 1 CHECK (style_version > 0),
     data_revision BIGINT NOT NULL DEFAULT 0 CHECK (data_revision >= 0),
@@ -365,29 +367,16 @@ CREATE INDEX idx_gis_vector_layer_dataset ON ocean_gis.gis_vector_layer(data_set
 CREATE INDEX idx_gis_vector_layer_source ON ocean_gis.gis_vector_layer(source_file_id) WHERE deleted = 0;
 CREATE INDEX idx_gis_vector_layer_group ON ocean_gis.gis_vector_layer(data_set_id,group_id,id) WHERE deleted=0;
 
-CREATE TABLE ocean_gis.gis_vector_style (
-    id BIGINT PRIMARY KEY,
-    layer_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL CHECK (btrim(name) <> ''),
-    is_default BOOLEAN NOT NULL DEFAULT false,
-    definition JSONB NOT NULL,
-    version BIGINT NOT NULL DEFAULT 1 CHECK (version >= 1),
-    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (layer_id, name),
-    CHECK (jsonb_typeof(definition) = 'object'
-        AND definition @> '{"schemaVersion":1}'::jsonb
-        AND definition ? 'rules' AND jsonb_typeof(definition->'rules') = 'array')
-);
-CREATE UNIQUE INDEX uk_gis_vector_style_default ON ocean_gis.gis_vector_style(layer_id) WHERE is_default;
-COMMENT ON TABLE ocean_gis.gis_vector_style IS '图层样式方案及有序渲染规则，样式版本与要素数据版本独立';
-COMMENT ON COLUMN ocean_gis.gis_vector_style.definition IS 'schemaVersion=1；rules 按几何类别、属性及连续 zoom 匹配，首条命中生效';
-COMMENT ON COLUMN ocean_gis.gis_vector_style.is_default IS '同一图层至多一个默认方案，业务层保证默认方案不被删除';
-
 CREATE TABLE ocean_gis.gis_vector_feature (
     id BIGINT PRIMARY KEY,
     layer_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
     geom public.geometry NOT NULL,
+    display_geom public.geometry(Geometry,3857) GENERATED ALWAYS AS (
+        public.ST_Transform(public.ST_Force2D(CASE
+            WHEN geom OPERATOR(public.@) public.ST_MakeEnvelope(-180,-85.0511287798066,180,85.0511287798066,4326) THEN geom
+            ELSE public.ST_Intersection(geom,public.ST_MakeEnvelope(-180,-85.0511287798066,180,85.0511287798066,4326))
+        END),3857)
+    ) STORED,
     properties JSONB,
     source_feature_id JSONB,
     source_feature_index BIGINT CHECK (source_feature_index >= 0),
@@ -407,12 +396,42 @@ CREATE TABLE ocean_gis.gis_vector_feature (
 );
 CREATE INDEX idx_gis_vector_feature_layer ON ocean_gis.gis_vector_feature(layer_id, id) WHERE deleted = 0;
 CREATE INDEX idx_gis_vector_feature_geom ON ocean_gis.gis_vector_feature USING GIST(geom) WHERE deleted = 0;
+CREATE INDEX idx_gis_vector_feature_display ON ocean_gis.gis_vector_feature USING GIST(layer_id,display_geom) WHERE deleted = 0;
 COMMENT ON TABLE ocean_gis.gis_vector_layer IS '从原始矢量文件提取的可编辑图层；同一来源文件允许生成多个图层';
 COMMENT ON COLUMN ocean_gis.gis_vector_layer.layer_key IS '来源文件、初始分类及几何类别组成的稳定键；手动移组不变更';
 COMMENT ON COLUMN ocean_gis.gis_vector_layer.geographic_extent IS '当前要素的二维包围范围；与来源文件范围独立维护';
 COMMENT ON TABLE ocean_gis.gis_vector_feature IS '逐要素几何与属性；编辑不回写来源文件';
 COMMENT ON COLUMN ocean_gis.gis_vector_feature.geom IS 'SRID 4326，保留 XY 或 XYZ；空间索引和默认空间查询为二维';
+COMMENT ON COLUMN ocean_gis.gis_vector_feature.display_geom IS '从原始几何自动生成的二维Web Mercator显示缓存；编辑及导入自动同步，不参与业务属性和原始几何编辑';
 COMMENT ON COLUMN ocean_gis.gis_vector_feature.source_feature_index IS '来源文件内从零开始的要素序号；交互新增的要素为空';
+
+CREATE TABLE ocean_gis.gis_vector_style (
+    id BIGINT PRIMARY KEY,
+    layer_id BIGINT REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
+    scope VARCHAR(10) NOT NULL DEFAULT 'LAYER',
+    group_id BIGINT REFERENCES ocean_gis.gis_vector_group(id) ON DELETE CASCADE,
+    feature_id BIGINT REFERENCES ocean_gis.gis_vector_feature(id) ON DELETE CASCADE,
+    CONSTRAINT ck_vector_style_scope CHECK (
+        (scope='LAYER' AND layer_id IS NOT NULL AND group_id IS NULL AND feature_id IS NULL) OR
+        (scope='GROUP' AND group_id IS NOT NULL AND layer_id IS NULL AND feature_id IS NULL AND NOT is_default) OR
+        (scope='FEATURE' AND feature_id IS NOT NULL AND layer_id IS NULL AND group_id IS NULL AND NOT is_default)),
+    UNIQUE(group_id), UNIQUE(feature_id),
+    name VARCHAR(100) NOT NULL CHECK (btrim(name) <> ''),
+    is_default BOOLEAN NOT NULL DEFAULT false,
+    definition JSONB NOT NULL,
+    version BIGINT NOT NULL DEFAULT 1 CHECK (version >= 1),
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (layer_id, name),
+    CHECK (jsonb_typeof(definition) = 'object'
+        AND definition @> '{"schemaVersion":1}'::jsonb
+        AND ((scope='LAYER' AND definition ? 'rules' AND jsonb_typeof(definition->'rules')='array')
+            OR (scope IN ('GROUP','FEATURE') AND definition ? 'symbol' AND jsonb_typeof(definition->'symbol')='object')))
+);
+CREATE UNIQUE INDEX uk_gis_vector_style_default ON ocean_gis.gis_vector_style(layer_id) WHERE is_default;
+COMMENT ON TABLE ocean_gis.gis_vector_style IS '图层样式方案及有序渲染规则，样式版本与要素数据版本独立';
+COMMENT ON COLUMN ocean_gis.gis_vector_style.definition IS 'schemaVersion=1；rules 按几何类别、属性及连续 zoom 匹配，首条命中生效';
+COMMENT ON COLUMN ocean_gis.gis_vector_style.is_default IS '同一图层至多一个默认方案，业务层保证默认方案不被删除';
 
 -- 显示查询中的参数化条件解释器；不拼接或执行模板提供的SQL。
 CREATE FUNCTION ocean_gis.vector_rule_value(v JSONB, field_name TEXT) RETURNS JSONB

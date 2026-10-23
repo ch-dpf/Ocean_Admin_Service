@@ -47,15 +47,12 @@ public final class GisVectorVO {
     public record EffectiveStyle(String layerId, String source, String groupId, String styleId,
             long version, long presentationVersion, boolean configured, JsonNode definition) { }
 
-    /** 上下文同时固定视窗、样式和数据版本，不能跨视窗或修改后继续使用。 */
-    public record RenderContext(String contextId, String dataSetId, long dataRevision, long displayRevision,
-            long styleVersion, List<Double> bbox, double displayZoom, int widthPixels, int heightPixels,
-            int budget, long objectCount, long candidateCount, boolean detailReduced,
-            Double cutoffMinZoom, Double cutoffPixelSize, int maxZoom,
-            JsonNode plans, JsonNode policy, Instant expiresAt) { }
+    /** 瓦片版本只由数据与抽析规则决定，连续显示缩放和配图不参与。 */
+    public record MapDefinition(String dataSetId, String tileVersion, long dataRevision,
+            int minZoom, int nativeMaxZoom, int displayMaxZoom, int tileSize, String tiles, JsonNode extent) { }
 
-    /** 同级同屏幕尺寸的要素一起保留/排除，不用任意ID截取前N个要素。 */
-    public record DisplayPlan(long candidateCount, long objectCount, Double cutoffMinZoom, Double cutoffPixelSize) { }
+    public record Cartography(String dataSetId, long styleVersion, long displayRevision,
+            JsonNode defaults, JsonNode groups, JsonNode layers, boolean hasFeatureOverrides) { }
 
     /** 仅供数据库与瓦片服务协作，不直接作为HTTP JSON响应。 */
     public record TilePayload(byte[] body, long byteSize) { }

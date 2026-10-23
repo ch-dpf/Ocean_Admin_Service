@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "kind": "VECTOR_DATASET_STYLE_TEMPLATE",
   "templateId": "cn-vector-default",
-  "templateVersion": 2,
+  "templateVersion": 3,
   "name": "矢量数据集默认业务分类与样式",
-  "description": "以分类映射表定义业务目录，以当前原型定义默认显示和未知图层手动挂载；不包含来源适配器。",
+  "description": "按最新分类映射与OSM-bright层级组织独立的数据规则和配图规则。",
   "provenance": {
     "classificationWorkbook": {
       "fileName": "浙江省原始数据分类映射(1).xlsx",
@@ -14,7 +14,6 @@
       "notesSheet": "说明",
       "notesRange": "A1:B10"
     },
-    "prototype": "poi86-autostyle-v4",
     "policyNotes": [
       "业务目录以映射表为准；建筑、水体保留“不划分”，符号和比例尺细节不新增业务组。",
       "code 和 fclass 保留原始值；fclass 语义优先，code 仅在 fclass 缺失、null 或空白时兜底。",
@@ -22,8 +21,9 @@
       "riverbank 保持源 fclass，nature_reserve 归入土地利用/自然保护。",
       "行政区原始属性为 id、name、site；不凭空写入 code=1202/1204/1206/1208 或 admin_level。",
       "未提供的国家、县级数据不填充虚构要素；省级融合计划默认禁用，不能仅凭文件名生成省域面。",
-      "点、线、面均不做网格聚合；点和行政边界受预算保护，其他线面按业务级别和屏幕尺寸进行保形细节筛选。"
-    ]
+      "仅按XYZ整数级别和tilePolicy确定数据LOD；行政边界保留原有拓扑；配图及临时显隐不参与瓦片生成。"
+    ],
+    "mappingDocument": "分类映射与OSM-bright样式层级对应说明.md"
   },
   "initialization": {
     "onDatasetCreate": "COPY_TEMPLATE_TO_DATASET_SNAPSHOT",
@@ -219,15 +219,66 @@
       ]
     },
     {
-      "id": "land-urban",
+      "id": "land-residential",
       "parentId": "land",
-      "name": "城镇建设用地",
+      "name": "居住用地",
       "nodeType": "CLASSIFICATION",
       "geometryType": "POLYGON",
       "assignable": true,
-      "defaultStyleId": "style-land-urban",
+      "defaultStyleId": "style-land-residential",
       "defaultLayerEnabled": true,
       "sortOrder": 60,
+      "sourceRows": [
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "id": "land-industrial",
+      "parentId": "land",
+      "name": "工业用地",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-land-industrial",
+      "defaultLayerEnabled": true,
+      "sortOrder": 61,
+      "sourceRows": [
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "id": "land-commercial",
+      "parentId": "land",
+      "name": "商业用地",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-land-commercial",
+      "defaultLayerEnabled": true,
+      "sortOrder": 62,
+      "sourceRows": [
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "id": "land-retail",
+      "parentId": "land",
+      "name": "零售商业用地",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-land-retail",
+      "defaultLayerEnabled": true,
+      "sortOrder": 63,
       "sourceRows": [
         7,
         8,
@@ -678,12 +729,32 @@
           "op": "and",
           "conditions": [
             {
-              "op": "missingOrEmpty",
-              "field": "osm_id"
-            },
-            {
-              "op": "missingOrEmpty",
-              "field": "fclass"
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "osm_id"
+                    }
+                  ]
+                },
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "national",
+                    "admin_level4",
+                    "admin_level6",
+                    "admin_level8"
+                  ]
+                }
+              ]
             },
             {
               "op": "eq",
@@ -692,14 +763,7 @@
             }
           ]
         },
-        "sourceClasses": [
-          {
-            "sourceRow": 2,
-            "code": null,
-            "fclass": null,
-            "name": "国家边界（当前浙江数据未提供）"
-          }
-        ]
+        "sourceClasses": []
       },
       {
         "id": "classify-admin-province",
@@ -709,17 +773,42 @@
           "op": "and",
           "conditions": [
             {
-              "op": "missingOrEmpty",
-              "field": "osm_id"
-            },
-            {
-              "op": "missingOrEmpty",
-              "field": "fclass"
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "osm_id"
+                    }
+                  ]
+                },
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "national",
+                    "admin_level4",
+                    "admin_level6",
+                    "admin_level8"
+                  ]
+                }
+              ]
             },
             {
               "op": "regex",
               "field": "id",
               "value": "^[0-9]{2}0000$"
+            },
+            {
+              "op": "ne",
+              "field": "id",
+              "value": "100000"
             },
             {
               "op": "ne",
@@ -745,12 +834,32 @@
           "op": "and",
           "conditions": [
             {
-              "op": "missingOrEmpty",
-              "field": "osm_id"
-            },
-            {
-              "op": "missingOrEmpty",
-              "field": "fclass"
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "osm_id"
+                    }
+                  ]
+                },
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "national",
+                    "admin_level4",
+                    "admin_level6",
+                    "admin_level8"
+                  ]
+                }
+              ]
             },
             {
               "op": "regex",
@@ -784,12 +893,32 @@
           "op": "and",
           "conditions": [
             {
-              "op": "missingOrEmpty",
-              "field": "osm_id"
-            },
-            {
-              "op": "missingOrEmpty",
-              "field": "fclass"
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "osm_id"
+                    }
+                  ]
+                },
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "national",
+                    "admin_level4",
+                    "admin_level6",
+                    "admin_level8"
+                  ]
+                }
+              ]
             },
             {
               "op": "regex",
@@ -857,9 +986,9 @@
         ]
       },
       {
-        "id": "classify-land-urban",
+        "id": "classify-land-residential",
         "geometryType": "POLYGON",
-        "groupId": "land-urban",
+        "groupId": "land-residential",
         "filter": {
           "op": "or",
           "conditions": [
@@ -867,9 +996,129 @@
               "op": "in",
               "field": "fclass",
               "value": [
-                "residential",
-                "industrial",
-                "commercial",
+                "residential"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    7203
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 7,
+            "code": 7203,
+            "fclass": "residential",
+            "name": "居住用地"
+          }
+        ]
+      },
+      {
+        "id": "classify-land-industrial",
+        "geometryType": "POLYGON",
+        "groupId": "land-industrial",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "industrial"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    7204
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 8,
+            "code": 7204,
+            "fclass": "industrial",
+            "name": "工业用地"
+          }
+        ]
+      },
+      {
+        "id": "classify-land-commercial",
+        "geometryType": "POLYGON",
+        "groupId": "land-commercial",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "commercial"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    7209
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 9,
+            "code": 7209,
+            "fclass": "commercial",
+            "name": "商业用地"
+          }
+        ]
+      },
+      {
+        "id": "classify-land-retail",
+        "geometryType": "POLYGON",
+        "groupId": "land-retail",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
                 "retail"
               ]
             },
@@ -884,9 +1133,6 @@
                   "op": "in",
                   "field": "code",
                   "value": [
-                    7203,
-                    7204,
-                    7209,
                     7212
                   ]
                 }
@@ -895,24 +1141,6 @@
           ]
         },
         "sourceClasses": [
-          {
-            "sourceRow": 7,
-            "code": 7203,
-            "fclass": "residential",
-            "name": "居住用地"
-          },
-          {
-            "sourceRow": 8,
-            "code": 7204,
-            "fclass": "industrial",
-            "name": "工业用地"
-          },
-          {
-            "sourceRow": 9,
-            "code": 7209,
-            "fclass": "commercial",
-            "name": "商业用地"
-          },
           {
             "sourceRow": 10,
             "code": 7212,
@@ -2109,820 +2337,12 @@
       "POLYGON": "unknown-polygon"
     }
   },
-  "styles": [
-    {
-      "id": "style-admin-country",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 3,
-      "maxZoom": 22,
-      "renderOrder": 30,
-      "symbol": {
-        "fillColor": "#7c8da6",
-        "fillOpacity": 0.05,
-        "strokeColor": "#7c8da6",
-        "strokeWidth": 1,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": "id",
-        "minZoom": 7,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-admin-province",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 5,
-      "maxZoom": 22,
-      "renderOrder": 30,
-      "symbol": {
-        "fillColor": "#7c8da6",
-        "fillOpacity": 0.05,
-        "strokeColor": "#7c8da6",
-        "strokeWidth": 1,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": "id",
-        "minZoom": 7,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-admin-city",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 6,
-      "maxZoom": 22,
-      "renderOrder": 30,
-      "symbol": {
-        "fillColor": "#8b9bb1",
-        "fillOpacity": 0.05,
-        "strokeColor": "#8b9bb1",
-        "strokeWidth": 1,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": "id",
-        "minZoom": 7,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-admin-county",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 9,
-      "maxZoom": 22,
-      "renderOrder": 30,
-      "symbol": {
-        "fillColor": "#a0adbd",
-        "fillOpacity": 0.05,
-        "strokeColor": "#a0adbd",
-        "strokeWidth": 1,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": "id",
-        "minZoom": 7,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-building-outline",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 15,
-      "maxZoom": 22,
-      "renderOrder": 50,
-      "symbol": {
-        "fillColor": "#b4becb",
-        "fillOpacity": 0.58,
-        "strokeColor": "#b4becb",
-        "strokeWidth": 0.6,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-land-urban",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 12,
-      "maxZoom": 22,
-      "renderOrder": 10,
-      "symbol": {
-        "fillColor": "#d3cdc3",
-        "fillOpacity": 0.58,
-        "strokeColor": "#d3cdc3",
-        "strokeWidth": 0.6,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-land-park",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 10,
-      "maxZoom": 22,
-      "renderOrder": 10,
-      "symbol": {
-        "fillColor": "#91b49b",
-        "fillOpacity": 0.58,
-        "strokeColor": "#91b49b",
-        "strokeWidth": 0.6,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-land-forest",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 8,
-      "maxZoom": 22,
-      "renderOrder": 10,
-      "symbol": {
-        "fillColor": "#8cab91",
-        "fillOpacity": 0.58,
-        "strokeColor": "#8cab91",
-        "strokeWidth": 0.6,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-land-farm",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 10,
-      "maxZoom": 22,
-      "renderOrder": 10,
-      "symbol": {
-        "fillColor": "#bdc5a2",
-        "fillOpacity": 0.58,
-        "strokeColor": "#bdc5a2",
-        "strokeWidth": 0.6,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-land-reserve",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 7,
-      "maxZoom": 22,
-      "renderOrder": 10,
-      "symbol": {
-        "fillColor": "#95b5a3",
-        "fillOpacity": 0.58,
-        "strokeColor": "#95b5a3",
-        "strokeWidth": 0.6,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-land-special",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 13,
-      "maxZoom": 22,
-      "renderOrder": 10,
-      "symbol": {
-        "fillColor": "#c6bdb2",
-        "fillOpacity": 0.58,
-        "strokeColor": "#c6bdb2",
-        "strokeWidth": 0.6,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-water-body",
-      "geometryType": "POLYGON",
-      "enabled": true,
-      "minZoom": 8,
-      "maxZoom": 22,
-      "renderOrder": 20,
-      "symbol": {
-        "fillColor": "#97c3d9",
-        "fillOpacity": 0.58,
-        "strokeColor": "#97c3d9",
-        "strokeWidth": 0.6,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": [
-        {
-          "id": "riverbank-detail",
-          "filter": {
-            "op": "in",
-            "field": "fclass",
-            "value": [
-              "riverbank"
-            ]
-          },
-          "minZoom": 9,
-          "maxZoom": 22,
-          "symbol": {
-            "fillColor": "#8dbbd2",
-            "strokeColor": "#8dbbd2"
-          }
-        },
-        {
-          "id": "wetland-detail",
-          "filter": {
-            "op": "in",
-            "field": "fclass",
-            "value": [
-              "wetland"
-            ]
-          },
-          "minZoom": 11,
-          "maxZoom": 22,
-          "symbol": {
-            "fillColor": "#9bbcb4",
-            "strokeColor": "#9bbcb4"
-          }
-        },
-        {
-          "id": "dock-detail",
-          "filter": {
-            "op": "in",
-            "field": "fclass",
-            "value": [
-              "dock"
-            ]
-          },
-          "minZoom": 13,
-          "maxZoom": 22,
-          "symbol": {
-            "fillColor": "#a3c5d5",
-            "strokeColor": "#a3c5d5"
-          }
-        }
-      ]
-    },
-    {
-      "id": "style-road-motorway",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 6,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#e4b262",
-        "width": 2.2,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-road-trunk",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 8,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#e7c38b",
-        "width": 1.5,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-road-primary",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 10,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#cdbb98",
-        "width": 1.5,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-road-secondary",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 11,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#c8bea8",
-        "width": 1.2,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-road-tertiary",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 12,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#b9b5a6",
-        "width": 1,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-road-local",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 14,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#bcc5d2",
-        "width": 1,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": [
-        {
-          "id": "pedestrian-detail",
-          "filter": {
-            "op": "in",
-            "field": "fclass",
-            "value": [
-              "pedestrian"
-            ]
-          },
-          "minZoom": 16,
-          "maxZoom": 22,
-          "symbol": {
-            "color": "#c4b6ac",
-            "width": 1
-          }
-        }
-      ]
-    },
-    {
-      "id": "style-road-link",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 10,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#cdbb98",
-        "width": 1.2,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": [
-        {
-          "id": "local-road-links",
-          "filter": {
-            "op": "in",
-            "field": "fclass",
-            "value": [
-              "primary_link",
-              "secondary_link",
-              "tertiary_link"
-            ]
-          },
-          "minZoom": 12,
-          "maxZoom": 22,
-          "symbol": {
-            "color": "#cdbb98",
-            "width": 1
-          }
-        }
-      ]
-    },
-    {
-      "id": "style-road-service-track",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 15,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#c9d0d9",
-        "width": 1,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": [
-        {
-          "id": "track-detail",
-          "filter": {
-            "op": "in",
-            "field": "fclass",
-            "value": [
-              "track",
-              "track_grade1",
-              "track_grade2",
-              "track_grade3",
-              "track_grade4",
-              "track_grade5"
-            ]
-          },
-          "minZoom": 16,
-          "maxZoom": 22,
-          "symbol": {
-            "color": "#b5b19e",
-            "width": 1
-          }
-        }
-      ]
-    },
-    {
-      "id": "style-road-path",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 16,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#c4b6ac",
-        "width": 1,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-road-other",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 15,
-      "maxZoom": 22,
-      "renderOrder": 60,
-      "symbol": {
-        "color": "#c4c6c9",
-        "width": 1,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-rail-main",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 7,
-      "maxZoom": 22,
-      "renderOrder": 70,
-      "symbol": {
-        "color": "#7e8a9b",
-        "width": 1.1,
-        "opacity": 1,
-        "dashArray": [
-          4,
-          3
-        ]
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": [
-        {
-          "id": "special-rail-detail",
-          "filter": {
-            "op": "in",
-            "field": "fclass",
-            "value": [
-              "narrow_gauge",
-              "miniature_railway",
-              "funicular"
-            ]
-          },
-          "minZoom": 14,
-          "maxZoom": 22,
-          "symbol": {
-            "color": "#9f97a9",
-            "width": 1.1
-          }
-        }
-      ]
-    },
-    {
-      "id": "style-rail-urban",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 11,
-      "maxZoom": 22,
-      "renderOrder": 70,
-      "symbol": {
-        "color": "#917e9f",
-        "width": 1.1,
-        "opacity": 1,
-        "dashArray": [
-          4,
-          3
-        ]
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-hydro-river",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 8,
-      "maxZoom": 22,
-      "renderOrder": 40,
-      "symbol": {
-        "color": "#6ba9ce",
-        "width": 1.5,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-hydro-stream",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 13,
-      "maxZoom": 22,
-      "renderOrder": 40,
-      "symbol": {
-        "color": "#94bfd3",
-        "width": 1,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-hydro-canal-drain",
-      "geometryType": "LINE",
-      "enabled": true,
-      "minZoom": 11,
-      "maxZoom": 22,
-      "renderOrder": 40,
-      "symbol": {
-        "color": "#83b4cf",
-        "width": 1.5,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": true,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": [
-        {
-          "id": "drain-detail",
-          "filter": {
-            "op": "in",
-            "field": "fclass",
-            "value": [
-              "drain"
-            ]
-          },
-          "minZoom": 15,
-          "maxZoom": 22,
-          "symbol": {
-            "color": "#a2c4d3",
-            "width": 1
-          }
-        }
-      ]
-    },
-    {
-      "id": "style-unknown-point",
-      "geometryType": "POINT",
-      "enabled": false,
-      "minZoom": 12,
-      "maxZoom": 22,
-      "renderOrder": 90,
-      "symbol": {
-        "color": "#b2927c",
-        "radius": 6,
-        "opacity": 1,
-        "strokeColor": "#b2927c",
-        "strokeWidth": 0
-      },
-      "labels": {
-        "enabled": false,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-unknown-line",
-      "geometryType": "LINE",
-      "enabled": false,
-      "minZoom": 14,
-      "maxZoom": 22,
-      "renderOrder": 90,
-      "symbol": {
-        "color": "#b2927c",
-        "width": 1.5,
-        "opacity": 1
-      },
-      "labels": {
-        "enabled": false,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    },
-    {
-      "id": "style-unknown-polygon",
-      "geometryType": "POLYGON",
-      "enabled": false,
-      "minZoom": 14,
-      "maxZoom": 22,
-      "renderOrder": 90,
-      "symbol": {
-        "fillColor": "#b2927c",
-        "fillOpacity": 0.58,
-        "strokeColor": "#b2927c",
-        "strokeWidth": 1,
-        "strokeOpacity": 1
-      },
-      "labels": {
-        "enabled": false,
-        "field": "name",
-        "fallbackField": null,
-        "minZoom": 13,
-        "collisionAvoidance": true
-      },
-      "overrides": []
-    }
-  ],
   "styleResolution": {
     "precedence": [
+      "FEATURE_OVERRIDE",
       "LAYER_CUSTOM_STYLE",
+      "GROUP_OVERRIDE",
+      "PROPERTY_RULE",
       "GROUP_DEFAULT_STYLE"
     ],
     "groupOverride": {
@@ -2934,8 +2354,8 @@
     "layerCustomStyleReplacesGroupZoomBounds": true,
     "zoomInterval": "MIN_INCLUSIVE_MAX_EXCLUSIVE",
     "ancestorsMustBeEnabled": true,
-    "noMatchingVisibleStyle": "DO_NOT_FETCH_GEOMETRY",
-    "unknownWithoutExplicitConfiguration": "DO_NOT_FETCH_GEOMETRY",
+    "noMatchingVisibleStyle": "CLIENT_HIDE",
+    "unknownWithoutExplicitConfiguration": "CLIENT_HIDE",
     "groupVisibilityIncludesLeaf": true
   },
   "unknownPolicy": {
@@ -2968,7 +2388,7 @@
     "customStyleBounds": {
       "minZoom": 0,
       "maxStartZoom": 18,
-      "maxZoom": 22,
+      "maxZoom": 25,
       "minLessThanMax": true
     },
     "preserveOriginalProperties": true,
@@ -3000,7 +2420,8 @@
         "fillOpacity",
         "strokeColor",
         "strokeWidth",
-        "strokeOpacity"
+        "strokeOpacity",
+        "dashArray"
       ]
     },
     "symbolConstraints": {
@@ -3019,85 +2440,6 @@
       }
     }
   },
-  "renderPolicy": {
-    "requireViewport": true,
-    "requireZoom": true,
-    "viewportIncludes": [
-      "bbox",
-      "widthPixels",
-      "heightPixels"
-    ],
-    "minZoom": 0,
-    "maxZoom": 18,
-    "queryMode": "VIEWPORT_OR_VECTOR_TILE_ONLY",
-    "applyClassificationAndStyleFiltersBeforeGeometryFetch": true,
-    "visibilityPredicate": "GROUP_AND_ALL_ANCESTORS_ENABLED_AND_LAYER_ENABLED_AND_STYLE_CONFIGURED_AND_MIN_ZOOM_LE_ZOOM_LT_MAX_ZOOM",
-    "styleZoomSource": "REQUEST_CONTINUOUS_ZOOM",
-    "allowFullDatasetGeometryLoad": false,
-    "allowFullSampleGeometryPreview": false,
-    "onNoVisibleFeatures": "EMPTY_RESPONSE_NO_UNFILTERED_FALLBACK",
-    "onBudgetExceeded": "GEOMETRY_PRESERVING_LOD_OR_REPORT_LIMIT",
-    "densityBudget": {
-      "scope": "WHOLE_VIEWPORT_ACROSS_ALL_ENABLED_LAYERS",
-      "pixelSpace": "CSS_PIXELS",
-      "formula": "CLAMP(FLOOR(widthPixels * heightPixels / pixelsPerObject), minObjects, maxObjects)",
-      "pixelsPerObject": 800,
-      "minObjects": 32,
-      "maxObjects": 600,
-      "includeLayerCustomStyles": true
-    },
-    "pixelFilters": {
-      "polygonMinAreaPixels": 3,
-      "polygonExemptGroupParentIds": [
-        "admin"
-      ],
-      "lineMinProjectedLengthPixels": 1.5
-    },
-    "generalization": {
-      "space": "SCREEN_PIXELS",
-      "maxErrorPixels": 1,
-      "preserveTopology": true,
-      "preserveSourceGeometry": true
-    },
-    "labels": {
-      "collisionAvoidance": true,
-      "fontSizePixels": 11,
-      "pixelsPerLabel": 7000,
-      "maxCountFormula": "CEIL(widthPixels * heightPixels / pixelsPerLabel)"
-    },
-    "cacheIdentityFields": [
-      "datasetId",
-      "datasetStyleVersion",
-      "dataVersion",
-      "layerAssignmentVersion",
-      "customStyleVersion",
-      "enabledGroupIds",
-      "enabledLayerIds",
-      "displayZoom",
-      "tileOrViewport",
-      "viewportBudget"
-    ],
-    "pointAggregation": false,
-    "displaySelection": {
-      "priority": "MATCHED_RULE_MIN_ZOOM_ASC_THEN_VISIBLE_PIXEL_SIZE_DESC",
-      "equalMetricTies": "KEEP_OR_EXCLUDE_WHOLE_BUCKET",
-      "protectedGeometry": [
-        "POINT",
-        "ADMINISTRATIVE_POLYGON"
-      ],
-      "onProtectedBudgetExceeded": "REPORT_LIMIT_NO_RAW_FALLBACK"
-    },
-    "tileRendering": {
-      "extent": 4096,
-      "buffer": 1024,
-      "cssRenderBuffer": 64,
-      "polygonParts": [
-        "FILL_WITHOUT_STROKE",
-        "TRUE_BOUNDARY_LINE"
-      ],
-      "labels": "SOURCE_ANCHOR_SINGLE_XYZ_OWNER"
-    }
-  },
   "derivations": [
     {
       "id": "province-from-cities",
@@ -3113,6 +2455,3873 @@
       "missingNamePolicy": "KEEP_NULL_USE_ID_FOR_LABEL",
       "description": "映射表中的省域面为市级面融合派生项；须单独实现并显式启用，不在导入时自动制造省界。"
     }
-  ]
+  ],
+  "tilePolicy": {
+    "minZoom": 0,
+    "nativeMaxZoom": 18,
+    "displayMaxZoom": 24,
+    "tileSize": 512,
+    "extent": 8192,
+    "buffer": 256,
+    "simplifyPixels": 0.25,
+    "polygonMinAreaPixels": 1,
+    "lineMinLengthPixels": 1,
+    "encodingVersion": 1,
+    "groups": [
+      {
+        "groupKey": "admin-country",
+        "minZoom": 0,
+        "preserveBoundary": true,
+        "overrides": []
+      },
+      {
+        "groupKey": "admin-province",
+        "minZoom": 3,
+        "preserveBoundary": true,
+        "overrides": []
+      },
+      {
+        "groupKey": "admin-city",
+        "minZoom": 5,
+        "preserveBoundary": true,
+        "overrides": []
+      },
+      {
+        "groupKey": "admin-county",
+        "minZoom": 8,
+        "preserveBoundary": true,
+        "overrides": []
+      },
+      {
+        "groupKey": "building-outline",
+        "minZoom": 13,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "land-residential",
+        "minZoom": 11,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "residential"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7203
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 11
+          }
+        ]
+      },
+      {
+        "groupKey": "land-industrial",
+        "minZoom": 10,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "industrial"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7204
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 10
+          }
+        ]
+      },
+      {
+        "groupKey": "land-commercial",
+        "minZoom": 11,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "commercial"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7209
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 11
+          }
+        ]
+      },
+      {
+        "groupKey": "land-retail",
+        "minZoom": 12,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "retail"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7212
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 12
+          }
+        ]
+      },
+      {
+        "groupKey": "land-park",
+        "minZoom": 8,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "park"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7202
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 8
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "recreation_ground"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7211
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 10
+          }
+        ]
+      },
+      {
+        "groupKey": "land-forest",
+        "minZoom": 6,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "forest"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7201
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 6
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "scrub"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7217
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 8
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "grass"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7218
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 9
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "heath"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7219
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 10
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "meadow"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7208
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 9
+          }
+        ]
+      },
+      {
+        "groupKey": "land-farm",
+        "minZoom": 8,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "farmland"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7229
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 8
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "farmyard"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7228
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 10
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "orchard"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7215
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 10
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "vineyard"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7216
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 11
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "allotments"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7207
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 12
+          }
+        ]
+      },
+      {
+        "groupKey": "land-reserve",
+        "minZoom": 8,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "nature_reserve"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7210
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 8
+          }
+        ]
+      },
+      {
+        "groupKey": "land-special",
+        "minZoom": 9,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "cemetery"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7206
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 10
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "military"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7213
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 9
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "quarry"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7214
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 10
+          }
+        ]
+      },
+      {
+        "groupKey": "water-body",
+        "minZoom": 5,
+        "preserveBoundary": false,
+        "overrides": [
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "water"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8200
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "reservoir"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8201
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "riverbank"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8202
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "dock"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8203
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5
+          },
+          {
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "wetland"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8221
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5
+          }
+        ]
+      },
+      {
+        "groupKey": "road-motorway",
+        "minZoom": 5,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "road-trunk",
+        "minZoom": 6,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "road-primary",
+        "minZoom": 7,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "road-secondary",
+        "minZoom": 8,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "road-tertiary",
+        "minZoom": 9,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "road-local",
+        "minZoom": 10,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "road-link",
+        "minZoom": 8,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "road-service-track",
+        "minZoom": 11,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "road-path",
+        "minZoom": 12,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "road-other",
+        "minZoom": 11,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "rail-main",
+        "minZoom": 8,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "rail-urban",
+        "minZoom": 10,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "hydro-river",
+        "minZoom": 5,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "hydro-stream",
+        "minZoom": 8,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "hydro-canal-drain",
+        "minZoom": 8,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "unknown-point",
+        "minZoom": 12,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "unknown-line",
+        "minZoom": 14,
+        "preserveBoundary": false,
+        "overrides": []
+      },
+      {
+        "groupKey": "unknown-polygon",
+        "minZoom": 14,
+        "preserveBoundary": false,
+        "overrides": []
+      }
+    ],
+    "propertyFields": [
+      "fclass",
+      "code",
+      "id",
+      "name",
+      "ref"
+    ]
+  },
+  "cartography": {
+    "styles": [
+      {
+        "id": "style-admin-country",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 0,
+        "maxZoom": 25,
+        "renderOrder": 30,
+        "symbol": {
+          "fillColor": "#F1EDF3",
+          "fillOpacity": 0.035,
+          "strokeColor": "#5F536F",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.6
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "id",
+          "minZoom": 1,
+          "fontSizeStops": [
+            [
+              1,
+              11
+            ],
+            [
+              5,
+              14
+            ],
+            [
+              9,
+              17
+            ]
+          ]
+        },
+        "overrides": [],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              0,
+              0.6
+            ],
+            [
+              4,
+              1
+            ],
+            [
+              8,
+              1.4
+            ],
+            [
+              12,
+              1.8
+            ],
+            [
+              16,
+              2.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-admin-province",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 3,
+        "maxZoom": 25,
+        "renderOrder": 30,
+        "symbol": {
+          "fillColor": "#EEE9F1",
+          "fillOpacity": 0.045,
+          "strokeColor": "#897B94",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.6
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "id",
+          "minZoom": 4,
+          "fontSizeStops": [
+            [
+              4,
+              11
+            ],
+            [
+              8,
+              14
+            ],
+            [
+              12,
+              17
+            ]
+          ]
+        },
+        "overrides": [],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              3,
+              0.6
+            ],
+            [
+              6,
+              0.9
+            ],
+            [
+              9,
+              1.2
+            ],
+            [
+              12,
+              1.55
+            ],
+            [
+              16,
+              1.8
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-admin-city",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 5,
+        "maxZoom": 25,
+        "renderOrder": 30,
+        "symbol": {
+          "fillColor": "#E8F0F4",
+          "fillOpacity": 0.035,
+          "strokeColor": "#9AA5AE",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.45
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "id",
+          "minZoom": 6,
+          "fontSizeStops": [
+            [
+              6,
+              11
+            ],
+            [
+              10,
+              14
+            ],
+            [
+              14,
+              17
+            ]
+          ]
+        },
+        "overrides": [],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              5,
+              0.45
+            ],
+            [
+              8,
+              0.7
+            ],
+            [
+              11,
+              0.95
+            ],
+            [
+              14,
+              1.2
+            ],
+            [
+              17,
+              1.4
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-admin-county",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 8,
+        "maxZoom": 25,
+        "renderOrder": 30,
+        "symbol": {
+          "fillColor": "#E9EEF0",
+          "fillOpacity": 0.025,
+          "strokeColor": "#B6BEC4",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.4,
+          "dashArray": [
+            2,
+            1.5
+          ]
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "id",
+          "minZoom": 9,
+          "fontSizeStops": [
+            [
+              9,
+              11
+            ],
+            [
+              13,
+              14
+            ],
+            [
+              17,
+              17
+            ]
+          ]
+        },
+        "overrides": [],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              8,
+              0.4
+            ],
+            [
+              11,
+              0.6
+            ],
+            [
+              14,
+              0.8
+            ],
+            [
+              17,
+              1
+            ],
+            [
+              20,
+              1.1
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-building-outline",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 13,
+        "maxZoom": 25,
+        "renderOrder": 50,
+        "symbol": {
+          "fillColor": "#D9D6D1",
+          "fillOpacity": 0.82,
+          "strokeColor": "#B7B2AA",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.2
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              13,
+              0.2
+            ],
+            [
+              16,
+              0.4
+            ],
+            [
+              19,
+              0.65
+            ],
+            [
+              22,
+              0.8
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-land-residential",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 11,
+        "maxZoom": 25,
+        "renderOrder": 10,
+        "symbol": {
+          "fillColor": "#E9D9CC",
+          "fillOpacity": 0.42,
+          "strokeColor": "#CDBAA9",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.35
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "residential",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "residential"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7203
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 11,
+            "symbol": {
+              "fillColor": "#E9D9CC",
+              "fillOpacity": 0.42,
+              "strokeColor": "#CDBAA9",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  11,
+                  0.35
+                ],
+                [
+                  15,
+                  0.65
+                ],
+                [
+                  19,
+                  0.9
+                ],
+                [
+                  23,
+                  1.2
+                ]
+              ]
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              11,
+              0.35
+            ],
+            [
+              15,
+              0.65
+            ],
+            [
+              19,
+              0.9
+            ],
+            [
+              23,
+              1.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-land-industrial",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 10,
+        "maxZoom": 25,
+        "renderOrder": 10,
+        "symbol": {
+          "fillColor": "#E5E0C9",
+          "fillOpacity": 0.46,
+          "strokeColor": "#BDB493",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.35
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "industrial",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "industrial"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7204
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 10,
+            "symbol": {
+              "fillColor": "#E5E0C9",
+              "fillOpacity": 0.46,
+              "strokeColor": "#BDB493",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  10,
+                  0.35
+                ],
+                [
+                  14,
+                  0.65
+                ],
+                [
+                  18,
+                  0.9
+                ],
+                [
+                  22,
+                  1.2
+                ]
+              ]
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              10,
+              0.35
+            ],
+            [
+              14,
+              0.65
+            ],
+            [
+              18,
+              0.9
+            ],
+            [
+              22,
+              1.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-land-commercial",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 11,
+        "maxZoom": 25,
+        "renderOrder": 10,
+        "symbol": {
+          "fillColor": "#F1D7D2",
+          "fillOpacity": 0.46,
+          "strokeColor": "#D3B2AD",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.35
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "commercial",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "commercial"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7209
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 11,
+            "symbol": {
+              "fillColor": "#F1D7D2",
+              "fillOpacity": 0.46,
+              "strokeColor": "#D3B2AD",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  11,
+                  0.35
+                ],
+                [
+                  15,
+                  0.65
+                ],
+                [
+                  19,
+                  0.9
+                ],
+                [
+                  23,
+                  1.2
+                ]
+              ]
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              11,
+              0.35
+            ],
+            [
+              15,
+              0.65
+            ],
+            [
+              19,
+              0.9
+            ],
+            [
+              23,
+              1.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-land-retail",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 12,
+        "maxZoom": 25,
+        "renderOrder": 10,
+        "symbol": {
+          "fillColor": "#F5E0D6",
+          "fillOpacity": 0.5,
+          "strokeColor": "#D8BEB3",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.35
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "retail",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "retail"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7212
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 12,
+            "symbol": {
+              "fillColor": "#F5E0D6",
+              "fillOpacity": 0.5,
+              "strokeColor": "#D8BEB3",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  12,
+                  0.35
+                ],
+                [
+                  16,
+                  0.65
+                ],
+                [
+                  20,
+                  0.9
+                ],
+                [
+                  24,
+                  1.2
+                ]
+              ]
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              12,
+              0.35
+            ],
+            [
+              16,
+              0.65
+            ],
+            [
+              20,
+              0.9
+            ],
+            [
+              24,
+              1.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-land-park",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 8,
+        "maxZoom": 25,
+        "renderOrder": 10,
+        "symbol": {
+          "fillColor": "#B9D9B0",
+          "fillOpacity": 0.62,
+          "strokeColor": "#8EB48A",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.35
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "park",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "park"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7202
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 8,
+            "symbol": {
+              "fillColor": "#B9D9B0",
+              "fillOpacity": 0.62,
+              "strokeColor": "#8EB48A",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  8,
+                  0.35
+                ],
+                [
+                  12,
+                  0.65
+                ],
+                [
+                  16,
+                  0.9
+                ],
+                [
+                  20,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "recreation_ground",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "recreation_ground"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7211
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 10,
+            "symbol": {
+              "fillColor": "#C8E0B9",
+              "fillOpacity": 0.62,
+              "strokeColor": "#99BB8D",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  10,
+                  0.35
+                ],
+                [
+                  14,
+                  0.65
+                ],
+                [
+                  18,
+                  0.9
+                ],
+                [
+                  22,
+                  1.2
+                ]
+              ]
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              8,
+              0.35
+            ],
+            [
+              12,
+              0.65
+            ],
+            [
+              16,
+              0.9
+            ],
+            [
+              20,
+              1.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-land-forest",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 6,
+        "maxZoom": 25,
+        "renderOrder": 10,
+        "symbol": {
+          "fillColor": "#8EB783",
+          "fillOpacity": 0.72,
+          "strokeColor": "#6F9B68",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.35
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "forest",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "forest"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7201
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 6,
+            "symbol": {
+              "fillColor": "#8EB783",
+              "fillOpacity": 0.72,
+              "strokeColor": "#6F9B68",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  6,
+                  0.35
+                ],
+                [
+                  10,
+                  0.65
+                ],
+                [
+                  14,
+                  0.9
+                ],
+                [
+                  18,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "scrub",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "scrub"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7217
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 8,
+            "symbol": {
+              "fillColor": "#A8C993",
+              "fillOpacity": 0.68,
+              "strokeColor": "#89AB77",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  8,
+                  0.35
+                ],
+                [
+                  12,
+                  0.65
+                ],
+                [
+                  16,
+                  0.9
+                ],
+                [
+                  20,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "grass",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "grass"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7218
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 9,
+            "symbol": {
+              "fillColor": "#C6DDAE",
+              "fillOpacity": 0.64,
+              "strokeColor": "#A5C28E",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  9,
+                  0.35
+                ],
+                [
+                  13,
+                  0.65
+                ],
+                [
+                  17,
+                  0.9
+                ],
+                [
+                  21,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "heath",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "heath"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7219
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 10,
+            "symbol": {
+              "fillColor": "#D6D4A9",
+              "fillOpacity": 0.62,
+              "strokeColor": "#B6B17E",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  10,
+                  0.35
+                ],
+                [
+                  14,
+                  0.65
+                ],
+                [
+                  18,
+                  0.9
+                ],
+                [
+                  22,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "meadow",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "meadow"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7208
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 9,
+            "symbol": {
+              "fillColor": "#C1DCAE",
+              "fillOpacity": 0.62,
+              "strokeColor": "#9EBE8A",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  9,
+                  0.35
+                ],
+                [
+                  13,
+                  0.65
+                ],
+                [
+                  17,
+                  0.9
+                ],
+                [
+                  21,
+                  1.2
+                ]
+              ]
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              6,
+              0.35
+            ],
+            [
+              10,
+              0.65
+            ],
+            [
+              14,
+              0.9
+            ],
+            [
+              18,
+              1.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-land-farm",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 8,
+        "maxZoom": 25,
+        "renderOrder": 10,
+        "symbol": {
+          "fillColor": "#E9E1B9",
+          "fillOpacity": 0.62,
+          "strokeColor": "#C8BB87",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.35
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "farmland",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "farmland"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7229
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 8,
+            "symbol": {
+              "fillColor": "#E9E1B9",
+              "fillOpacity": 0.62,
+              "strokeColor": "#C8BB87",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  8,
+                  0.35
+                ],
+                [
+                  12,
+                  0.65
+                ],
+                [
+                  16,
+                  0.9
+                ],
+                [
+                  20,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "farmyard",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "farmyard"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7228
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 10,
+            "symbol": {
+              "fillColor": "#E2D6B8",
+              "fillOpacity": 0.64,
+              "strokeColor": "#BFAF8D",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  10,
+                  0.35
+                ],
+                [
+                  14,
+                  0.65
+                ],
+                [
+                  18,
+                  0.9
+                ],
+                [
+                  22,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "orchard",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "orchard"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7215
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 10,
+            "symbol": {
+              "fillColor": "#BFD7A9",
+              "fillOpacity": 0.64,
+              "strokeColor": "#91B27C",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  10,
+                  0.35
+                ],
+                [
+                  14,
+                  0.65
+                ],
+                [
+                  18,
+                  0.9
+                ],
+                [
+                  22,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "vineyard",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "vineyard"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7216
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 11,
+            "symbol": {
+              "fillColor": "#C9D5A1",
+              "fillOpacity": 0.64,
+              "strokeColor": "#9DAF74",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  11,
+                  0.35
+                ],
+                [
+                  15,
+                  0.65
+                ],
+                [
+                  19,
+                  0.9
+                ],
+                [
+                  23,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "allotments",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "allotments"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7207
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 12,
+            "symbol": {
+              "fillColor": "#D2E0B4",
+              "fillOpacity": 0.66,
+              "strokeColor": "#A8BF86",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  12,
+                  0.35
+                ],
+                [
+                  16,
+                  0.65
+                ],
+                [
+                  20,
+                  0.9
+                ],
+                [
+                  24,
+                  1.2
+                ]
+              ]
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              8,
+              0.35
+            ],
+            [
+              12,
+              0.65
+            ],
+            [
+              16,
+              0.9
+            ],
+            [
+              20,
+              1.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-land-reserve",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 8,
+        "maxZoom": 25,
+        "renderOrder": 10,
+        "symbol": {
+          "fillColor": "#B8D9C0",
+          "fillOpacity": 0.48,
+          "strokeColor": "#6E9B78",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.35,
+          "dashArray": [
+            2,
+            2
+          ]
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "nature_reserve",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "nature_reserve"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7210
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 8,
+            "symbol": {
+              "fillColor": "#B8D9C0",
+              "fillOpacity": 0.48,
+              "strokeColor": "#6E9B78",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35,
+              "dashArray": [
+                2,
+                2
+              ]
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  8,
+                  0.35
+                ],
+                [
+                  12,
+                  0.65
+                ],
+                [
+                  16,
+                  0.9
+                ],
+                [
+                  20,
+                  1.2
+                ]
+              ]
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              8,
+              0.35
+            ],
+            [
+              12,
+              0.65
+            ],
+            [
+              16,
+              0.9
+            ],
+            [
+              20,
+              1.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-land-special",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 10,
+        "maxZoom": 25,
+        "renderOrder": 10,
+        "symbol": {
+          "fillColor": "#D7E0D2",
+          "fillOpacity": 0.66,
+          "strokeColor": "#9BAA96",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.35
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "cemetery",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "cemetery"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7206
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 10,
+            "symbol": {
+              "fillColor": "#D7E0D2",
+              "fillOpacity": 0.66,
+              "strokeColor": "#9BAA96",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  10,
+                  0.35
+                ],
+                [
+                  14,
+                  0.65
+                ],
+                [
+                  18,
+                  0.9
+                ],
+                [
+                  22,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "military",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "military"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7213
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 9,
+            "symbol": {
+              "fillColor": "#E7D1CE",
+              "fillOpacity": 0.38,
+              "strokeColor": "#A36F6C",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35,
+              "dashArray": [
+                3,
+                2
+              ]
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  9,
+                  0.35
+                ],
+                [
+                  13,
+                  0.65
+                ],
+                [
+                  17,
+                  0.9
+                ],
+                [
+                  21,
+                  1.2
+                ]
+              ]
+            }
+          },
+          {
+            "id": "quarry",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "quarry"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        7214
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "maxZoom": 25,
+            "minZoom": 10,
+            "symbol": {
+              "fillColor": "#D9D5CF",
+              "fillOpacity": 0.62,
+              "strokeColor": "#9B958C",
+              "strokeOpacity": 1,
+              "strokeWidth": 0.35
+            },
+            "zoomStops": {
+              "strokeWidth": [
+                [
+                  10,
+                  0.35
+                ],
+                [
+                  14,
+                  0.65
+                ],
+                [
+                  18,
+                  0.9
+                ],
+                [
+                  22,
+                  1.2
+                ]
+              ]
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              10,
+              0.35
+            ],
+            [
+              14,
+              0.65
+            ],
+            [
+              18,
+              0.9
+            ],
+            [
+              22,
+              1.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-water-body",
+        "geometryType": "POLYGON",
+        "enabled": true,
+        "minZoom": 5,
+        "maxZoom": 25,
+        "renderOrder": 20,
+        "symbol": {
+          "fillColor": "#B5DCE8",
+          "fillOpacity": 0.9,
+          "strokeColor": "#91BDCC",
+          "strokeOpacity": 1,
+          "strokeWidth": 0.2
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 11,
+          "collisionAvoidance": true
+        },
+        "overrides": [
+          {
+            "id": "water",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "water"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8200
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5,
+            "maxZoom": 25,
+            "symbol": {
+              "fillColor": "#B5DCE8"
+            }
+          },
+          {
+            "id": "reservoir",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "reservoir"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8201
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5,
+            "maxZoom": 25,
+            "symbol": {
+              "fillColor": "#A9D1DF"
+            }
+          },
+          {
+            "id": "riverbank",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "riverbank"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8202
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5,
+            "maxZoom": 25,
+            "symbol": {
+              "fillColor": "#A5D3E1"
+            }
+          },
+          {
+            "id": "dock",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "dock"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8203
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5,
+            "maxZoom": 25,
+            "symbol": {
+              "fillColor": "#91C2D4"
+            }
+          },
+          {
+            "id": "wetland",
+            "filter": {
+              "op": "or",
+              "conditions": [
+                {
+                  "op": "in",
+                  "field": "fclass",
+                  "value": [
+                    "wetland"
+                  ]
+                },
+                {
+                  "op": "and",
+                  "conditions": [
+                    {
+                      "op": "missingOrEmpty",
+                      "field": "fclass"
+                    },
+                    {
+                      "op": "in",
+                      "field": "code",
+                      "value": [
+                        8221
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "minZoom": 5,
+            "maxZoom": 25,
+            "symbol": {
+              "fillColor": "#C7DDD1"
+            }
+          }
+        ],
+        "zoomStops": {
+          "strokeWidth": [
+            [
+              5,
+              0.2
+            ],
+            [
+              10,
+              0.4
+            ],
+            [
+              15,
+              0.6
+            ],
+            [
+              20,
+              0.8
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-motorway",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 5,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#df625b",
+          "width": 2.55,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              2.55
+            ],
+            [
+              15,
+              3.8
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-trunk",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 6,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#e99b4b",
+          "width": 2.2,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              2.2
+            ],
+            [
+              15,
+              3.2
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-primary",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 7,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#f0b96c",
+          "width": 1.75,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              1.75
+            ],
+            [
+              15,
+              2.7
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-secondary",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 8,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#f4d28a",
+          "width": 1.45,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              1.45
+            ],
+            [
+              15,
+              2.25
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-tertiary",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 9,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#fff0c3",
+          "width": 1.15,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              1.15
+            ],
+            [
+              15,
+              1.9
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-local",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 10,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#ffffff",
+          "width": 0.7,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              0.7
+            ],
+            [
+              15,
+              1.35
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-link",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 8,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#f7c987",
+          "width": 0.75,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              0.75
+            ],
+            [
+              15,
+              1.5
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-service-track",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 11,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#c7c2b8",
+          "width": 0.55,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              0.55
+            ],
+            [
+              15,
+              1
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-path",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 12,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#8eaa91",
+          "width": 0.55,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              0.55
+            ],
+            [
+              15,
+              1.05
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-road-other",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 11,
+        "maxZoom": 25,
+        "renderOrder": 60,
+        "symbol": {
+          "color": "#9da2a5",
+          "width": 0.65,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": "ref",
+          "minZoom": 12,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              0.65
+            ],
+            [
+              15,
+              1
+            ]
+          ]
+        },
+        "casing": {
+          "color": "#FFFDF9",
+          "widthStops": [
+            [
+              5,
+              0.8
+            ],
+            [
+              10,
+              2
+            ],
+            [
+              15,
+              5
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-rail-main",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 8,
+        "maxZoom": 25,
+        "renderOrder": 70,
+        "symbol": {
+          "color": "#7e6ca6",
+          "width": 1.2,
+          "opacity": 1,
+          "dashArray": [
+            4,
+            3
+          ]
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              1.2
+            ],
+            [
+              15,
+              2.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-rail-urban",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 10,
+        "maxZoom": 25,
+        "renderOrder": 70,
+        "symbol": {
+          "color": "#a05b8d",
+          "width": 1.3,
+          "opacity": 1,
+          "dashArray": [
+            4,
+            3
+          ]
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              1.3
+            ],
+            [
+              15,
+              2.4
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-hydro-river",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 5,
+        "maxZoom": 25,
+        "renderOrder": 40,
+        "symbol": {
+          "color": "#3289a8",
+          "width": 1.4,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              1.4
+            ],
+            [
+              15,
+              3.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-hydro-stream",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 8,
+        "maxZoom": 25,
+        "renderOrder": 40,
+        "symbol": {
+          "color": "#61a7bf",
+          "width": 0.75,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              0.75
+            ],
+            [
+              15,
+              1.7
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-hydro-canal-drain",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 8,
+        "maxZoom": 25,
+        "renderOrder": 40,
+        "symbol": {
+          "color": "#7cb8c8",
+          "width": 0.8,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              5,
+              0.8
+            ],
+            [
+              15,
+              1.8
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-unknown-point",
+        "geometryType": "POINT",
+        "enabled": false,
+        "minZoom": 12,
+        "maxZoom": 25,
+        "renderOrder": 90,
+        "symbol": {
+          "color": "#b2927c",
+          "radius": 6,
+          "opacity": 1,
+          "strokeColor": "#b2927c",
+          "strokeWidth": 0
+        },
+        "labels": {
+          "enabled": false,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": []
+      },
+      {
+        "id": "style-unknown-line",
+        "geometryType": "LINE",
+        "enabled": false,
+        "minZoom": 14,
+        "maxZoom": 25,
+        "renderOrder": 90,
+        "symbol": {
+          "color": "#b2927c",
+          "width": 1.5,
+          "opacity": 1
+        },
+        "labels": {
+          "enabled": false,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": []
+      },
+      {
+        "id": "style-unknown-polygon",
+        "geometryType": "POLYGON",
+        "enabled": false,
+        "minZoom": 14,
+        "maxZoom": 25,
+        "renderOrder": 90,
+        "symbol": {
+          "fillColor": "#b2927c",
+          "fillOpacity": 0.58,
+          "strokeColor": "#b2927c",
+          "strokeWidth": 1,
+          "strokeOpacity": 1
+        },
+        "labels": {
+          "enabled": false,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 13,
+          "collisionAvoidance": true
+        },
+        "overrides": []
+      }
+    ]
+  }
 }
 

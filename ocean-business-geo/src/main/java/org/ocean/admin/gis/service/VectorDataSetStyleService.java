@@ -43,7 +43,9 @@ public class VectorDataSetStyleService {
         snapshot.setDataSetId(dataSetId);
         snapshot.setTemplateId(definition.path("templateId").asText());
         snapshot.setTemplateVersion(definition.path("templateVersion").asInt());
-        snapshot.setSchemaVersion(2);
+        snapshot.setSchemaVersion(3);
+        snapshot.setCartographyJson(json.writeValueAsString(definition.path("cartography")));
+        ((tools.jackson.databind.node.ObjectNode) definition).remove("cartography");
         snapshot.setDefinitionJson(json.writeValueAsString(definition));
         snapshot.setTemplateChecksum(digest(bytes));
         if (mapper.insertDataSetStyle(snapshot) != 1) throw new IllegalStateException("样式快照创建失败");
@@ -77,9 +79,14 @@ public class VectorDataSetStyleService {
     }
 
     public VectorTemplateRules.Compiled compile(GisVectorDataSetStyle snapshot) {
+        if (snapshot.getSchemaVersion() != 3) throw new ResponseStatusException(HttpStatus.CONFLICT,"该数据集使用旧分类协议，请保留旧数据并重新导入新数据集");
         // 模板以内容校验和共享编译结果，不缓存任何数据集的运行时分组ID、开关或图层状态。
         if (compiled.size() > 128) compiled.clear();
-        return compiled.computeIfAbsent(snapshot.getTemplateChecksum(), k -> rules.compile(json.readTree(snapshot.getDefinitionJson())));
+        return compiled.computeIfAbsent(snapshot.getTemplateChecksum(), k -> {
+            var definition = (tools.jackson.databind.node.ObjectNode) json.readTree(snapshot.getDefinitionJson());
+            definition.set("cartography", json.readTree(snapshot.getCartographyJson()));
+            return rules.compile(definition);
+        });
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
