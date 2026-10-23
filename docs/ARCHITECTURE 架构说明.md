@@ -54,21 +54,24 @@ GIS 文件传输与空间元数据提取分阶段执行。原始文件保存在�
 
 ### 动态矢量瓦片及编辑链路
 
-`VectorTileService` 在 GIS 业务模块生成只读显示数据：渲染上下文固定图层数据版本、规则字段清单、聚合及缓冲参数，Redis持久化短期上下文并限制瓦片缓存份数。PostGIS以现有空间索引筛选候选要素，集合递归拆分、点按网格和属性投影聚合，生成MVT；原始几何、属性和版本仍由 `VectorLayerService` 管理。点聚合以投影属性JSON保持规则匹配等价，成员查询返回不同原始要素，不以瓦片片段计数。超时、并发和字节预算超过时明确失败，不静默截断。
+`VectorTileService` 在 GIS 业务模块生成只读显示数据：`VectorRenderPlanner` 固定数据/显示版本、视窗、样式、预算与筛选阈值，Redis持久化短期上下文并限制缓存份数。PostGIS 使用现有空间索引，按属性、连续级别及屏幕尺寸筛选、简化并编码MVT。点、线、面均不网格聚合，点和行政边界受预算保护；其他线面按业务级别和屏幕尺寸保形选择，等值桶不按ID截断。面分别输出无描边填充、裁剪前提取的真实边界，文字只输出到锚点归属瓦片。源几何、属性和版本由 `VectorLayerService` 管理；预算或资源超限明确失败，禁止全量回退。
 
 ```mermaid
 classDiagram
-  VectorController --> VectorTileService : 渲染上下文 / MVT / 聚合成员
+  VectorController --> VectorTileService : 渲染上下文 / 保形MVT
   VectorController --> VectorLayerService : 原始Feature / If-Match编辑
   VectorController --> VectorStyleService : 方案及规则
-  VectorTileService --> VectorLayerService : READY与dataVersion
+  VectorTileService --> VectorRenderPlanner : 全视窗保形预算规划
+  VectorRenderPlanner --> VectorDataSetStyleService : 不可变快照
+  VectorRenderPlanner --> VectorStyleService : 有效规则
+  VectorRenderPlanner --> GisVectorMapper : 候选统计及筛选阈值
   VectorTileService --> GisVectorMapper : 空间查询及MVT编码
   VectorTileService --> VectorTileProperties : 资源预算
   VectorTileService --> TransactionTemplate : 取得槽位后开启只读事务
   VectorTileService --> StringRedisTemplate : 上下文及版本缓存
   GisVectorMapper --> PostGIS : 原始geometry及properties
   VectorLayerService --> GisVectorMapper : 编辑与版本递增
-  VectorCartography --> useVectorTiles : 规则字段与可见图层
+  VectorCartography --> useVectorTiles : 视窗与可见图层
   useVectorTiles --> vectorService : 上下文请求
   VectorMap --> vectorTileSource : 256像素XYZ瓦片
   vectorTileSource --> vectorService : 二进制请求及取消
@@ -84,12 +87,12 @@ sequenceDiagram
   participant Tile as VectorTileService
   participant Redis
   participant DB as PostGIS
-  UI->>HTTP: 图层目录及默认方案
-  HTTP->>API: GET layers / default-style
-  API-->>UI: dataVersion及规则定义
-  UI->>HTTP: 汇总全部规则字段、符号缓冲和聚合选项
+  UI->>HTTP: 数据集快照、分类树及分页图层目录
+  HTTP->>API: GET datasets/id/style、groups及layers
+  API-->>UI: 数据/显示版本、分类统计及快照定义
+  UI->>HTTP: 世界范围内bbox、连续zoom、CSS尺寸和可见ID
   HTTP->>API: POST render-contexts
-  API->>Tile: 校验READY及版本，规范化参数
+  API->>Tile: 全视窗规划候选、保护对象和筛选阈值
   Tile->>Redis: 保存contextId及expiresAt
   Tile-->>UI: 渲染上下文
   UI->>HTTP: 视窗及样式层级筛选，最多2个真实HTTP在途
@@ -99,31 +102,24 @@ sequenceDiagram
   alt 未命中
     Tile->>Tile: 合并同瓦片请求，有界排队等待槽位
     Tile->>Tile: 开启只读事务并重新校验版本
-    Tile->>DB: 空间索引筛选、动态裁剪/简化/聚合、ST_AsMVT
+    Tile->>DB: 重复冻结阈值筛选、全几何简化、真实边界及唯一锚点、缓冲编码
     DB-->>Tile: 完整显示瓦片及字节数
     Tile->>Redis: 有界缓存
   end
   Tile-->>UI: 二进制MVT
-  UI->>UI: 本地按几何、属性、连续zoom匹配规则
+  UI->>UI: 按FILL/OUTLINE/GEOMETRY/LABEL角色及服务端符号绘制
   Note over UI,DB: 原始4326 XY/XYZ与完整属性保留，瓦片不作为编辑依据
 ```
 
 ```mermaid
 sequenceDiagram
-  participant UI as VectorMap/成员面板
+  participant UI as VectorMap/属性面板
   participant HTTP as vectorService/httpClient
   participant API as VectorController
   participant Tile as VectorTileService
   participant Layer as VectorLayerService
   participant DB as PostGIS
-  opt 点击聚合标记
-    UI->>HTTP: 选择clusterId和contextId
-    HTTP->>API: GET clusters/clusterId/features
-    API->>Tile: 相同网格和属性投影查询成员
-    Tile->>DB: 按原始ID去重并游标分页
-    DB-->>UI: 成员列表
-  end
-  UI->>HTTP: 选择原始featureId
+  UI->>HTTP: 点击显示部件取得layerId及原始featureId
   HTTP->>API: GET features/featureId
   API->>Layer: 完整要素详情
   Layer-->>UI: GeoJSON及ETag
@@ -140,10 +136,10 @@ sequenceDiagram
   end
 ```
 
-前端 `VectorMap` 使用MVT的轻量RenderFeature，`vectorTileSource` 负责二进制加载、订阅取消及重入恢复，`vectorService` 管理所有图层共享的真实HTTP并发队列。同一瓦片多个订阅共享请求；排队订阅取消后不发送，已发HTTP完成前仍占用槽位，避免残留JDBC查询与新请求叠加。已知图层范围及当前全部隐藏的样式规则在发请求前筛除。后端合并同瓦片生成，按4个执行槽位和32个排队位置保护查询，并在取得槽位后开启事务、重新校验版本；等待不占用数据库连接。
+前端 `VectorMap` 使用MVT的轻量RenderFeature，`vectorTileSource` 负责二进制加载、订阅取消及重入恢复，`vectorService` 管理所有图层共享的真实HTTP并发队列。同一瓦片多个订阅共享请求；排队订阅取消后不发送，已发HTTP完成前仍占用槽位，避免残留JDBC查询与新请求叠加。后端在空间查询前排除当前级别整层不可能显示的计划。后端合并同瓦片生成，按4个执行槽位和32个排队位置保护查询，并在取得槽位后开启事务、重新校验版本；等待不占用数据库连接。
 
-SQL对普通几何走直接路径，仅对集合做逐要素递归；使用现有空间索引、按需属性投影及单次MVT裁剪，避免全量递归物化和重复计算，空间事务局部关闭JIT。密集线面仍需按比例尺控制显示；确有小比例尺高性能需求时应另行发布静态MVT成果，不能用扩大并发代替数据组织。
+候选统计与瓦片共享同一SQL筛选链路，先按视窗和规则过滤，简化在瓦片裁剪之前完成。MVT extent=4096、buffer=1024；前端 renderBuffer=64。稳定标注锚点只属于一个XYZ瓦片，避免逐片重复标注。数据库不存储派生概化几何；确需静态发布时走独立发布任务，不扩大动态并发。
 
-选中要素另以完整GeoJSON覆盖。XYZ几何支持已有顶点拖动，插入顶点需明确高程。样式颜色和透明度只重绘；字段清单或缓冲变化重建上下文。显示状态以图层及瓦片加载为准，不能用瓦片片段数量充当视窗要素总数。
+选中要素另以完整GeoJSON覆盖。XYZ几何支持已有顶点拖动，插入顶点需明确高程。样式颜色和透明度只重绘；视窗、显示开关、版本或样式变化重建上下文。显示状态以图层及瓦片加载为准，不能用瓦片片段数量充当视窗要素总数。
 
 ## 安全约束

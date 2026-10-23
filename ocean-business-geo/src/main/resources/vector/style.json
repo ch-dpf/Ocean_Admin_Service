@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "VECTOR_DATASET_STYLE_TEMPLATE",
   "templateId": "cn-vector-default",
-  "templateVersion": 1,
+  "templateVersion": 2,
   "name": "矢量数据集默认业务分类与样式",
   "description": "以分类映射表定义业务目录，以当前原型定义默认显示和未知图层手动挂载；不包含来源适配器。",
   "provenance": {
@@ -22,7 +22,7 @@
       "riverbank 保持源 fclass，nature_reserve 归入土地利用/自然保护。",
       "行政区原始属性为 id、name、site；不凭空写入 code=1202/1204/1206/1208 或 admin_level。",
       "未提供的国家、县级数据不填充虚构要素；省级融合计划默认禁用，不能仅凭文件名生成省域面。",
-      "schemaVersion=2 为本次数据集模板协议，不是现有 VectorStyleRules 的图层样式 v1；本次仅提供配置，未接入加载器。"
+      "点、线、面均不做网格聚合；点和行政边界受预算保护，其他线面按业务级别和屏幕尺寸进行保形细节筛选。"
     ]
   },
   "initialization": {
@@ -2131,10 +2131,6 @@
         "minZoom": 7,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2157,10 +2153,6 @@
         "fallbackField": "id",
         "minZoom": 7,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -2185,10 +2177,6 @@
         "minZoom": 7,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2211,10 +2199,6 @@
         "fallbackField": "id",
         "minZoom": 7,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -2239,11 +2223,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "GRID_BELOW_ZOOM",
-        "gridPixels": 36,
-        "belowZoom": 16
-      },
       "overrides": []
     },
     {
@@ -2266,10 +2245,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -2294,10 +2269,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2320,10 +2291,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -2348,10 +2315,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2374,10 +2337,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -2402,10 +2361,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2428,10 +2383,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": [
         {
@@ -2503,10 +2454,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2527,10 +2474,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -2553,10 +2496,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2577,10 +2516,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -2603,10 +2538,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2627,10 +2558,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": [
         {
@@ -2669,10 +2596,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": [
         {
@@ -2713,10 +2636,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": [
         {
@@ -2761,10 +2680,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2785,10 +2700,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -2814,10 +2725,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": [
         {
@@ -2863,10 +2770,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2887,10 +2790,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -2913,10 +2812,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -2937,10 +2832,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": [
         {
@@ -2982,10 +2873,6 @@
         "minZoom": 13,
         "collisionAvoidance": true
       },
-      "aggregation": {
-        "mode": "GRID",
-        "gridPixels": 36
-      },
       "overrides": []
     },
     {
@@ -3006,10 +2893,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     },
@@ -3033,10 +2916,6 @@
         "fallbackField": null,
         "minZoom": 13,
         "collisionAvoidance": true
-      },
-      "aggregation": {
-        "mode": "DENSITY_BUDGET_ONLY",
-        "gridPixels": 36
       },
       "overrides": []
     }
@@ -3103,15 +2982,41 @@
     "onCancel": "DISCARD_DRAFT",
     "mergeLayersOnMove": false,
     "symbolFieldsByGeometry": {
-      "POINT": ["color", "radius", "opacity", "strokeColor", "strokeWidth"],
-      "LINE": ["color", "width", "opacity", "dashArray"],
-      "POLYGON": ["fillColor", "fillOpacity", "strokeColor", "strokeWidth", "strokeOpacity"]
+      "POINT": [
+        "color",
+        "radius",
+        "opacity",
+        "strokeColor",
+        "strokeWidth"
+      ],
+      "LINE": [
+        "color",
+        "width",
+        "opacity",
+        "dashArray"
+      ],
+      "POLYGON": [
+        "fillColor",
+        "fillOpacity",
+        "strokeColor",
+        "strokeWidth",
+        "strokeOpacity"
+      ]
     },
     "symbolConstraints": {
       "colorPattern": "^#[0-9a-fA-F]{6}$",
-      "opacity": {"min": 0, "max": 1},
-      "sizePixels": {"min": 0.5, "max": 12},
-      "strokeWidthPixels": {"min": 0, "max": 12}
+      "opacity": {
+        "min": 0,
+        "max": 1
+      },
+      "sizePixels": {
+        "min": 0.5,
+        "max": 12
+      },
+      "strokeWidthPixels": {
+        "min": 0,
+        "max": 12
+      }
     }
   },
   "renderPolicy": {
@@ -3131,8 +3036,7 @@
     "allowFullDatasetGeometryLoad": false,
     "allowFullSampleGeometryPreview": false,
     "onNoVisibleFeatures": "EMPTY_RESPONSE_NO_UNFILTERED_FALLBACK",
-    "onBudgetExceeded": "INCREASE_AGGREGATION_OR_GENERALIZATION_NO_RAW_FALLBACK",
-    "onAggregationUnavailable": "REPORT_UNAVAILABLE_DO_NOT_FETCH_RAW",
+    "onBudgetExceeded": "GEOMETRY_PRESERVING_LOD_OR_REPORT_LIMIT",
     "densityBudget": {
       "scope": "WHOLE_VIEWPORT_ACROSS_ALL_ENABLED_LAYERS",
       "pixelSpace": "CSS_PIXELS",
@@ -3140,8 +3044,7 @@
       "pixelsPerObject": 800,
       "minObjects": 32,
       "maxObjects": 600,
-      "includeLayerCustomStyles": true,
-      "countAggregatesAsOneDisplayObject": true
+      "includeLayerCustomStyles": true
     },
     "pixelFilters": {
       "polygonMinAreaPixels": 3,
@@ -3149,15 +3052,6 @@
         "admin"
       ],
       "lineMinProjectedLengthPixels": 1.5
-    },
-    "aggregation": {
-      "gridPixels": 36,
-      "adaptiveGrid": true,
-      "coarsenUntilWithinBudget": true,
-      "groupBy": [
-        "groupId"
-      ],
-      "preserveUnderlyingMembers": true
     },
     "generalization": {
       "space": "SCREEN_PIXELS",
@@ -3182,7 +3076,27 @@
       "displayZoom",
       "tileOrViewport",
       "viewportBudget"
-    ]
+    ],
+    "pointAggregation": false,
+    "displaySelection": {
+      "priority": "MATCHED_RULE_MIN_ZOOM_ASC_THEN_VISIBLE_PIXEL_SIZE_DESC",
+      "equalMetricTies": "KEEP_OR_EXCLUDE_WHOLE_BUCKET",
+      "protectedGeometry": [
+        "POINT",
+        "ADMINISTRATIVE_POLYGON"
+      ],
+      "onProtectedBudgetExceeded": "REPORT_LIMIT_NO_RAW_FALLBACK"
+    },
+    "tileRendering": {
+      "extent": 4096,
+      "buffer": 1024,
+      "cssRenderBuffer": 64,
+      "polygonParts": [
+        "FILL_WITHOUT_STROKE",
+        "TRUE_BOUNDARY_LINE"
+      ],
+      "labels": "SOURCE_ANCHOR_SINGLE_XYZ_OWNER"
+    }
   },
   "derivations": [
     {

@@ -89,14 +89,6 @@ public class VectorController {
         return ResponseEntity.ok().header("Cache-Control","no-store").body(body);
     }
 
-    @GetMapping("/datasets/{dataSetId}/clusters/{clusterId}/features")
-    @Operation(summary = "分页查询视窗聚合成员属性", description = "返回图层ID和入库要素ID，不返回几何；编辑须另读单要素及ETag")
-    public ResponseResult<GisVectorVO.ClusterMembers> clusterFeatures(@PathVariable Long dataSetId,
-            @PathVariable String clusterId, @RequestParam String contextId,
-            @RequestParam(defaultValue = "50") int limit, @RequestParam(required = false) String cursor) {
-        return ResponseResult.success(tiles.getClusterFeatures(dataSetId,contextId,clusterId,limit,cursor));
-    }
-
     @GetMapping("/layers/{layerId}/styles")
     @Operation(summary = "查询图层样式方案摘要", description = "样式定义通过单方案详情读取")
     public ResponseResult<List<GisVectorVO.StyleSummary>> styles(@PathVariable Long layerId) {

@@ -56,13 +56,9 @@ public interface GisVectorMapper {
     int setDefaultStyle(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
     int deleteStyle(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
     String setTileQueryTimeout(@Param("milliseconds") int milliseconds);
-    long displayObjectCount(@Param("ctx") GisVectorVO.RenderContext context, @Param("plansJson") String plans,
+    GisVectorVO.DisplayPlan displayPlan(@Param("ctx") GisVectorVO.RenderContext context, @Param("plansJson") String plans,
             @Param("policyJson") String policy);
     GisVectorVO.TilePayload dataSetTile(@Param("ctx") GisVectorVO.RenderContext context, @Param("plansJson") String plans,
             @Param("policyJson") String policy, @Param("z") int z, @Param("x") int x,
             @Param("y") int y, @Param("maxBytes") int maxBytes);
-    List<GisVectorFeature> dataSetClusterMembers(@Param("ctx") GisVectorVO.RenderContext context,
-            @Param("plansJson") String plans, @Param("policyJson") String policy,
-            @Param("groupId") long groupId, @Param("cellX") long cellX, @Param("cellY") long cellY,
-            @Param("afterId") long afterId, @Param("limit") int limit);
 }

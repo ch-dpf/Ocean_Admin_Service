@@ -33,7 +33,7 @@ gis_publication             静态瓦片集统一发布记录（地形、影像�
 
 GIS 数据库依赖 public Schema 中的 PostGIS 扩展。`gis_file_spatial_metadata.geographic_extent` 使用 SRID 4326 的 geometry，并建立 GiST 索引；同一文件与图层键唯一，物理删除文件时级联删除。原始栅格及矢量文件不存入 PostGIS。
 
-矢量内容提取是文件元数据处理的一部分。原始 GeoJSON 保留在文件存储，`gis_vector_feature.geom` 保存 SRID 4326 的真实几何并保留 XY/XYZ，建立 GiST 索引；properties 使用 JSONB 保留属性数据类型。文件与图层以 source_file_id 关联，图层与要素以 layer_id 关联；编辑不回写来源文件，不改变文件覆盖范围和文件统计口径。矢量瓦片直接从 `gis_vector_feature` 动态裁剪、简化和聚合，数据库不保存派生概化几何或其构建任务。
+矢量内容提取是文件元数据处理的一部分。原始 GeoJSON 保留在文件存储，`gis_vector_feature.geom` 保存 SRID 4326 的真实几何并保留 XY/XYZ，建立 GiST 索引；properties 使用 JSONB 保留属性数据类型。文件与图层以 source_file_id 关联，图层与要素以 layer_id 关联；编辑不回写来源文件，不改变文件覆盖范围和文件统计口径。矢量瓦片直接从 `gis_vector_feature` 按业务与像素尺寸保形筛选、简化和裁剪，数据库不保存派生概化几何或其构建任务。
 
 GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验，原始名称记录在 `gis_file_spatial_metadata.extra_metadata.declaredCrs`；source_crs_code 统一为 OGC:CRS84。坐标数值与经纬度顺序保持不变，真实要素继续以 SRID4326 存储，无需修改表结构。在线编辑及空间响应不携带旧式 crs 声明。
 
@@ -47,7 +47,7 @@ GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验
 
 `gis_vector_style.layer_id` 外键关联矢量图层，物理删除图层时级联删除方案，(layer_id,name) 唯一。is_default 的部分唯一索引保证每层至多一个选中方案，禁止直接删除选中方案。新导入的已识别图层直接继承分类样式，不再生成通用蓝色默认方案。自定义图层方案的 definition 仍为 schemaVersion=1 和 rules 数组，由 `VectorStyleRules` 校验；这是独立的图层样式领域，不是对 schemaVersion=2 数据集快照的兼容转换。非选中方案修改不影响显示；CUSTOM 模式下选中方案修改或切换，会更新图层 presentation_version 和数据集 display_revision，不修改原始要素或 layer.data_version。
 
-数据集 data_revision 用于要素新增、修改、删除以及导入完成；display_revision 用于分类开关、图层挂载、显示样式等变化。地图渲染在 Redis 保存带 bbox、连续 displayZoom、CSS 宽高、版本、规则和预算的视窗上下文，MVT 与聚合成员查询必须引用该上下文。整个视窗的所有启用图层共用 `CLAMP(FLOOR(width*height/800),32,600)` 的逻辑显示对象预算，按属性与级别过滤后进行像素过滤、显示用简化及自适应网格聚合。原始几何不回写，不新增概化表或离线概化任务。过期上下文返回410，版本变化返回409；不存在全量原始几何回退。属性分页必须有 bbox 且不返回几何，完整几何仅通过单要素编辑详情读取。
+数据集 data_revision 用于要素新增、修改、删除以及导入完成；display_revision 用于分类开关、图层挂载、显示样式等变化。地图渲染在 Redis 保存带 bbox、连续 displayZoom、CSS 宽高、版本、规则和预算的视窗上下文，MVT 查询必须引用该上下文。整个视窗的所有启用图层共用 `CLAMP(FLOOR(width*height/800),32,600)` 的逻辑显示对象预算，按属性与级别过滤后进行像素过滤和显示用简化；点、线、面均不网格聚合，点与行政边界受保护，其余线面按命中规则开始级别和可见屏幕尺寸筛选，等值桶不截断。上下文记录候选数、保留数及冻结的筛选阈值。面填充、源真实边界和唯一锚点标注分别编码为显示部件，预算仅计一次源分量。原始几何不回写，不新增概化表或离线概化任务。过期上下文返回410，版本变化返回409；不存在全量原始几何回退。属性分页必须有 bbox 且不返回几何，完整几何仅通过单要素编辑详情读取。
 
 `gis_file_meta.metadata_status` 为 QUEUED、RUNNING、COMPLETED、FAILED 或 NOT_APPLICABLE。metadata_version 和 metadata_lease_expires_at 用于领取与过期执行隔离。空间元数据、矢量图层 READY 与文件 COMPLETED 状态在同一事务提交；原上传批次的成功计数也在此后更新。数据集文件数不随提取状态变化；图层可用性以 READY 状态为准。
 

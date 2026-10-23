@@ -240,22 +240,24 @@
             AND l.id IN <foreach collection="layerIds" item="id" open="(" close=")" separator=",">#{id}</foreach>
     </select>
 
-    <!-- 所有几何变换只服务于显示；源4326/XYZ不更新。规则在投影、简化及编码前匹配。 -->
+    <!-- 候选、预算规划和瓦片共享同一筛选语义；所有变换只作用于显示，不更新源几何。 -->
     <sql id="displayCandidates">
         WITH settings AS MATERIALIZED (
-            SELECT 40075016.68557849/(power(2.0,#{ctx.displayZoom})*256.0) AS resolution,
-                CAST(#{policyJson} AS jsonb) AS policy,
-                ST_Transform(
-                    <choose>
-                        <when test="ctx.bbox[0] &lt; ctx.bbox[2]">
-                            ST_MakeEnvelope(#{ctx.bbox[0]},#{ctx.bbox[1]},#{ctx.bbox[2]},#{ctx.bbox[3]},4326)
-                        </when>
-                        <otherwise>
-                            ST_Collect(ST_MakeEnvelope(#{ctx.bbox[0]},#{ctx.bbox[1]},180,#{ctx.bbox[3]},4326),
-                                ST_MakeEnvelope(-180,#{ctx.bbox[1]},#{ctx.bbox[2]},#{ctx.bbox[3]},4326))
-                        </otherwise>
-                    </choose>,3857) AS view_box,
-                ST_MakeEnvelope(-180,-85.0511287798066,180,85.0511287798066,4326) AS world_geo
+            SELECT *,ST_Buffer(view_box,resolution*64,'join=mitre') AS render_box FROM (
+                SELECT 40075016.68557849/(power(2.0,#{ctx.displayZoom})*256.0) AS resolution,
+                    CAST(#{policyJson} AS jsonb) AS policy,
+                    ST_Transform(
+                        <choose>
+                            <when test="ctx.bbox[0] &lt; ctx.bbox[2]">
+                                ST_MakeEnvelope(#{ctx.bbox[0]},#{ctx.bbox[1]},#{ctx.bbox[2]},#{ctx.bbox[3]},4326)
+                            </when>
+                            <otherwise>
+                                ST_Collect(ST_MakeEnvelope(#{ctx.bbox[0]},#{ctx.bbox[1]},180,#{ctx.bbox[3]},4326),
+                                    ST_MakeEnvelope(-180,#{ctx.bbox[1]},#{ctx.bbox[2]},#{ctx.bbox[3]},4326))
+                            </otherwise>
+                        </choose>,3857) AS view_box,
+                    ST_MakeEnvelope(-180,-85.0511287798066,180,85.0511287798066,4326) AS world_geo
+            ) s
         ), plans AS MATERIALIZED (
             SELECT p AS plan,(p->>'layerId')::bigint AS layer_id,(p->>'groupId')::bigint AS group_id
             FROM jsonb_array_elements(CAST(#{plansJson} AS jsonb)) p
@@ -284,90 +286,98 @@
                 AND COALESCE((r.rule->>'visible')::boolean,true)
                 AND (r.rule->>'minZoom' IS NULL OR #{ctx.displayZoom} &gt;= (r.rule->>'minZoom')::double precision)
                 AND (r.rule->>'maxZoom' IS NULL OR #{ctx.displayZoom} &lt; (r.rule->>'maxZoom')::double precision)
+
         ), projected AS MATERIALIZED (
-            SELECT m.*,s.resolution,s.policy,ST_CollectionExtract(
-                ST_Intersection(ST_Transform(ST_Intersection(ST_Force2D(m.geom),s.world_geo),3857),s.view_box),
-                CASE m.plan->>'kind' WHEN 'POINT' THEN 1 WHEN 'LINE' THEN 2 ELSE 3 END) AS display_geom
+            SELECT m.*,s.resolution,s.policy,s.view_box,s.render_box,
+                ST_CollectionExtract(ST_Transform(ST_Intersection(ST_Force2D(m.geom),s.world_geo),3857),
+                    CASE m.plan->>'kind' WHEN 'POINT' THEN 1 WHEN 'LINE' THEN 2 ELSE 3 END) AS source_geom
             FROM matched m CROSS JOIN settings s
-        ), filtered AS MATERIALIZED (
-            SELECT *,ST_PointOnSurface(display_geom) AS anchor,
-                (#{ctx.forceAggregation} OR (plan->>'gridRequired')::boolean) AS clustered
+        ), visible AS MATERIALIZED (
+            SELECT *,ST_CollectionExtract(ST_Intersection(source_geom,view_box),
+                CASE plan->>'kind' WHEN 'POINT' THEN 1 WHEN 'LINE' THEN 2 ELSE 3 END) AS view_geom
             FROM projected
-            WHERE NOT ST_IsEmpty(display_geom)
+        ), candidates AS MATERIALIZED (
+            SELECT *,plan->>'kind'='POINT' OR (plan->>'kind'='POLYGON' AND (plan->>'pixelExempt')::boolean) AS is_protected,
+                COALESCE((rule->>'minZoom')::double precision,0) AS priority,
+                CASE plan->>'kind' WHEN 'LINE' THEN ST_Length(view_geom)/resolution
+                    WHEN 'POLYGON' THEN sqrt(ST_Area(view_geom))/resolution ELSE 0 END AS pixel_size
+            FROM visible
+            WHERE NOT ST_IsEmpty(view_geom)
               AND (plan->>'kind'!='POLYGON' OR (plan->>'pixelExempt')::boolean
-                    OR ST_Area(display_geom)/(resolution*resolution) &gt;= (policy->'pixelFilters'->>'polygonMinAreaPixels')::double precision)
-              AND (plan->>'kind'!='LINE' OR ST_Length(display_geom)/resolution &gt;= (policy->'pixelFilters'->>'lineMinProjectedLengthPixels')::double precision)
-        ), cells AS MATERIALIZED (
-            SELECT *,floor((ST_X(anchor)+20037508.342789244)/(#{ctx.gridPixels}*resolution))::bigint AS cell_x,
-                floor((ST_Y(anchor)+20037508.342789244)/(#{ctx.gridPixels}*resolution))::bigint AS cell_y
-            FROM filtered
+                    OR ST_Area(view_geom)/(resolution*resolution) &gt;= (policy->'pixelFilters'->>'polygonMinAreaPixels')::double precision)
+              AND (plan->>'kind'!='LINE' OR ST_Length(view_geom)/resolution &gt;= (policy->'pixelFilters'->>'lineMinProjectedLengthPixels')::double precision)
         )
     </sql>
-    <sql id="displayObjects">
-        , objects AS (
-            SELECT 'f:' || id::text AS representation_id,NULL::text AS cluster_id,
-                id::text AS feature_id,layer_id::text AS layer_id,group_id::text AS group_id,
-                rule->>'id' AS rule_id,rule->'symbol' AS symbol,plan->>'kind' AS category,
-                CASE WHEN (plan->'labels'->>'enabled')::boolean AND #{ctx.displayZoom} &gt;= (plan->'labels'->>'minZoom')::double precision
-                    THEN left(COALESCE(properties->>(plan->'labels'->>'field'),properties->>(plan->'labels'->>'fallbackField')),200) END AS label,
-                (plan->>'renderOrder')::integer AS render_order,1::bigint AS feature_count,
-                CASE WHEN plan->>'kind'='POINT' THEN display_geom
-                    ELSE ST_SimplifyPreserveTopology(display_geom,resolution*(policy->'generalization'->>'maxErrorPixels')::double precision) END AS display_geom
-            FROM cells WHERE NOT clustered
-            UNION ALL
-            SELECT 'g:' || group_id || ':' || cell_x || ':' || cell_y,
-                group_id || ':' || cell_x || ':' || cell_y,NULL,NULL,group_id::text,
-                (array_agg(rule->>'id' ORDER BY id))[1],
-                (array_agg(rule->'symbol' ORDER BY id))[1],'POINT',NULL,
-                min((plan->>'renderOrder')::integer),count(*),
-                ST_Centroid(ST_Collect(anchor))
-            FROM cells WHERE clustered GROUP BY group_id,cell_x,cell_y
-        )
-    </sql>
-    <select id="displayObjectCount" resultType="long">
+    <select id="displayPlan" resultType="org.ocean.admin.gis.vo.GisVectorVO$DisplayPlan">
         <include refid="displayCandidates"/>
-        SELECT (SELECT count(*) FROM cells WHERE NOT clustered)
-            + (SELECT count(*) FROM (SELECT group_id,cell_x,cell_y FROM cells WHERE clustered GROUP BY group_id,cell_x,cell_y) c)
+        , stats AS (
+            SELECT count(*) AS candidate_count,count(*) FILTER(WHERE is_protected) AS protected_count FROM candidates
+        ), buckets AS (
+            SELECT priority,pixel_size,count(*) AS n FROM candidates WHERE NOT is_protected GROUP BY priority,pixel_size
+        ), ranked AS (
+            SELECT *,sum(n) OVER(ORDER BY priority,pixel_size DESC) AS cumulative FROM buckets
+        ), cutoff AS (
+            SELECT r.* FROM ranked r CROSS JOIN stats s
+            WHERE r.cumulative &gt; greatest(#{ctx.budget}-s.protected_count,0)
+            ORDER BY r.priority,r.pixel_size DESC LIMIT 1
+        )
+        SELECT s.candidate_count,
+            CASE WHEN c.priority IS NULL THEN s.candidate_count ELSE s.protected_count+c.cumulative-c.n END::bigint AS object_count,
+            c.priority AS cutoff_min_zoom,c.pixel_size AS cutoff_pixel_size
+        FROM stats s LEFT JOIN cutoff c ON true
     </select>
     <select id="dataSetTile" resultType="org.ocean.admin.gis.vo.GisVectorVO$TilePayload">
         <include refid="displayCandidates"/>
-        <include refid="displayObjects"/>
-        , labeled AS (
-            SELECT *,row_number() OVER(ORDER BY CASE WHEN label IS NULL THEN 1 ELSE 0 END,render_order,representation_id) AS label_rank
-            FROM objects
-        )
-        , encoded AS (
-            SELECT o.representation_id AS "_vector_representation_id",o.cluster_id AS "_vector_cluster_id",
-                o.feature_id AS "_vector_feature_id",o.layer_id AS "_vector_layer_id",o.group_id AS "_vector_group_id",
-                o.rule_id AS "_vector_rule_id",
-                CASE WHEN o.cluster_id IS NULL THEN o.symbol::text ELSE jsonb_build_object(
-                    'color',COALESCE(o.symbol->>'color',o.symbol->>'fillColor'),
-                    'radius',least(12,COALESCE((o.symbol->>'radius')::double precision,5)+CASE WHEN o.feature_count>1 THEN log(2,o.feature_count::numeric)::double precision ELSE 0 END),
-                    'opacity',COALESCE((o.symbol->>'opacity')::double precision,0.85))::text END AS "_vector_symbol",
-                o.category AS "_vector_category",o.feature_count AS "_vector_feature_count",
-                CASE WHEN o.label_rank &lt;= ceil((#{ctx.widthPixels}::double precision*#{ctx.heightPixels})/
-                    (CAST(#{policyJson} AS jsonb)->'labels'->>'pixelsPerLabel')::double precision) THEN o.label END AS "_vector_label",
-                o.render_order AS "_vector_render_order",g.geom
-            FROM labeled o CROSS JOIN LATERAL (
-                SELECT ST_AsMVTGeom(o.display_geom,ST_TileEnvelope(#{z},#{x},#{y}),4096,0,true) AS geom OFFSET 0
-            ) g WHERE NOT ST_IsEmpty(g.geom)
+        , selected AS MATERIALIZED (
+            SELECT * FROM candidates
+            WHERE is_protected OR CAST(#{ctx.cutoffMinZoom,jdbcType=DOUBLE} AS double precision) IS NULL
+                OR priority &lt; #{ctx.cutoffMinZoom,jdbcType=DOUBLE}
+                OR (priority=#{ctx.cutoffMinZoom,jdbcType=DOUBLE} AND pixel_size &gt; #{ctx.cutoffPixelSize,jdbcType=DOUBLE})
+        ), shapes AS MATERIALIZED (
+            SELECT *,CASE WHEN plan->>'kind'='POINT' THEN view_geom
+                ELSE ST_SimplifyPreserveTopology(source_geom,resolution*(policy->'generalization'->>'maxErrorPixels')::double precision)
+                END AS simplified_geom,
+                ST_PointOnSurface(source_geom) AS anchor,
+                CASE WHEN (plan->'labels'->>'enabled')::boolean AND #{ctx.displayZoom} &gt;= (plan->'labels'->>'minZoom')::double precision
+                    THEN nullif(left(COALESCE(properties->>(plan->'labels'->>'field'),properties->>(plan->'labels'->>'fallbackField')),200),'') END AS label
+            FROM selected
+        ), labels AS MATERIALIZED (
+            SELECT *,row_number() OVER(ORDER BY (plan->>'renderOrder')::integer,id) AS label_rank
+            FROM shapes WHERE label IS NOT NULL AND ST_Intersects(anchor,view_box)
+        ), representations AS (
+            SELECT s.id,s.layer_id,s.group_id,s.rule,s.plan,
+                CASE WHEN s.plan->>'kind'='POLYGON' THEN 'FILL' ELSE 'GEOMETRY' END AS role,
+                s.plan->>'kind' AS category,s.rule->'symbol' AS symbol,NULL::text AS label,
+                ST_Intersection(s.simplified_geom,s.render_box) AS display_geom
+            FROM shapes s
+            UNION ALL
+            SELECT s.id,s.layer_id,s.group_id,s.rule,s.plan,'OUTLINE','LINE',
+                jsonb_build_object('color',s.rule->'symbol'->>'strokeColor','width',s.rule->'symbol'->'strokeWidth',
+                    'opacity',s.rule->'symbol'->'strokeOpacity'),NULL,
+                ST_Intersection(ST_SimplifyPreserveTopology(ST_Boundary(s.source_geom),
+                    s.resolution*(s.policy->'generalization'->>'maxErrorPixels')::double precision),s.render_box)
+            FROM shapes s WHERE s.plan->>'kind'='POLYGON' AND COALESCE((s.rule->'symbol'->>'strokeWidth')::double precision,0)&gt;0
+            UNION ALL
+            SELECT l.id,l.layer_id,l.group_id,l.rule,l.plan,'LABEL','POINT',l.rule->'symbol',l.label,l.anchor
+            FROM labels l
+            WHERE l.label_rank &lt;= ceil((#{ctx.widthPixels}::double precision*#{ctx.heightPixels})/
+                    (l.policy->'labels'->>'pixelsPerLabel')::double precision)
+              AND least(power(2,#{z})-1,greatest(0,floor((ST_X(l.anchor)+20037508.342789244)/40075016.68557849*power(2,#{z}))))=#{x}
+              AND least(power(2,#{z})-1,greatest(0,floor((20037508.342789244-ST_Y(l.anchor))/40075016.68557849*power(2,#{z}))))=#{y}
+        ), encoded AS (
+            SELECT o.id::text || ':' || o.role AS "_vector_representation_id",o.role AS "_vector_render_role",
+                o.id::text AS "_vector_feature_id",o.layer_id::text AS "_vector_layer_id",o.group_id::text AS "_vector_group_id",
+                o.rule->>'id' AS "_vector_rule_id",o.symbol::text AS "_vector_symbol",
+                o.category AS "_vector_category",1::bigint AS "_vector_feature_count",o.label AS "_vector_label",
+                (o.plan->>'renderOrder')::integer AS "_vector_render_order",g.geom
+            FROM representations o CROSS JOIN LATERAL (
+                SELECT ST_AsMVTGeom(o.display_geom,ST_TileEnvelope(#{z},#{x},#{y}),4096,1024,true) AS geom OFFSET 0
+            ) g
+            WHERE NOT ST_IsEmpty(g.geom)
+              AND ST_Dimension(g.geom)=CASE o.category WHEN 'POINT' THEN 0 WHEN 'LINE' THEN 1 ELSE 2 END
         ), tile AS (
             SELECT COALESCE(ST_AsMVT(encoded,'features',4096,'geom'),''::bytea) AS body FROM encoded
         )
         SELECT CASE WHEN octet_length(body) &lt;= #{maxBytes} THEN body END AS body,octet_length(body)::bigint AS byte_size FROM tile
-    </select>
-    <select id="dataSetClusterMembers" resultType="org.ocean.admin.gis.entity.GisVectorFeature">
-        <include refid="displayCandidates"/>
-        , members AS (
-            SELECT c.id,c.layer_id,c.properties,f.version FROM cells c
-            JOIN ocean_gis.gis_vector_feature f ON f.id=c.id
-            WHERE c.clustered AND c.group_id=#{groupId} AND c.cell_x=#{cellX} AND c.cell_y=#{cellY}
-        ), page AS (
-            SELECT *,properties::text AS properties_json FROM members WHERE id &gt; #{afterId} ORDER BY id LIMIT #{limit}
-        ), sized AS (
-            SELECT *,sum(COALESCE(octet_length(properties_json),4)+128) OVER(ORDER BY id) AS total_bytes,
-                COALESCE(octet_length(properties_json),4)+128 AS row_bytes FROM page
-        )
-        SELECT id,layer_id,properties_json,version FROM sized WHERE total_bytes-row_bytes &lt; 8388608 ORDER BY id
     </select>
 </mapper>

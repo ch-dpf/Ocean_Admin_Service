@@ -50,13 +50,12 @@ public final class GisVectorVO {
     /** 上下文同时固定视窗、样式和数据版本，不能跨视窗或修改后继续使用。 */
     public record RenderContext(String contextId, String dataSetId, long dataRevision, long displayRevision,
             long styleVersion, List<Double> bbox, double displayZoom, int widthPixels, int heightPixels,
-            int budget, long objectCount, double gridPixels, boolean forceAggregation, int maxZoom,
+            int budget, long objectCount, long candidateCount, boolean detailReduced,
+            Double cutoffMinZoom, Double cutoffPixelSize, int maxZoom,
             JsonNode plans, JsonNode policy, Instant expiresAt) { }
 
-    public record ClusterMember(String layerId, String featureId, JsonNode properties, long version) { }
-
-    public record ClusterMembers(String clusterId, List<ClusterMember> members, boolean hasMore,
-            String nextCursor, String dataVersion) { }
+    /** 同级同屏幕尺寸的要素一起保留/排除，不用任意ID截取前N个要素。 */
+    public record DisplayPlan(long candidateCount, long objectCount, Double cutoffMinZoom, Double cutoffPixelSize) { }
 
     /** 仅供数据库与瓦片服务协作，不直接作为HTTP JSON响应。 */
     public record TilePayload(byte[] body, long byteSize) { }

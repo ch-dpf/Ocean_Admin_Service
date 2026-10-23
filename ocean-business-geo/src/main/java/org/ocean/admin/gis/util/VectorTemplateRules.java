@@ -82,10 +82,7 @@ public class VectorTemplateRules {
                 || budget.path("pixelsPerObject").asInt() < 1 || budget.path("minObjects").asInt() < 1
                 || budget.path("maxObjects").asInt() < budget.path("minObjects").asInt()
                 || budget.path("maxObjects").asInt() > 600) throw bad("模板必须包含安全的全视窗显示预算");
-        long assignable = groups.values().stream().filter(g -> g.path("assignable").asBoolean()).count();
-        if (assignable > budget.path("minObjects").asInt()) throw bad("最小预算须覆盖每个可挂载分组的一个聚合对象");
-        if (policy.path("aggregation").path("gridPixels").asInt() < 1
-                || policy.path("maxZoom").asInt() > 22 || policy.path("minZoom").asDouble() < 0) throw bad("显示策略无效");
+        if (policy.path("maxZoom").asInt() > 22 || policy.path("minZoom").asDouble() < 0) throw bad("显示策略无效");
         return new Compiled(definition.deepCopy(), Map.copyOf(groups), Map.copyOf(styles));
     }
 

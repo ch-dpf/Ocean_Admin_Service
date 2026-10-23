@@ -29,7 +29,13 @@ public class VectorRenderPlanner {
     public GisVectorVO.RenderContext plan(GisVectorDataSetStyle snapshot, GisVectorRequests.RenderContext request, Instant expiresAt) {
         validate(request);
         var template = snapshots.compile(snapshot);
-        JsonNode policy = template.definition().path("renderPolicy");
+        ObjectNode policy = (ObjectNode) template.definition().path("renderPolicy").deepCopy();
+        // 运行时只使用保形显示策略，不执行快照中的聚合元数据。
+        policy.remove("aggregation");
+        policy.remove("onAggregationUnavailable");
+        ((ObjectNode) policy.path("densityBudget")).remove("countAggregatesAsOneDisplayObject");
+        policy.put("pointAggregation", false);
+        policy.put("onBudgetExceeded", "GEOMETRY_PRESERVING_LOD_OR_REPORT_LIMIT");
         if (request.displayZoom() < policy.path("minZoom").asDouble() || request.displayZoom() > policy.path("maxZoom").asDouble())
             throw bad("显示层级超出数据集策略");
         List<GisVectorGroup> groups = mapper.groups(snapshot.getDataSetId());
@@ -74,33 +80,25 @@ public class VectorRenderPlanner {
             p.put("groupId", group.getId().toString());
             p.put("kind", layer.getGeometryType());
             p.put("pixelExempt", eligibleGroups.get(group.getId()));
-            var aggregation = definition.path("aggregation");
-            boolean grid = "GRID".equals(aggregation.path("mode").asText())
-                    || "GRID_BELOW_ZOOM".equals(aggregation.path("mode").asText())
-                        && request.displayZoom() < aggregation.path("belowZoom").asDouble();
-            p.put("gridRequired", grid);
             plans.add(p);
         }
         if (json.writeValueAsBytes(plans).length > 1024 * 1024) throw bad("显示规则过大，请减少启用图层或规则");
         int budget = budget(policy, request.widthPixels(), request.heightPixels());
-        double grid = policy.path("aggregation").path("gridPixels").asDouble();
-        boolean force = false;
         String plansJson = json.writeValueAsString(plans), policyJson = json.writeValueAsString(policy);
-        for (int attempt = 0; attempt < 32; attempt++) {
-            var context = context(snapshot, request, expiresAt, budget, 0, grid, force, plans, policy);
-            long count = plans.isEmpty() ? 0 : mapper.displayObjectCount(context, plansJson, policyJson);
-            if (count <= budget) return context(snapshot, request, expiresAt, budget, count, grid, force, plans, policy);
-            if (force) grid *= 2;
-            force = true;
-        }
-        throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "无法在安全预算内生成显示结果，请缩小视窗");
+        var preview = context(snapshot, request, expiresAt, budget, new GisVectorVO.DisplayPlan(0, 0, null, null), plans, policy);
+        var display = plans.isEmpty() ? new GisVectorVO.DisplayPlan(0, 0, null, null) : mapper.displayPlan(preview, plansJson, policyJson);
+        if (display.objectCount() > budget || display.candidateCount() > 0 && display.objectCount() == 0)
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "保形显示无法满足当前预算，请放大或减少启用分类；点要素不聚合，行政边界不以聚合点替代");
+        return context(snapshot, request, expiresAt, budget, display, plans, policy);
     }
 
     private GisVectorVO.RenderContext context(GisVectorDataSetStyle s, GisVectorRequests.RenderContext r, Instant expires,
-            int budget, long count, double grid, boolean force, JsonNode plans, JsonNode policy) {
+            int budget, GisVectorVO.DisplayPlan display, JsonNode plans, JsonNode policy) {
         return new GisVectorVO.RenderContext(null, s.getDataSetId().toString(), s.getDataRevision(), s.getDisplayRevision(),
-                s.getStyleVersion(), List.copyOf(r.bbox()), r.displayZoom(), r.widthPixels(), r.heightPixels(), budget, count,
-                grid, force, policy.path("maxZoom").asInt(), plans, policy, expires);
+                s.getStyleVersion(), List.copyOf(r.bbox()), r.displayZoom(), r.widthPixels(), r.heightPixels(), budget,
+                display.objectCount(), display.candidateCount(), display.candidateCount() > display.objectCount(),
+                display.cutoffMinZoom(), display.cutoffPixelSize(), policy.path("maxZoom").asInt(), plans, policy, expires);
     }
 
     public int budget(JsonNode policy, int width, int height) {

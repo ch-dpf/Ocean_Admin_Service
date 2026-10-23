@@ -34,8 +34,8 @@ import java.util.function.Supplier;
 /** 同一数据版本生成一致的显示瓦片；原始要素查询和编辑仍由图层服务负责。 */
 @Service
 public class VectorTileService {
-    private static final String CONTEXT_PREFIX = "gis:vector:dataset:context:";
-    private static final String TILE_PREFIX = "gis:vector:dataset:tile:";
+    private static final String CONTEXT_PREFIX = "gis:vector:dataset:context:preserving:";
+    private static final String TILE_PREFIX = "gis:vector:dataset:tile:preserving:";
     private static final String CACHE_INDEX = "gis:vector:dataset:tile:index";
     private static final DefaultRedisScript<Long> CACHE_WRITE = new DefaultRedisScript<>("""
             redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2])
@@ -84,10 +84,11 @@ public class VectorTileService {
         });
         String id = digest(json.writeValueAsString(java.util.Arrays.asList(context.dataSetId(),context.dataRevision(),
                 context.displayRevision(),context.styleVersion(),context.bbox(),context.displayZoom(),context.widthPixels(),
-                context.heightPixels(),context.gridPixels(),context.forceAggregation(),context.plans(),context.policy())));
+                context.heightPixels(),context.cutoffMinZoom(),context.cutoffPixelSize(),context.plans(),context.policy())));
         var result = new GisVectorVO.RenderContext(id,context.dataSetId(),context.dataRevision(),context.displayRevision(),
                 context.styleVersion(),context.bbox(),context.displayZoom(),context.widthPixels(),context.heightPixels(),
-                context.budget(),context.objectCount(),context.gridPixels(),context.forceAggregation(),context.maxZoom(),
+                context.budget(),context.objectCount(),context.candidateCount(),context.detailReduced(),
+                context.cutoffMinZoom(),context.cutoffPixelSize(),context.maxZoom(),
                 context.plans(),context.policy(),context.expiresAt());
         try { redis.opsForValue().set(CONTEXT_PREFIX + id,json.writeValueAsString(result),Duration.ofSeconds(properties.getContextTtlSeconds())); }
         catch (DataAccessException ex) { throw unavailable("渲染上下文存储暂不可用"); }
@@ -122,40 +123,6 @@ public class VectorTileService {
         finally { inFlight.remove(key,result); }
     }
 
-    public GisVectorVO.ClusterMembers getClusterFeatures(Long dataSetId, String contextId, String clusterId, int limit, String cursor) {
-        if (limit < 1 || limit > 100) throw bad("limit须为1至100");
-        if (clusterId == null || !clusterId.matches("[0-9]{1,19}:-?[0-9]{1,13}:-?[0-9]{1,13}")) throw bad("clusterId无效");
-        String[] parts = clusterId.split(":");
-        long groupId, cx, cy;
-        try { groupId=Long.parseLong(parts[0]); cx=Long.parseLong(parts[1]); cy=Long.parseLong(parts[2]); }
-        catch (NumberFormatException ex) { throw bad("clusterId无效"); }
-        String prefix = contextId + ':' + clusterId + ':';
-        long after = parseCursor(cursor,prefix);
-        return spatial(() -> {
-            var context = requireContext(dataSetId,contextId);
-            boolean known = false;
-            for (var p : context.plans()) if (Long.toString(groupId).equals(p.path("groupId").asText())) known=true;
-            if (!known) throw bad("聚合分组不属于该上下文");
-            mapper.setTileQueryTimeout(properties.getQueryTimeoutMs());
-            var rows = mapper.dataSetClusterMembers(context,json.writeValueAsString(context.plans()),
-                    json.writeValueAsString(context.policy()),groupId,cx,cy,after,limit+1);
-            if (rows.isEmpty() && after == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"聚合不存在");
-            var page = new java.util.ArrayList<GisVectorVO.ClusterMember>();
-            boolean more = false;
-            long bytes = 0;
-            for (var row : rows) {
-                long size = row.getPropertiesJson() == null ? 4 : row.getPropertiesJson().getBytes(StandardCharsets.UTF_8).length;
-                if (page.size() >= limit || bytes+size > 8L*1024*1024 && !page.isEmpty()) { more=true; break; }
-                page.add(new GisVectorVO.ClusterMember(row.getLayerId().toString(),row.getId().toString(),
-                        row.getPropertiesJson() == null ? null : json.readTree(row.getPropertiesJson()),row.getVersion()));
-                bytes += size;
-            }
-            String next = more ? Base64.getUrlEncoder().withoutPadding().encodeToString(
-                    (prefix + page.getLast().featureId()).getBytes(StandardCharsets.UTF_8)) : null;
-            return new GisVectorVO.ClusterMembers(clusterId,page,more,next,Long.toString(context.dataRevision()));
-        });
-    }
-
     private GisVectorVO.RenderContext requireContext(Long dataSetId, String id) {
         if (id == null || !id.matches("[a-f0-9]{64}")) throw bad("contextId无效");
         String stored;
@@ -174,18 +141,6 @@ public class VectorTileService {
 
     private void requireTile(int z, int x, int y, int maxZoom) {
         if (z < 0 || z > maxZoom || x < 0 || y < 0 || x >= (1L << z) || y >= (1L << z)) throw bad("瓦片坐标超出有效范围");
-    }
-
-    private long parseCursor(String cursor, String prefix) {
-        if (cursor == null) return 0;
-        try {
-            if (cursor.length() > 512) throw new IllegalArgumentException();
-            String value = new String(Base64.getUrlDecoder().decode(cursor),StandardCharsets.UTF_8);
-            if (!value.startsWith(prefix)) throw new IllegalArgumentException();
-            long after = Long.parseLong(value.substring(prefix.length()));
-            if (after < 1) throw new IllegalArgumentException();
-            return after;
-        } catch (IllegalArgumentException ex) { throw bad("cursor 与聚合或渲染上下文不匹配"); }
     }
 
     private <T> T spatial(Supplier<T> work) {

@@ -174,7 +174,6 @@ public class VectorStyleService {
         JsonNode base = templateRules.groupStyle(template, group.getGroupKey());
         ObjectNode result = json.createObjectNode();
         result.set("labels", base.path("labels").deepCopy());
-        result.set("aggregation", base.path("aggregation").deepCopy());
         result.put("renderOrder", base.path("renderOrder").asInt());
         boolean customMode = "CUSTOM".equals(layer.getStyleMode());
         result.put("normalized", !customMode);
