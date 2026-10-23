@@ -86,8 +86,6 @@ knife4j:
 gis:
   vector:
     tiles:
-      grid-pixels: ${GIS_VECTOR_TILE_GRID_PIXELS:64}
-      max-zoom: ${GIS_VECTOR_TILE_MAX_ZOOM:22}
       max-tile-bytes: ${GIS_VECTOR_TILE_MAX_BYTES:2097152}
       max-concurrent-queries: ${GIS_VECTOR_TILE_MAX_CONCURRENT:4}
       max-queued-queries: ${GIS_VECTOR_TILE_MAX_QUEUED:32}

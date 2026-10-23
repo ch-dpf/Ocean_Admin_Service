@@ -28,6 +28,8 @@ public class GisFileTransferRecord {
 
     /** 关联数据集。 */
     private Long dataSetId;
+    private String vectorPlacement;
+    private Long vectorDatasetStyleId;
 
     /** 工作项总数。 */
     private Integer totalCount;

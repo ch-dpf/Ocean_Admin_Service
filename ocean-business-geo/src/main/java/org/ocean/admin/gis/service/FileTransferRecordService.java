@@ -195,13 +195,15 @@ public class FileTransferRecordService {
             Long dataSetId,
             int totalCount,
             long totalBytes,
-            Long operatorId) {
+            Long operatorId, String vectorPlacement, Long vectorDatasetStyleId) {
         LocalDateTime now = LocalDateTime.now();
         GisFileTransferRecord record = new GisFileTransferRecord();
         record.setRecordNo(recordNo);
         record.setRequestId(requestId);
         record.setOperationType("IMPORT");
         record.setDataSetId(dataSetId);
+        record.setVectorPlacement(vectorPlacement);
+        record.setVectorDatasetStyleId(vectorDatasetStyleId);
         record.setTotalCount(totalCount);
         record.setCompletedCount(0);
         record.setFailedCount(0);

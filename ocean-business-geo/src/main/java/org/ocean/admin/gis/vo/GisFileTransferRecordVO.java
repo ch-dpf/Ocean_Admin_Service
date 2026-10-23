@@ -16,6 +16,8 @@ public class GisFileTransferRecordVO {
     private String requestId;
     private String operationType;
     private Long dataSetId;
+    private String vectorPlacement;
+    private Long vectorDatasetStyleId;
     private String dataSetName;
     private Long categoryId;
     private Integer totalCount;

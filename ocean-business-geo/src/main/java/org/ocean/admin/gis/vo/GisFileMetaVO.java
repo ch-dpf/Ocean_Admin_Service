@@ -19,6 +19,10 @@ public class GisFileMetaVO {
 
     @Schema(description = "所属数据集 ID", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long dataSetId;
+    @Pattern(regexp = "AUTO|UNKNOWN", message = "矢量归组方式须为AUTO或UNKNOWN")
+    private String vectorPlacement;
+    @Schema(accessMode = Schema.AccessMode.READ_ONLY)
+    private Long vectorDatasetStyleId;
 
     @Schema(description = "数据类别：0-影像数据、1-地形数据、2-矢量数据",
             allowableValues = {"0", "1", "2"}, accessMode = Schema.AccessMode.READ_ONLY)

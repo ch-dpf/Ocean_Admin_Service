@@ -12,6 +12,8 @@ public class GisVectorFeature {
     private String propertiesJson;
     private String sourceFeatureId;
     private Long sourceFeatureIndex;
+    private String sourceGeometryPath;
+    private String classificationRuleKey;
     private Long version;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

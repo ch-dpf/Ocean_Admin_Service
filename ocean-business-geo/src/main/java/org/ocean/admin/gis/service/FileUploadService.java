@@ -71,6 +71,7 @@ public class FileUploadService {
     private final AsyncTaskService asyncTaskService;
     private final FileTransferRecordService fileTransferRecordService;
     private final FileMetaService fileMetaService;
+    private final VectorDataSetStyleService vectorDataSetStyles;
     private final FileUploadConfig uploadConfig;
     private final Object capacityMonitor = new Object();
 
@@ -276,7 +277,8 @@ public class FileUploadService {
         if (command.fileIndex() != 0 || command.offset() != 0) {
             throw new IllegalStateException("上传批次不存在，必须从第一个文件首块开始");
         }
-        requireDataSet(command.dataSetId());
+        GisDataSet target = requireDataSet(command.dataSetId());
+        var snapshot = Long.valueOf(2).equals(target.getCategoryId()) ? vectorDataSetStyles.require(target.getId(), false) : null;
         synchronized (capacityMonitor) {
             existing = fileTransferRecordService.findImportRecordByRequestId(command.requestId());
             if (existing != null) {
@@ -295,7 +297,9 @@ public class FileUploadService {
                         command.dataSetId(),
                         command.fileCount(),
                         command.totalSize(),
-                        getCurrentOperatorId());
+                        getCurrentOperatorId(),
+                        snapshot == null ? null : command.vectorPlacement(),
+                        snapshot == null ? null : snapshot.getId());
             } catch (DuplicateKeyException ex) {
                 GisFileTransferRecord raced = fileTransferRecordService.findImportRecordByRequestId(
                         command.requestId());
@@ -352,6 +356,9 @@ public class FileUploadService {
                 || command.fileCount() != record.getTotalCount()
                 || command.totalSize() != record.getTotalBytes()) {
             throw new IllegalArgumentException("requestId对应的上传批次参数不一致");
+        }
+        if (record.getVectorDatasetStyleId() != null && !command.vectorPlacement().equals(record.getVectorPlacement())) {
+            throw new IllegalArgumentException("同一批次的矢量归组方式不可变更");
         }
     }
 
@@ -585,6 +592,8 @@ public class FileUploadService {
         GisFileMeta meta = new GisFileMeta();
         meta.setId(IdWorker.getId());
         meta.setDataSetId(record.getDataSetId());
+        meta.setVectorPlacement(record.getVectorPlacement());
+        meta.setVectorDatasetStyleId(record.getVectorDatasetStyleId());
         meta.setOriginalName(normalizeFileName(command.fileName()));
         meta.setStorageName(storedFile.getStorageName());
         meta.setStorageKey(storedFile.getStorageKey());

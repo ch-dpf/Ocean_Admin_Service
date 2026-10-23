@@ -63,16 +63,6 @@ public class VectorStyleRules {
         return normalized;
     }
 
-    public JsonNode defaultDefinition() {
-        return validate(json.readTree("""
-                {"schemaVersion":1,"rules":[
-                  {"id":"polygons","geometryType":"POLYGON","symbol":{"fillColor":"#3388ff"}},
-                  {"id":"lines","geometryType":"LINE","symbol":{"color":"#3388ff","width":2}},
-                  {"id":"points","geometryType":"POINT","symbol":{"color":"#3388ff","radius":6}}
-                ]}
-                """));
-    }
-
     public List<GisVectorVO.RuleMatch> match(JsonNode definition, JsonNode geometry, JsonNode properties, double zoom) {
         requireZoom(zoom);
         JsonNode normalized = validate(definition);
@@ -183,7 +173,7 @@ public class VectorStyleRules {
     private void normalizeSymbol(JsonNode symbol, String geometry) {
         Set<String> names = switch (geometry) {
             case "POINT" -> Set.of("color", "radius", "opacity", "strokeColor", "strokeWidth");
-            case "LINE" -> Set.of("color", "width", "opacity");
+            case "LINE" -> Set.of("color", "width", "opacity", "dashArray");
             default -> Set.of("fillColor", "fillOpacity", "strokeColor", "strokeWidth", "strokeOpacity");
         };
         fields(symbol, names, "symbol");
@@ -201,7 +191,14 @@ public class VectorStyleRules {
                 number(result, "radius", 6, 0, 1024, true);
                 defaultColor(result, "strokeColor", symbol.get("color").asText());
                 number(result, "strokeWidth", 0, 0, 1024, false);
-            } else number(result, "width", 2, 0, 1024, true);
+            } else {
+                number(result, "width", 2, 0, 1024, true);
+                if (symbol.has("dashArray")) {
+                    var dash = symbol.path("dashArray");
+                    if (!dash.isArray() || dash.isEmpty() || dash.size() > 16) throw invalid("dashArray须为1至16项数组");
+                    for (var n : dash) if (!n.isNumber() || !Double.isFinite(n.asDouble()) || n.asDouble() <= 0 || n.asDouble() > 128) throw invalid("虚线长度无效");
+                }
+            }
         }
     }
 

@@ -39,6 +39,7 @@ import java.util.stream.Collectors;
 public class DataSetService {
 
     private final GisVectorMapper vectorMapper;
+    private final VectorDataSetStyleService vectorDataSetStyles;
 
     private final GisDataSetMapper gisDataSetMapper;
     private final GisFileMetaMapper gisFileMetaMapper;
@@ -135,6 +136,7 @@ public class DataSetService {
         if (gisDataSetMapper.insert(dataSet) != 1) {
             throw new IllegalStateException("数据集创建失败");
         }
+        if (Long.valueOf(2).equals(dataSet.getCategoryId())) vectorDataSetStyles.initialize(dataSet.getId());
 
         log.info("创建 GIS 数据集成功: id={}, code={}, name={}",
                 dataSet.getId(), dataSet.getDataSetCode(), dataSet.getDataSetName());
@@ -158,6 +160,9 @@ public class DataSetService {
         ensureDataSetNameAvailable(dataSetName, reqVO.getId());
 
         if (!existing.getCategoryId().equals(reqVO.getCategoryId())) {
+            if (Long.valueOf(2).equals(existing.getCategoryId()) || Long.valueOf(2).equals(reqVO.getCategoryId())) {
+                throw new IllegalArgumentException("矢量数据集的类别不可直接切换，请新建目标类别数据集");
+            }
             // 推荐层级依赖分类，分类变化后旧结果与正在提取的版本均失效。
             spatialMetadataMapper.invalidateDataSetRasters(reqVO.getId());
         }
@@ -224,6 +229,11 @@ public class DataSetService {
             throw new IllegalArgumentException("数据集不存在或已删除: " + id);
         }
         GisDataSetVO result = toVO(dataSet);
+        if (Long.valueOf(2).equals(dataSet.getCategoryId())) {
+            var s = vectorMapper.dataSetStyle(id);
+            if (s != null) result.setVectorStyle(new GisDataSetVO.VectorStyleSummary(s.getId().toString(), s.getTemplateId(),
+                    s.getTemplateVersion(), s.getStyleVersion(), s.getDataRevision(), s.getDisplayRevision()));
+        }
         populateFileInformation(List.of(result), includeFootprints, tolerance);
         return result;
     }

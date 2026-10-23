@@ -9,6 +9,13 @@ public class GisVectorLayer {
     private Long id;
     private Long dataSetId;
     private Long sourceFileId;
+    private Long groupId;
+    private Long originalGroupId;
+    private String geometryType;
+    private String assignmentMode;
+    private Boolean enabled;
+    private String styleMode;
+    private Long presentationVersion;
     private String layerKey;
     private String layerName;
     private String layerStatus;

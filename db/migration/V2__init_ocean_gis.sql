@@ -47,6 +47,53 @@ CREATE INDEX idx_gis_data_set_create_time
 
 
 -- =========================================================
+-- 数据集默认矢量样式快照及分类树
+-- =========================================================
+
+CREATE TABLE ocean_gis.gis_vector_dataset_style (
+    id BIGINT PRIMARY KEY,
+    data_set_id BIGINT NOT NULL UNIQUE REFERENCES ocean_gis.gis_data_set(id),
+    template_id VARCHAR(100) NOT NULL,
+    template_version INTEGER NOT NULL CHECK (template_version > 0),
+    schema_version INTEGER NOT NULL CHECK (schema_version = 2),
+    definition JSONB NOT NULL CHECK (definition @> '{"schemaVersion":2,"kind":"VECTOR_DATASET_STYLE_TEMPLATE"}'::jsonb),
+    template_checksum VARCHAR(64) NOT NULL,
+    style_version BIGINT NOT NULL DEFAULT 1 CHECK (style_version > 0),
+    data_revision BIGINT NOT NULL DEFAULT 0 CHECK (data_revision >= 0),
+    display_revision BIGINT NOT NULL DEFAULT 0 CHECK (display_revision >= 0),
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (data_set_id,id)
+);
+COMMENT ON TABLE ocean_gis.gis_vector_dataset_style IS '创建数据集时复制的不可变模板；数据和显示修订号独立更新，不随后台模板文件变化';
+
+CREATE TABLE ocean_gis.gis_vector_group (
+    id BIGINT PRIMARY KEY,
+    data_set_id BIGINT NOT NULL,
+    dataset_style_id BIGINT NOT NULL,
+    parent_id BIGINT,
+    group_key VARCHAR(100) NOT NULL,
+    group_name VARCHAR(100) NOT NULL,
+    node_type VARCHAR(32) NOT NULL CHECK (node_type IN ('GEOMETRY_FOLDER','BUSINESS_FOLDER','CLASSIFICATION','UNKNOWN_FOLDER','UNKNOWN_CLASSIFICATION')),
+    geometry_type VARCHAR(10) CHECK (geometry_type IN ('POINT','LINE','POLYGON')),
+    assignable BOOLEAN NOT NULL,
+    default_style_key VARCHAR(100),
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (data_set_id,id),
+    UNIQUE (data_set_id,group_key),
+    FOREIGN KEY (data_set_id,dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id),
+    FOREIGN KEY (data_set_id,parent_id) REFERENCES ocean_gis.gis_vector_group(data_set_id,id) DEFERRABLE INITIALLY DEFERRED,
+    CHECK (assignable = (node_type IN ('CLASSIFICATION','UNKNOWN_CLASSIFICATION'))),
+    CHECK (NOT assignable OR (geometry_type IS NOT NULL AND default_style_key IS NOT NULL))
+);
+CREATE INDEX idx_gis_vector_group_parent ON ocean_gis.gis_vector_group(data_set_id,parent_id,sort_order);
+COMMENT ON COLUMN ocean_gis.gis_vector_group.default_style_key IS '数据集不可变快照中styles的业务键；初始化时校验引用完整性与几何类别';
+
+-- =========================================================
 -- GIS 原始文件上传、下载传输记录
 -- =========================================================
 
@@ -56,6 +103,8 @@ CREATE TABLE ocean_gis.gis_file_transfer_record (
     request_id          VARCHAR(64),
     operation_type      VARCHAR(16)   NOT NULL,
     data_set_id         BIGINT        NOT NULL,
+    vector_placement    VARCHAR(10) CHECK (vector_placement IN ('AUTO','UNKNOWN')),
+    vector_dataset_style_id BIGINT,
     total_count         INTEGER       NOT NULL DEFAULT 0,
     completed_count     INTEGER       NOT NULL DEFAULT 0,
     failed_count        INTEGER       NOT NULL DEFAULT 0,
@@ -76,6 +125,7 @@ CREATE TABLE ocean_gis.gis_file_transfer_record (
         UNIQUE (record_no),
     CONSTRAINT fk_gis_file_transfer_record_data_set
         FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id),
+    FOREIGN KEY (data_set_id,vector_dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id),
     CONSTRAINT ck_gis_file_transfer_record_operation
         CHECK (operation_type IN ('IMPORT', 'EXPORT')),
     CONSTRAINT ck_gis_file_transfer_record_status
@@ -140,6 +190,8 @@ CREATE UNIQUE INDEX uk_gis_file_transfer_record_request
 CREATE TABLE ocean_gis.gis_file_meta (
     id                       BIGINT        PRIMARY KEY,
     data_set_id              BIGINT        NOT NULL,
+    vector_placement         VARCHAR(10) CHECK (vector_placement IN ('AUTO','UNKNOWN')),
+    vector_dataset_style_id  BIGINT,
     original_name            VARCHAR(255)  NOT NULL,
     storage_name             VARCHAR(255),
     storage_key              VARCHAR(1000),
@@ -166,6 +218,7 @@ CREATE TABLE ocean_gis.gis_file_meta (
     deleted                  INTEGER       NOT NULL DEFAULT 0,
     CONSTRAINT ck_gis_file_meta_storage_type
         CHECK (storage_type IN ('LOCAL', 'MINIO', 'S3')),
+    FOREIGN KEY (data_set_id,vector_dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id),
     CONSTRAINT ck_gis_file_meta_metadata_status
         CHECK (metadata_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'NOT_APPLICABLE')),
     CONSTRAINT ck_gis_file_meta_metadata_version CHECK (metadata_version >= 0),
@@ -282,6 +335,13 @@ CREATE TABLE ocean_gis.gis_vector_layer (
     id BIGINT PRIMARY KEY,
     data_set_id BIGINT NOT NULL REFERENCES ocean_gis.gis_data_set(id),
     source_file_id BIGINT REFERENCES ocean_gis.gis_file_meta(id),
+    group_id BIGINT NOT NULL,
+    original_group_id BIGINT NOT NULL,
+    geometry_type VARCHAR(10) NOT NULL CHECK (geometry_type IN ('POINT','LINE','POLYGON')),
+    assignment_mode VARCHAR(10) NOT NULL DEFAULT 'AUTO' CHECK (assignment_mode IN ('AUTO','MANUAL')),
+    enabled BOOLEAN NOT NULL DEFAULT false,
+    style_mode VARCHAR(32) NOT NULL CHECK (style_mode IN ('UNCONFIGURED','INHERIT_TARGET_GROUP','CUSTOM')),
+    presentation_version BIGINT NOT NULL DEFAULT 1 CHECK (presentation_version > 0),
     layer_key VARCHAR(255) NOT NULL,
     layer_name VARCHAR(100) NOT NULL,
     layer_status VARCHAR(20) NOT NULL DEFAULT 'IMPORTING'
@@ -294,12 +354,16 @@ CREATE TABLE ocean_gis.gis_vector_layer (
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
     UNIQUE (source_file_id, layer_key),
+    FOREIGN KEY (data_set_id,group_id) REFERENCES ocean_gis.gis_vector_group(data_set_id,id),
+    FOREIGN KEY (data_set_id,original_group_id) REFERENCES ocean_gis.gis_vector_group(data_set_id,id),
+    CHECK (style_mode != 'UNCONFIGURED' OR NOT enabled),
     CHECK (deleted = 1 OR source_file_id IS NOT NULL),
     CHECK (geographic_extent IS NULL OR
         (NOT public.ST_IsEmpty(geographic_extent) AND public.ST_IsValid(geographic_extent)))
 );
 CREATE INDEX idx_gis_vector_layer_dataset ON ocean_gis.gis_vector_layer(data_set_id, id) WHERE deleted = 0;
 CREATE INDEX idx_gis_vector_layer_source ON ocean_gis.gis_vector_layer(source_file_id) WHERE deleted = 0;
+CREATE INDEX idx_gis_vector_layer_group ON ocean_gis.gis_vector_layer(data_set_id,group_id,id) WHERE deleted=0;
 
 CREATE TABLE ocean_gis.gis_vector_style (
     id BIGINT PRIMARY KEY,
@@ -327,11 +391,15 @@ CREATE TABLE ocean_gis.gis_vector_feature (
     properties JSONB,
     source_feature_id JSONB,
     source_feature_index BIGINT CHECK (source_feature_index >= 0),
+    source_geometry_path VARCHAR(512),
+    classification_rule_key VARCHAR(100),
     version BIGINT NOT NULL DEFAULT 1 CHECK (version >= 1),
     create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
-    UNIQUE (layer_id, source_feature_index),
+    UNIQUE (layer_id, source_feature_index, source_geometry_path),
+    CHECK ((source_feature_index IS NULL AND source_geometry_path IS NULL)
+        OR (source_feature_index IS NOT NULL AND source_geometry_path IS NOT NULL AND source_geometry_path LIKE '/geometry%')),
     CHECK (public.ST_SRID(geom) = 4326 AND public.ST_NDims(geom) IN (2,3)
         AND NOT public.ST_IsEmpty(geom) AND public.ST_IsValid(geom)),
     CHECK (properties IS NULL OR jsonb_typeof(properties) IN ('object','null')),
@@ -340,68 +408,82 @@ CREATE TABLE ocean_gis.gis_vector_feature (
 CREATE INDEX idx_gis_vector_feature_layer ON ocean_gis.gis_vector_feature(layer_id, id) WHERE deleted = 0;
 CREATE INDEX idx_gis_vector_feature_geom ON ocean_gis.gis_vector_feature USING GIST(geom) WHERE deleted = 0;
 COMMENT ON TABLE ocean_gis.gis_vector_layer IS '从原始矢量文件提取的可编辑图层；同一来源文件允许生成多个图层';
-COMMENT ON COLUMN ocean_gis.gis_vector_layer.layer_key IS '来源文件内稳定图层键；首期为 default';
+COMMENT ON COLUMN ocean_gis.gis_vector_layer.layer_key IS '来源文件、初始分类及几何类别组成的稳定键；手动移组不变更';
 COMMENT ON COLUMN ocean_gis.gis_vector_layer.geographic_extent IS '当前要素的二维包围范围；与来源文件范围独立维护';
 COMMENT ON TABLE ocean_gis.gis_vector_feature IS '逐要素几何与属性；编辑不回写来源文件';
 COMMENT ON COLUMN ocean_gis.gis_vector_feature.geom IS 'SRID 4326，保留 XY 或 XYZ；空间索引和默认空间查询为二维';
 COMMENT ON COLUMN ocean_gis.gis_vector_feature.source_feature_index IS '来源文件内从零开始的要素序号；交互新增的要素为空';
 
-CREATE TABLE ocean_gis.gis_vector_generalization_build (
-    id BIGINT PRIMARY KEY,
-    layer_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
-    data_version BIGINT NOT NULL,
-    policy_version BIGINT NOT NULL,
-    policy JSONB NOT NULL,
-    build_status VARCHAR(20) NOT NULL DEFAULT 'QUEUED'
-        CHECK (build_status IN ('QUEUED','RUNNING','READY','FAILED','SUPERSEDED')),
-    attempt BIGINT NOT NULL DEFAULT 0,
-    completed_zoom INTEGER NOT NULL DEFAULT -1,
-    max_tile_bytes BIGINT NOT NULL DEFAULT 0,
-    error_message VARCHAR(1000),
-    lease_expires_at TIMESTAMP,
-    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    finish_time TIMESTAMP,
-    CHECK ((build_status = 'RUNNING') = (lease_expires_at IS NOT NULL)),
-    CHECK ((build_status IN ('READY','FAILED','SUPERSEDED')) = (finish_time IS NOT NULL))
-);
-CREATE UNIQUE INDEX uk_vector_generalization_pending ON ocean_gis.gis_vector_generalization_build(layer_id)
-    WHERE build_status = 'QUEUED';
-CREATE INDEX idx_vector_generalization_queue ON ocean_gis.gis_vector_generalization_build(build_status,lease_expires_at,create_time);
+-- 显示查询中的参数化条件解释器；不拼接或执行模板提供的SQL。
+CREATE FUNCTION ocean_gis.vector_rule_value(v JSONB, field_name TEXT) RETURNS JSONB
+LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $$
+DECLARE t TEXT;
+BEGIN
+    IF v IS NULL OR v='null'::jsonb THEN RETURN NULL; END IF;
+    IF jsonb_typeof(v)='string' THEN
+        t:=btrim(v #>> '{}', E' \t\r\n');
+        IF t='' THEN RETURN NULL; END IF;
+    END IF;
+    IF field_name='fclass' THEN
+        IF jsonb_typeof(v)!='string' THEN RETURN NULL; END IF;
+        RETURN to_jsonb(lower(t));
+    ELSIF field_name='id' THEN
+        IF jsonb_typeof(v)='string' THEN RETURN to_jsonb(t); END IF;
+        IF jsonb_typeof(v)='number' AND (v #>> '{}')::numeric=trunc((v #>> '{}')::numeric)
+            THEN RETURN to_jsonb(trunc((v #>> '{}')::numeric)::text); END IF;
+        RETURN NULL;
+    ELSIF field_name='code' THEN
+        IF jsonb_typeof(v)='string' AND t ~ '^[+-]?[0-9]+$' THEN RETURN to_jsonb(t::numeric); END IF;
+        IF jsonb_typeof(v)='number' AND (v #>> '{}')::numeric=trunc((v #>> '{}')::numeric) THEN RETURN v; END IF;
+        RETURN NULL;
+    END IF;
+    RETURN v;
+END $$;
 
-CREATE TABLE ocean_gis.gis_vector_generalization (
-    layer_id BIGINT PRIMARY KEY REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
-    policy JSONB NOT NULL CHECK (jsonb_typeof(policy) = 'object'),
-    policy_version BIGINT NOT NULL DEFAULT 1 CHECK (policy_version > 0),
-    published_build_id BIGINT REFERENCES ocean_gis.gis_vector_generalization_build(id),
-    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+CREATE FUNCTION ocean_gis.vector_filter_matches(p JSONB, f JSONB, normalized BOOLEAN) RETURNS BOOLEAN
+LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $$
+DECLARE op TEXT; field_name TEXT; a JSONB; b JSONB; child JSONB;
+BEGIN
+    IF f IS NULL OR f='null'::jsonb THEN RETURN true; END IF;
+    op:=f->>'op';
+    IF op IN ('and','or') THEN
+        FOR child IN SELECT value FROM jsonb_array_elements(f->'conditions') LOOP
+            IF op='and' AND NOT ocean_gis.vector_filter_matches(p,child,normalized) THEN RETURN false; END IF;
+            IF op='or' AND ocean_gis.vector_filter_matches(p,child,normalized) THEN RETURN true; END IF;
+        END LOOP;
+        RETURN op='and';
+    ELSIF op='not' THEN RETURN NOT ocean_gis.vector_filter_matches(p,f->'condition',normalized);
+    END IF;
+    field_name:=f->>'field'; a:=p->field_name; b:=f->'value';
+    IF op='exists' THEN RETURN (a IS NOT NULL)=COALESCE((b #>> '{}')::boolean,true); END IF;
+    IF op='missingOrEmpty' THEN RETURN a IS NULL OR a='null'::jsonb
+        OR (jsonb_typeof(a)='string' AND btrim(a #>> '{}', E' \t\r\n')=''); END IF;
+    IF normalized THEN
+        a:=ocean_gis.vector_rule_value(a,field_name);
+        IF op!='in' THEN b:=ocean_gis.vector_rule_value(b,field_name); END IF;
+    END IF;
+    IF a IS NULL THEN RETURN false; END IF;
+    IF op='in' THEN
+        FOR child IN SELECT value FROM jsonb_array_elements(b) LOOP
+            IF normalized THEN child:=ocean_gis.vector_rule_value(child,field_name); END IF;
+            IF a=child THEN RETURN true; END IF;
+        END LOOP;
+        RETURN false;
+    ELSIF op='regex' THEN RETURN COALESCE((a #>> '{}') ~ ('^(?:' || (b #>> '{}') || ')$'),false);
+    ELSIF op='eq' THEN RETURN COALESCE(a=b,false);
+    ELSIF op='ne' THEN RETURN b IS NULL OR a!=b;
+    ELSIF jsonb_typeof(a)='number' AND jsonb_typeof(b)='number' THEN
+        CASE op
+            WHEN 'gt' THEN RETURN (a #>> '{}')::numeric>(b #>> '{}')::numeric;
+            WHEN 'gte' THEN RETURN (a #>> '{}')::numeric>=(b #>> '{}')::numeric;
+            WHEN 'lt' THEN RETURN (a #>> '{}')::numeric<(b #>> '{}')::numeric;
+            WHEN 'lte' THEN RETURN (a #>> '{}')::numeric<=(b #>> '{}')::numeric;
+            ELSE RETURN false;
+        END CASE;
+    END IF;
+    RETURN false;
+END $$;
 
-CREATE TABLE ocean_gis.gis_vector_generalized_feature (
-    build_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_generalization_build(id) ON DELETE CASCADE,
-    zoom INTEGER NOT NULL CHECK (zoom BETWEEN 0 AND 15),
-    representation_id VARCHAR(64) NOT NULL,
-    category VARCHAR(10) NOT NULL CHECK (category IN ('LINE','POLYGON')),
-    properties JSONB NOT NULL,
-    geom public.geometry(Geometry,3857) NOT NULL,
-    feature_count BIGINT NOT NULL CHECK (feature_count > 0),
-    PRIMARY KEY(build_id,zoom,representation_id),
-    CHECK (NOT public.ST_IsEmpty(geom) AND public.ST_IsValid(geom))
-);
-CREATE INDEX idx_vector_generalized_geom ON ocean_gis.gis_vector_generalized_feature USING GIST(geom);
-
-CREATE TABLE ocean_gis.gis_vector_generalized_member (
-    build_id BIGINT NOT NULL,
-    zoom INTEGER NOT NULL,
-    representation_id VARCHAR(64) NOT NULL,
-    feature_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_feature(id) ON DELETE CASCADE,
-    PRIMARY KEY(build_id,zoom,representation_id,feature_id),
-    FOREIGN KEY(build_id,zoom,representation_id)
-        REFERENCES ocean_gis.gis_vector_generalized_feature(build_id,zoom,representation_id) ON DELETE CASCADE
-);
-COMMENT ON TABLE ocean_gis.gis_vector_generalization IS '图层概化策略与原子发布指针；样式与原始要素独立';
-COMMENT ON TABLE ocean_gis.gis_vector_generalization_build IS '可恢复概化待办，固定源数据及策略版本；仅完整校验后发布';
-COMMENT ON TABLE ocean_gis.gis_vector_generalized_feature IS '显示用二维概化几何；不得作为原始要素编辑依据';
-COMMENT ON TABLE ocean_gis.gis_vector_generalized_member IS '概化对象到原始要素的去重成员关系';
 
 CREATE TABLE ocean_gis.gis_file_transfer_record_item (
     id                  BIGINT        PRIMARY KEY,

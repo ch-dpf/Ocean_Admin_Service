@@ -53,6 +53,7 @@ public class FileMetaService {
     private final FileUploadUtil fileUploadUtil;
     private final FileSpatialMetadataService spatialMetadataService;
     private final GisVectorMapper vectorMapper;
+    private final VectorDataSetStyleService vectorDataSetStyles;
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResult<List<GisFileMetaVO>> getFileMetaPage(GisFileQuery query, boolean deleted) {
@@ -125,6 +126,11 @@ public class FileMetaService {
         meta.setCleanupStatus("NOT_REQUIRED");
         meta.setMetadataStatus("QUEUED");
         meta.setMetadataVersion(0L);
+        if (Long.valueOf(2).equals(gisDataSetMapper.selectById(meta.getDataSetId()).getCategoryId())) {
+            var snapshot = vectorDataSetStyles.require(meta.getDataSetId(), false);
+            meta.setVectorDatasetStyleId(snapshot.getId());
+            meta.setVectorPlacement(reqVO.getVectorPlacement() == null ? "AUTO" : reqVO.getVectorPlacement());
+        }
         meta.setCreateTime(now);
         meta.setUpdateTime(now);
         meta.setDeleted(0);
@@ -146,6 +152,9 @@ public class FileMetaService {
                 && !existing.getDataSetId().equals(reqVO.getDataSetId())) {
             throw new IllegalArgumentException("已上传成功的文件不允许变更所属数据集");
         }
+        if (existing.getVectorDatasetStyleId() != null && !existing.getDataSetId().equals(reqVO.getDataSetId())) {
+            throw new IllegalArgumentException("已固定矢量样式的文件不允许变更所属数据集");
+        }
         ensureDataSetExists(reqVO.getDataSetId());
 
         String storageType = normalizeUpper(reqVO.getStorageType());
@@ -157,6 +166,10 @@ public class FileMetaService {
 
         GisFileMeta updatedMeta = new GisFileMeta();
         updatedMeta.setId(existing.getId());
+        updatedMeta.setVectorDatasetStyleId(existing.getVectorDatasetStyleId());
+        updatedMeta.setVectorPlacement(existing.getVectorPlacement());
+        if (reqVO.getVectorPlacement() != null && !Objects.equals(reqVO.getVectorPlacement(), existing.getVectorPlacement()))
+            throw new IllegalArgumentException("已建立文件的归组方式不可变更");
         applyEditableFields(updatedMeta, reqVO, storageType, storageKey);
         updatedMeta.setCleanupStatus(existing.getCleanupStatus());
         String requestedStatus = normalizeUpper(reqVO.getUploadStatus());
@@ -331,6 +344,9 @@ public class FileMetaService {
         if (reqVO.getDataSetId() == null) {
             throw new IllegalArgumentException("数据集ID不能为空");
         }
+        if (reqVO.getVectorPlacement() != null && !Set.of("AUTO", "UNKNOWN").contains(reqVO.getVectorPlacement())) {
+            throw new IllegalArgumentException("矢量归组方式须为AUTO或UNKNOWN");
+        }
         requireText(reqVO.getOriginalName(), "原始文件名不能为空");
         requireText(reqVO.getStorageName(), "存储文件名不能为空");
         requireText(reqVO.getStorageKey(), "存储 Key 不能为空");
@@ -393,6 +409,8 @@ public class FileMetaService {
         GisFileMetaVO result = new GisFileMetaVO();
         result.setId(meta.getId());
         result.setDataSetId(meta.getDataSetId());
+        result.setVectorDatasetStyleId(meta.getVectorDatasetStyleId());
+        result.setVectorPlacement(meta.getVectorPlacement());
         result.setOriginalName(meta.getOriginalName());
         result.setStorageName(meta.getStorageName());
         result.setStorageKey(meta.getStorageKey());

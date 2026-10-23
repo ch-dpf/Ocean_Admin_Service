@@ -10,9 +10,11 @@ public record GisUploadChunkCommand(
         long fileSize,
         long totalSize,
         long offset,
-        long chunkSize) {
+        long chunkSize,
+        String vectorPlacement) {
 
     public GisUploadChunkCommand {
+        if (vectorPlacement == null || !java.util.Set.of("AUTO", "UNKNOWN").contains(vectorPlacement)) throw new IllegalArgumentException("矢量归组方式须为AUTO或UNKNOWN");
         if (requestId == null || requestId.isBlank()) {
             throw new IllegalArgumentException("上传请求标识不能为空");
         }

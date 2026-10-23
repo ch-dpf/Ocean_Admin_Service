@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Param;
 import org.ocean.admin.gis.entity.GisVectorFeature;
 import org.ocean.admin.gis.entity.GisVectorLayer;
 import org.ocean.admin.gis.entity.GisVectorStyle;
+import org.ocean.admin.gis.entity.GisVectorDataSetStyle;
+import org.ocean.admin.gis.entity.GisVectorGroup;
 import org.ocean.admin.gis.vo.GisVectorVO;
 
 import java.util.List;
@@ -17,7 +19,20 @@ public interface GisVectorMapper {
     int deleteExtractingLayersBySource(@Param("fileId") Long fileId);
     List<GisVectorLayer> layersBySource(@Param("fileId") Long fileId);
     int setLayerStatus(@Param("id") Long id, @Param("status") String status);
-    Page<GisVectorLayer> pageLayers(Page<GisVectorLayer> page, @Param("dataSetId") Long dataSetId);
+    Page<GisVectorLayer> pageLayers(Page<GisVectorLayer> page, @Param("dataSetId") Long dataSetId,
+            @Param("groupId") Long groupId, @Param("sourceFileId") Long sourceFileId);
+    GisVectorDataSetStyle dataSetStyle(@Param("dataSetId") Long dataSetId);
+    GisVectorDataSetStyle lockDataSetStyle(@Param("dataSetId") Long dataSetId);
+    int insertDataSetStyle(@Param("s") GisVectorDataSetStyle style);
+    int insertGroups(@Param("groups") List<GisVectorGroup> groups);
+    List<GisVectorGroup> groups(@Param("dataSetId") Long dataSetId);
+    GisVectorGroup group(@Param("dataSetId") Long dataSetId, @Param("id") Long id);
+    int setGroupEnabled(@Param("id") Long id, @Param("enabled") boolean enabled);
+    int bumpDataSetRevision(@Param("dataSetId") Long dataSetId, @Param("data") boolean data, @Param("display") boolean display);
+    int updatePresentation(@Param("l") GisVectorLayer layer, @Param("expected") long expected);
+    List<GisVectorLayer> renderLayers(@Param("dataSetId") Long dataSetId, @Param("groupIds") List<Long> groupIds,
+            @Param("layerIds") List<Long> layerIds);
+    List<GisVectorStyle> defaultStyles(@Param("dataSetId") Long dataSetId, @Param("layerIds") List<Long> layerIds);
     GisVectorLayer layer(@Param("id") Long id);
     GisVectorLayer lockLayer(@Param("id") Long id);
     int refreshLayer(@Param("id") Long id);
@@ -41,13 +56,13 @@ public interface GisVectorMapper {
     int setDefaultStyle(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
     int deleteStyle(@Param("layerId") Long layerId, @Param("id") Long id, @Param("expected") long expected);
     String setTileQueryTimeout(@Param("milliseconds") int milliseconds);
-    GisVectorVO.TilePayload vectorTile(@Param("layerId") Long layerId, @Param("z") int z,
-            @Param("x") int x, @Param("y") int y, @Param("fieldsJson") String fieldsJson,
-            @Param("gridPixels") int gridPixels, @Param("bufferPixels") int bufferPixels,
-            @Param("aggregate") boolean aggregate, @Param("maxBytes") int maxBytes);
-    List<GisVectorFeature> clusterMembers(@Param("layerId") Long layerId, @Param("z") int z,
-            @Param("x") int x, @Param("y") int y, @Param("fieldsJson") String fieldsJson,
-            @Param("gridPixels") int gridPixels, @Param("bufferPixels") int bufferPixels,
-            @Param("clusterX") long clusterX, @Param("clusterY") long clusterY,
-            @Param("propertyHash") String propertyHash, @Param("afterId") long afterId, @Param("limit") int limit);
+    long displayObjectCount(@Param("ctx") GisVectorVO.RenderContext context, @Param("plansJson") String plans,
+            @Param("policyJson") String policy);
+    GisVectorVO.TilePayload dataSetTile(@Param("ctx") GisVectorVO.RenderContext context, @Param("plansJson") String plans,
+            @Param("policyJson") String policy, @Param("z") int z, @Param("x") int x,
+            @Param("y") int y, @Param("maxBytes") int maxBytes);
+    List<GisVectorFeature> dataSetClusterMembers(@Param("ctx") GisVectorVO.RenderContext context,
+            @Param("plansJson") String plans, @Param("policyJson") String policy,
+            @Param("groupId") long groupId, @Param("cellX") long cellX, @Param("cellY") long cellY,
+            @Param("afterId") long afterId, @Param("limit") int limit);
 }

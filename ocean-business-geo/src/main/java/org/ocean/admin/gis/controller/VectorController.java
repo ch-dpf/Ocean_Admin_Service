@@ -11,6 +11,7 @@ import org.ocean.admin.gis.dto.GisVectorRequests;
 import org.ocean.admin.gis.service.VectorLayerService;
 import org.ocean.admin.gis.service.VectorStyleService;
 import org.ocean.admin.gis.service.VectorTileService;
+import org.ocean.admin.gis.service.VectorDataSetStyleService;
 import org.ocean.admin.gis.vo.GisVectorVO;
 import org.ocean.admin.gis.util.GeoJsonFeatureReader;
 import org.ocean.admin.kernel.audit.OperationLog;
@@ -37,27 +38,63 @@ public class VectorController {
     private final GeoJsonFeatureReader reader;
     private final VectorStyleService styles;
     private final VectorTileService tiles;
-    @PostMapping("/layers/{layerId}/render-contexts")
-    @Operation(summary = "创建版本化矢量渲染上下文", description = "fields 按字面取属性；聚合以投影后的属性分组，保留 null 与缺失语义")
-    public ResponseResult<GisVectorVO.RenderContext> renderContext(@PathVariable Long layerId,
-            @Valid @RequestBody GisVectorRequests.RenderContext request) {
-        return ResponseResult.success(tiles.createContext(layerId,request));
+    private final VectorDataSetStyleService dataSetStyles;
+
+    @GetMapping("/datasets/{dataSetId}/style")
+    @Operation(summary = "查询数据集样式快照与默认规则", description = "仅配置，不含要素几何")
+    public ResponseResult<GisVectorVO.DataSetStyle> dataSetStyle(@PathVariable Long dataSetId) {
+        return ResponseResult.success(dataSetStyles.detail(dataSetId));
     }
 
-    @GetMapping(value = "/layers/{layerId}/tiles/{z}/{x}/{y}.mvt", produces = "application/vnd.mapbox-vector-tile")
+    @GetMapping("/datasets/{dataSetId}/groups")
+    @Operation(summary = "查询数据集分类树与统计", description = "图层通过分页接口按分类加载，不内嵌几何")
+    public ResponseEntity<ResponseResult<List<GisVectorVO.Group>>> groups(@PathVariable Long dataSetId) {
+        var tree = dataSetStyles.groupTree(dataSetId);
+        return ResponseEntity.ok().eTag(tree.etag()).body(ResponseResult.success(tree.groups()));
+    }
+
+    @PatchMapping("/datasets/{dataSetId}/groups/{groupId}/visibility")
+    @Operation(summary = "更新分类默认显隐", description = "If-Match来自分类树响应；父分类关闭后所有后代均隐藏")
+    @OperationLog(module = "GIS_VECTOR_STYLE", type = OperationType.UPDATE, description = "更新矢量分类显隐")
+    public ResponseResult<Void> groupVisibility(@PathVariable Long dataSetId, @PathVariable Long groupId,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody GisVectorRequests.GroupVisibility request) {
+        dataSetStyles.setEnabled(dataSetId, groupId, request.enabled(), ifMatch);
+        return ResponseResult.success();
+    }
+
+    @PutMapping("/layers/{layerId}/presentation")
+    @Operation(summary = "原子保存图层挂载、样式与显隐", description = "If-Match来自图层详情；不重解析来源、不合并图层")
+    @OperationLog(module = "GIS_VECTOR_STYLE", type = OperationType.UPDATE, description = "保存矢量图层挂载与显示配置")
+    public ResponseEntity<ResponseResult<GisVectorVO.Layer>> presentation(@PathVariable Long layerId,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody GisVectorRequests.Presentation request) {
+        var layer = styles.savePresentation(layerId, ifMatch, request);
+        return ResponseEntity.ok().eTag(VectorLayerService.layerEtag(layerId, layer.dataVersion(), layer.presentationVersion()))
+                .body(ResponseResult.success(layer));
+    }
+
+    @PostMapping("/datasets/{dataSetId}/render-contexts")
+    @Operation(summary = "创建数据集视窗渲染上下文", description = "bbox、连续displayZoom及CSS宽高必填；全图层共用样式与密度预算")
+    public ResponseResult<GisVectorVO.RenderContext> renderContext(@PathVariable Long dataSetId,
+            @Valid @RequestBody GisVectorRequests.RenderContext request) {
+        return ResponseResult.success(tiles.createContext(dataSetId,request));
+    }
+
+    @GetMapping(value = "/datasets/{dataSetId}/tiles/{z}/{x}/{y}.mvt", produces = "application/vnd.mapbox-vector-tile")
     @Operation(summary = "按层级读取显示用MVT矢量瓦片", description = "须携带contextId；旧数据版本409，上下文过期410；不截取任意前N个要素")
-    public ResponseEntity<byte[]> tile(@PathVariable Long layerId, @PathVariable int z, @PathVariable int x,
+    public ResponseEntity<byte[]> tile(@PathVariable Long dataSetId, @PathVariable int z, @PathVariable int x,
             @PathVariable int y, @RequestParam String contextId) {
-        byte[] body = tiles.getTile(layerId,contextId,z,x,y);
+        byte[] body = tiles.getTile(dataSetId,contextId,z,x,y);
         return ResponseEntity.ok().header("Cache-Control","no-store").body(body);
     }
 
-    @GetMapping("/layers/{layerId}/clusters/{clusterId}/features")
-    @Operation(summary = "分页查询聚合的原始要素成员", description = "计数按点位，成员按原始要素ID去重；编辑须再获取原始Feature及ETag")
-    public ResponseResult<GisVectorVO.ClusterMembers> clusterFeatures(@PathVariable Long layerId,
+    @GetMapping("/datasets/{dataSetId}/clusters/{clusterId}/features")
+    @Operation(summary = "分页查询视窗聚合成员属性", description = "返回图层ID和入库要素ID，不返回几何；编辑须另读单要素及ETag")
+    public ResponseResult<GisVectorVO.ClusterMembers> clusterFeatures(@PathVariable Long dataSetId,
             @PathVariable String clusterId, @RequestParam String contextId,
             @RequestParam(defaultValue = "50") int limit, @RequestParam(required = false) String cursor) {
-        return ResponseResult.success(tiles.getClusterFeatures(layerId,contextId,clusterId,limit,cursor));
+        return ResponseResult.success(tiles.getClusterFeatures(dataSetId,contextId,clusterId,limit,cursor));
     }
 
     @GetMapping("/layers/{layerId}/styles")
@@ -81,9 +118,11 @@ public class VectorController {
     }
 
     @GetMapping("/layers/{layerId}/default-style")
-    @Operation(summary = "读取图层默认样式及ETag", description = "样式与GeoJSON分别读取，前端依据协议本地渲染")
-    public ResponseEntity<ResponseResult<GisVectorVO.Style>> defaultStyle(@PathVariable Long layerId) {
-        return styleResponse(styles.defaultStyle(layerId), HttpStatus.OK);
+    @Operation(summary = "读取图层有效样式及ETag", description = "返回继承或自定义配置供面板展示；地图渲染须使用数据集视窗上下文和MVT")
+    public ResponseEntity<ResponseResult<GisVectorVO.EffectiveStyle>> defaultStyle(@PathVariable Long layerId) {
+        var style = styles.defaultStyle(layerId);
+        return ResponseEntity.ok().eTag("\"effective-" + layerId + "-p" + style.presentationVersion() + "-s" + style.version() + "\"")
+                .body(ResponseResult.success(style));
     }
 
     @PutMapping("/layers/{layerId}/styles/{styleId}")
@@ -127,15 +166,17 @@ public class VectorController {
     @Operation(summary = "分页查询矢量图层")
     public ResponseResult<PageResult<List<GisVectorVO.Layer>>> page(
             @RequestParam(required = false) Long dataSetId,
+            @RequestParam(required = false) Long groupId,
+            @RequestParam(required = false) Long sourceFileId,
             @RequestParam(defaultValue = "1") int current, @RequestParam(defaultValue = "10") int size) {
-        return ResponseResult.success(layers.page(dataSetId, current, size));
+        return ResponseResult.success(layers.page(dataSetId, groupId, sourceFileId, current, size));
     }
 
     @GetMapping("/layers/{layerId}")
     @Operation(summary = "查询图层详情", description = "返回ETag，删除图层时通过If-Match提交")
     public ResponseEntity<ResponseResult<GisVectorVO.Layer>> layer(@PathVariable Long layerId) {
         var layer = layers.detail(layerId);
-        return ResponseEntity.ok().eTag(VectorLayerService.layerEtag(layerId, layer.dataVersion())).body(ResponseResult.success(layer));
+        return ResponseEntity.ok().eTag(VectorLayerService.layerEtag(layerId, layer.dataVersion(), layer.presentationVersion())).body(ResponseResult.success(layer));
     }
 
     @DeleteMapping("/layers/{layerId}")
@@ -147,7 +188,7 @@ public class VectorController {
     }
 
     @GetMapping(value = "/layers/{layerId}/features", produces = "application/geo+json")
-    @Operation(summary = "按真实要素几何查询GeoJSON", description = "bbox=west,south,east,north；limit为1至1000；后续页须保持bbox不变")
+    @Operation(summary = "按视窗分页查询要素属性", description = "bbox必填；不返回几何，单要素编辑另读详情；禁止作为地图全量预览")
     public GisVectorVO.FeatureCollection features(@PathVariable Long layerId,
             @RequestParam(required = false) String bbox, @RequestParam(defaultValue = "200") int limit,
             @RequestParam(required = false) String cursor) {

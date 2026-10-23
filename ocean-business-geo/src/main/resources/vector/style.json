@@ -1,0 +1,3204 @@
+{
+  "schemaVersion": 2,
+  "kind": "VECTOR_DATASET_STYLE_TEMPLATE",
+  "templateId": "cn-vector-default",
+  "templateVersion": 1,
+  "name": "矢量数据集默认业务分类与样式",
+  "description": "以分类映射表定义业务目录，以当前原型定义默认显示和未知图层手动挂载；不包含来源适配器。",
+  "provenance": {
+    "classificationWorkbook": {
+      "fileName": "浙江省原始数据分类映射(1).xlsx",
+      "sha256": "432a4e06f41aa7c4141dcc7009057b4ad827e180c62948cc299667214720dda9",
+      "sheet": "分类映射",
+      "range": "A1:H71",
+      "notesSheet": "说明",
+      "notesRange": "A1:B10"
+    },
+    "prototype": "poi86-autostyle-v4",
+    "policyNotes": [
+      "业务目录以映射表为准；建筑、水体保留“不划分”，符号和比例尺细节不新增业务组。",
+      "code 和 fclass 保留原始值；fclass 语义优先，code 仅在 fclass 缺失、null 或空白时兜底。",
+      "源数据 7228=farmyard、7229=farmland；不按其他版本编码表反向改写源 code。",
+      "riverbank 保持源 fclass，nature_reserve 归入土地利用/自然保护。",
+      "行政区原始属性为 id、name、site；不凭空写入 code=1202/1204/1206/1208 或 admin_level。",
+      "未提供的国家、县级数据不填充虚构要素；省级融合计划默认禁用，不能仅凭文件名生成省域面。",
+      "schemaVersion=2 为本次数据集模板协议，不是现有 VectorStyleRules 的图层样式 v1；本次仅提供配置，未接入加载器。"
+    ]
+  },
+  "initialization": {
+    "onDatasetCreate": "COPY_TEMPLATE_TO_DATASET_SNAPSHOT",
+    "createEmptyGroups": true,
+    "referenceMode": "DATASET_LOCAL_BUSINESS_KEYS",
+    "updateExistingDatasetOnTemplateChange": false,
+    "preserveRawProperties": true,
+    "onImportLayerEnabled": "TARGET_GROUP_DEFAULT",
+    "onUnknownLayerEnabled": false,
+    "defaultGroupEnabled": true
+  },
+  "geometry": {
+    "categories": {
+      "POINT": [
+        "Point",
+        "MultiPoint"
+      ],
+      "LINE": [
+        "LineString",
+        "MultiLineString"
+      ],
+      "POLYGON": [
+        "Polygon",
+        "MultiPolygon"
+      ]
+    },
+    "geometryCollection": "RECURSIVE_SPLIT",
+    "maxCollectionDepth": 16,
+    "layerPartitionKeys": [
+      "sourceFileId",
+      "groupId",
+      "geometryType"
+    ],
+    "preserveProvenance": [
+      "sourceFileId",
+      "sourceFeatureIndex",
+      "sourceFeatureId",
+      "geometryPath"
+    ],
+    "preserveMultipartGeometry": true,
+    "invalidGeometryPolicy": "REPORT_ERROR_DO_NOT_RENDER"
+  },
+  "groups": [
+    {
+      "id": "polygon",
+      "parentId": null,
+      "name": "面要素",
+      "nodeType": "GEOMETRY_FOLDER",
+      "geometryType": "POLYGON",
+      "assignable": false,
+      "sortOrder": 10
+    },
+    {
+      "id": "line",
+      "parentId": null,
+      "name": "线要素",
+      "nodeType": "GEOMETRY_FOLDER",
+      "geometryType": "LINE",
+      "assignable": false,
+      "sortOrder": 20
+    },
+    {
+      "id": "admin",
+      "parentId": "polygon",
+      "name": "行政区划",
+      "nodeType": "BUSINESS_FOLDER",
+      "geometryType": "POLYGON",
+      "assignable": false,
+      "sortOrder": 10
+    },
+    {
+      "id": "building",
+      "parentId": "polygon",
+      "name": "建筑",
+      "nodeType": "BUSINESS_FOLDER",
+      "geometryType": "POLYGON",
+      "assignable": false,
+      "sortOrder": 20
+    },
+    {
+      "id": "land",
+      "parentId": "polygon",
+      "name": "土地利用",
+      "nodeType": "BUSINESS_FOLDER",
+      "geometryType": "POLYGON",
+      "assignable": false,
+      "sortOrder": 30
+    },
+    {
+      "id": "water",
+      "parentId": "polygon",
+      "name": "水体",
+      "nodeType": "BUSINESS_FOLDER",
+      "geometryType": "POLYGON",
+      "assignable": false,
+      "sortOrder": 40
+    },
+    {
+      "id": "road",
+      "parentId": "line",
+      "name": "道路路网",
+      "nodeType": "BUSINESS_FOLDER",
+      "geometryType": "LINE",
+      "assignable": false,
+      "sortOrder": 50
+    },
+    {
+      "id": "rail",
+      "parentId": "line",
+      "name": "铁路轨道",
+      "nodeType": "BUSINESS_FOLDER",
+      "geometryType": "LINE",
+      "assignable": false,
+      "sortOrder": 60
+    },
+    {
+      "id": "hydro",
+      "parentId": "line",
+      "name": "水道",
+      "nodeType": "BUSINESS_FOLDER",
+      "geometryType": "LINE",
+      "assignable": false,
+      "sortOrder": 70
+    },
+    {
+      "id": "admin-country",
+      "parentId": "admin",
+      "name": "国家",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-admin-country",
+      "defaultLayerEnabled": true,
+      "sortOrder": 10,
+      "sourceRows": [
+        2
+      ]
+    },
+    {
+      "id": "admin-province",
+      "parentId": "admin",
+      "name": "省",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-admin-province",
+      "defaultLayerEnabled": true,
+      "sortOrder": 20,
+      "sourceRows": [
+        3
+      ]
+    },
+    {
+      "id": "admin-city",
+      "parentId": "admin",
+      "name": "市",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-admin-city",
+      "defaultLayerEnabled": true,
+      "sortOrder": 30,
+      "sourceRows": [
+        4
+      ]
+    },
+    {
+      "id": "admin-county",
+      "parentId": "admin",
+      "name": "县",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-admin-county",
+      "defaultLayerEnabled": true,
+      "sortOrder": 40,
+      "sourceRows": [
+        5
+      ]
+    },
+    {
+      "id": "building-outline",
+      "parentId": "building",
+      "name": "不划分",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-building-outline",
+      "defaultLayerEnabled": true,
+      "sortOrder": 50,
+      "sourceRows": [
+        6
+      ]
+    },
+    {
+      "id": "land-urban",
+      "parentId": "land",
+      "name": "城镇建设用地",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-land-urban",
+      "defaultLayerEnabled": true,
+      "sortOrder": 60,
+      "sourceRows": [
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "id": "land-park",
+      "parentId": "land",
+      "name": "公园与休闲",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-land-park",
+      "defaultLayerEnabled": true,
+      "sortOrder": 70,
+      "sourceRows": [
+        11,
+        12
+      ]
+    },
+    {
+      "id": "land-forest",
+      "parentId": "land",
+      "name": "林草自然覆盖",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-land-forest",
+      "defaultLayerEnabled": true,
+      "sortOrder": 80,
+      "sourceRows": [
+        13,
+        14,
+        15,
+        16,
+        17
+      ]
+    },
+    {
+      "id": "land-farm",
+      "parentId": "land",
+      "name": "农业用地",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-land-farm",
+      "defaultLayerEnabled": true,
+      "sortOrder": 90,
+      "sourceRows": [
+        18,
+        19,
+        20,
+        21,
+        22
+      ]
+    },
+    {
+      "id": "land-reserve",
+      "parentId": "land",
+      "name": "自然保护",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-land-reserve",
+      "defaultLayerEnabled": true,
+      "sortOrder": 100,
+      "sourceRows": [
+        23
+      ]
+    },
+    {
+      "id": "land-special",
+      "parentId": "land",
+      "name": "特殊用途",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-land-special",
+      "defaultLayerEnabled": true,
+      "sortOrder": 110,
+      "sourceRows": [
+        24,
+        25,
+        26
+      ]
+    },
+    {
+      "id": "water-body",
+      "parentId": "water",
+      "name": "不划分",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-water-body",
+      "defaultLayerEnabled": true,
+      "sortOrder": 120,
+      "sourceRows": [
+        27,
+        28,
+        29,
+        30,
+        31
+      ]
+    },
+    {
+      "id": "road-motorway",
+      "parentId": "road",
+      "name": "高速公路",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-motorway",
+      "defaultLayerEnabled": true,
+      "sortOrder": 130,
+      "sourceRows": [
+        32
+      ]
+    },
+    {
+      "id": "road-trunk",
+      "parentId": "road",
+      "name": "干线公路",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-trunk",
+      "defaultLayerEnabled": true,
+      "sortOrder": 140,
+      "sourceRows": [
+        33
+      ]
+    },
+    {
+      "id": "road-primary",
+      "parentId": "road",
+      "name": "一级主干道路",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-primary",
+      "defaultLayerEnabled": true,
+      "sortOrder": 150,
+      "sourceRows": [
+        34
+      ]
+    },
+    {
+      "id": "road-secondary",
+      "parentId": "road",
+      "name": "二级主干道路",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-secondary",
+      "defaultLayerEnabled": true,
+      "sortOrder": 160,
+      "sourceRows": [
+        35
+      ]
+    },
+    {
+      "id": "road-tertiary",
+      "parentId": "road",
+      "name": "三级道路",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-tertiary",
+      "defaultLayerEnabled": true,
+      "sortOrder": 170,
+      "sourceRows": [
+        36
+      ]
+    },
+    {
+      "id": "road-local",
+      "parentId": "road",
+      "name": "次要道路",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-local",
+      "defaultLayerEnabled": true,
+      "sortOrder": 180,
+      "sourceRows": [
+        37,
+        38,
+        39,
+        40,
+        41
+      ]
+    },
+    {
+      "id": "road-link",
+      "parentId": "road",
+      "name": "道路连接线",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-link",
+      "defaultLayerEnabled": true,
+      "sortOrder": 190,
+      "sourceRows": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ]
+    },
+    {
+      "id": "road-service-track",
+      "parentId": "road",
+      "name": "小路及服务道路",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-service-track",
+      "defaultLayerEnabled": true,
+      "sortOrder": 200,
+      "sourceRows": [
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53
+      ]
+    },
+    {
+      "id": "road-path",
+      "parentId": "road",
+      "name": "步行及非机动车路径",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-path",
+      "defaultLayerEnabled": true,
+      "sortOrder": 210,
+      "sourceRows": [
+        54,
+        55,
+        56,
+        57,
+        58
+      ]
+    },
+    {
+      "id": "road-other",
+      "parentId": "road",
+      "name": "其他道路",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-road-other",
+      "defaultLayerEnabled": true,
+      "sortOrder": 220,
+      "sourceRows": [
+        59
+      ]
+    },
+    {
+      "id": "rail-main",
+      "parentId": "rail",
+      "name": "铁路",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-rail-main",
+      "defaultLayerEnabled": true,
+      "sortOrder": 230,
+      "sourceRows": [
+        60,
+        65,
+        66,
+        67
+      ]
+    },
+    {
+      "id": "rail-urban",
+      "parentId": "rail",
+      "name": "城市轨道交通",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-rail-urban",
+      "defaultLayerEnabled": true,
+      "sortOrder": 240,
+      "sourceRows": [
+        61,
+        62,
+        63,
+        64
+      ]
+    },
+    {
+      "id": "hydro-river",
+      "parentId": "hydro",
+      "name": "河流",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-hydro-river",
+      "defaultLayerEnabled": true,
+      "sortOrder": 250,
+      "sourceRows": [
+        68
+      ]
+    },
+    {
+      "id": "hydro-stream",
+      "parentId": "hydro",
+      "name": "溪流/小河",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-hydro-stream",
+      "defaultLayerEnabled": true,
+      "sortOrder": 260,
+      "sourceRows": [
+        69
+      ]
+    },
+    {
+      "id": "hydro-canal-drain",
+      "parentId": "hydro",
+      "name": "人工河道/沟渠",
+      "nodeType": "CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-hydro-canal-drain",
+      "defaultLayerEnabled": true,
+      "sortOrder": 270,
+      "sourceRows": [
+        70,
+        71
+      ]
+    },
+    {
+      "id": "unknown",
+      "parentId": null,
+      "name": "未知组",
+      "nodeType": "UNKNOWN_FOLDER",
+      "geometryType": null,
+      "assignable": false,
+      "sortOrder": 90
+    },
+    {
+      "id": "unknown-point",
+      "parentId": "unknown",
+      "name": "未知点图层",
+      "nodeType": "UNKNOWN_CLASSIFICATION",
+      "geometryType": "POINT",
+      "assignable": true,
+      "defaultStyleId": "style-unknown-point",
+      "defaultLayerEnabled": false,
+      "sortOrder": 10
+    },
+    {
+      "id": "unknown-line",
+      "parentId": "unknown",
+      "name": "未知线图层",
+      "nodeType": "UNKNOWN_CLASSIFICATION",
+      "geometryType": "LINE",
+      "assignable": true,
+      "defaultStyleId": "style-unknown-line",
+      "defaultLayerEnabled": false,
+      "sortOrder": 20
+    },
+    {
+      "id": "unknown-polygon",
+      "parentId": "unknown",
+      "name": "未知面图层",
+      "nodeType": "UNKNOWN_CLASSIFICATION",
+      "geometryType": "POLYGON",
+      "assignable": true,
+      "defaultStyleId": "style-unknown-polygon",
+      "defaultLayerEnabled": false,
+      "sortOrder": 30
+    }
+  ],
+  "classification": {
+    "evaluation": "EACH_FEATURE_GEOMETRY_PART_AT_IMPORT",
+    "strategy": "FIRST_MATCH",
+    "zoomIndependent": true,
+    "fieldRoot": "properties",
+    "fileNameDeterminesClassification": false,
+    "precedence": [
+      "EXPLICIT_MANUAL_LAYER_ASSIGNMENT",
+      "EXPLICIT_IMPORT_UNKNOWN",
+      "ORDERED_RULES",
+      "UNKNOWN_FALLBACK"
+    ],
+    "propertySemantics": {
+      "preserveOriginalValues": true,
+      "fclass": {
+        "acceptedType": "STRING",
+        "trim": true,
+        "case": "LOWER"
+      },
+      "id": {
+        "acceptedTypes": [
+          "STRING",
+          "INTEGER"
+        ],
+        "comparison": "DECIMAL_TEXT",
+        "trim": true
+      },
+      "code": {
+        "acceptedTypes": [
+          "INTEGER",
+          "DECIMAL_INTEGER_STRING"
+        ],
+        "comparison": "INTEGER"
+      },
+      "missingOrEmpty": [
+        "MISSING",
+        "NULL",
+        "TRIMMED_EMPTY_STRING"
+      ],
+      "notEqualDoesNotMatchMissing": true,
+      "regexMode": "FULL_STRING",
+      "allowedOperators": [
+        "and",
+        "or",
+        "not",
+        "eq",
+        "ne",
+        "in",
+        "regex",
+        "missingOrEmpty"
+      ],
+      "executeScripts": false,
+      "executeRawSql": false
+    },
+    "codeFclassConflict": "USE_RECOGNIZED_FCLASS_PRESERVE_CODE_RECORD_WARNING",
+    "unknownNonEmptyFclassWithKnownCode": "UNKNOWN_FALLBACK",
+    "administrativeIdConvention": "CN_SIX_DIGIT_PATTERN_NOT_CODE_REGISTRY_VALIDATION",
+    "rules": [
+      {
+        "id": "classify-admin-country",
+        "geometryType": "POLYGON",
+        "groupId": "admin-country",
+        "filter": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "missingOrEmpty",
+              "field": "osm_id"
+            },
+            {
+              "op": "missingOrEmpty",
+              "field": "fclass"
+            },
+            {
+              "op": "eq",
+              "field": "id",
+              "value": "100000"
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 2,
+            "code": null,
+            "fclass": null,
+            "name": "国家边界（当前浙江数据未提供）"
+          }
+        ]
+      },
+      {
+        "id": "classify-admin-province",
+        "geometryType": "POLYGON",
+        "groupId": "admin-province",
+        "filter": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "missingOrEmpty",
+              "field": "osm_id"
+            },
+            {
+              "op": "missingOrEmpty",
+              "field": "fclass"
+            },
+            {
+              "op": "regex",
+              "field": "id",
+              "value": "^[0-9]{2}0000$"
+            },
+            {
+              "op": "ne",
+              "field": "id",
+              "value": "100000"
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 3,
+            "code": null,
+            "fclass": null,
+            "name": "浙江省省域面（由市级面融合派生）"
+          }
+        ]
+      },
+      {
+        "id": "classify-admin-city",
+        "geometryType": "POLYGON",
+        "groupId": "admin-city",
+        "filter": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "missingOrEmpty",
+              "field": "osm_id"
+            },
+            {
+              "op": "missingOrEmpty",
+              "field": "fclass"
+            },
+            {
+              "op": "regex",
+              "field": "id",
+              "value": "^[0-9]{4}00$"
+            },
+            {
+              "op": "not",
+              "condition": {
+                "op": "regex",
+                "field": "id",
+                "value": "^[0-9]{2}0000$"
+              }
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 4,
+            "code": null,
+            "fclass": null,
+            "name": "地级市行政区面"
+          }
+        ]
+      },
+      {
+        "id": "classify-admin-county",
+        "geometryType": "POLYGON",
+        "groupId": "admin-county",
+        "filter": {
+          "op": "and",
+          "conditions": [
+            {
+              "op": "missingOrEmpty",
+              "field": "osm_id"
+            },
+            {
+              "op": "missingOrEmpty",
+              "field": "fclass"
+            },
+            {
+              "op": "regex",
+              "field": "id",
+              "value": "^[0-9]{6}$"
+            },
+            {
+              "op": "not",
+              "condition": {
+                "op": "regex",
+                "field": "id",
+                "value": "^[0-9]{4}00$"
+              }
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 5,
+            "code": null,
+            "fclass": null,
+            "name": "县、县级市及市辖区（当前数据未提供）"
+          }
+        ]
+      },
+      {
+        "id": "classify-building-outline",
+        "geometryType": "POLYGON",
+        "groupId": "building-outline",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "building"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    1500
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 6,
+            "code": 1500,
+            "fclass": "building",
+            "name": "建筑轮廓"
+          }
+        ]
+      },
+      {
+        "id": "classify-land-urban",
+        "geometryType": "POLYGON",
+        "groupId": "land-urban",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "residential",
+                "industrial",
+                "commercial",
+                "retail"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    7203,
+                    7204,
+                    7209,
+                    7212
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 7,
+            "code": 7203,
+            "fclass": "residential",
+            "name": "居住用地"
+          },
+          {
+            "sourceRow": 8,
+            "code": 7204,
+            "fclass": "industrial",
+            "name": "工业用地"
+          },
+          {
+            "sourceRow": 9,
+            "code": 7209,
+            "fclass": "commercial",
+            "name": "商业用地"
+          },
+          {
+            "sourceRow": 10,
+            "code": 7212,
+            "fclass": "retail",
+            "name": "零售商业用地"
+          }
+        ]
+      },
+      {
+        "id": "classify-land-park",
+        "geometryType": "POLYGON",
+        "groupId": "land-park",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "park",
+                "recreation_ground"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    7202,
+                    7211
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 11,
+            "code": 7202,
+            "fclass": "park",
+            "name": "公园"
+          },
+          {
+            "sourceRow": 12,
+            "code": 7211,
+            "fclass": "recreation_ground",
+            "name": "休闲活动场地"
+          }
+        ]
+      },
+      {
+        "id": "classify-land-forest",
+        "geometryType": "POLYGON",
+        "groupId": "land-forest",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "forest",
+                "scrub",
+                "grass",
+                "heath",
+                "meadow"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    7201,
+                    7217,
+                    7218,
+                    7219,
+                    7208
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 13,
+            "code": 7201,
+            "fclass": "forest",
+            "name": "森林/林地"
+          },
+          {
+            "sourceRow": 14,
+            "code": 7217,
+            "fclass": "scrub",
+            "name": "灌丛"
+          },
+          {
+            "sourceRow": 15,
+            "code": 7218,
+            "fclass": "grass",
+            "name": "草地"
+          },
+          {
+            "sourceRow": 16,
+            "code": 7219,
+            "fclass": "heath",
+            "name": "石南荒原/荒灌地"
+          },
+          {
+            "sourceRow": 17,
+            "code": 7208,
+            "fclass": "meadow",
+            "name": "草甸"
+          }
+        ]
+      },
+      {
+        "id": "classify-land-farm",
+        "geometryType": "POLYGON",
+        "groupId": "land-farm",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "farmland",
+                "farmyard",
+                "orchard",
+                "vineyard",
+                "allotments"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    7229,
+                    7228,
+                    7215,
+                    7216,
+                    7207
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 18,
+            "code": 7229,
+            "fclass": "farmland",
+            "name": "农田"
+          },
+          {
+            "sourceRow": 19,
+            "code": 7228,
+            "fclass": "farmyard",
+            "name": "农场场院"
+          },
+          {
+            "sourceRow": 20,
+            "code": 7215,
+            "fclass": "orchard",
+            "name": "果园"
+          },
+          {
+            "sourceRow": 21,
+            "code": 7216,
+            "fclass": "vineyard",
+            "name": "葡萄园"
+          },
+          {
+            "sourceRow": 22,
+            "code": 7207,
+            "fclass": "allotments",
+            "name": "园圃/市民农园"
+          }
+        ]
+      },
+      {
+        "id": "classify-land-reserve",
+        "geometryType": "POLYGON",
+        "groupId": "land-reserve",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "nature_reserve"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    7210
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 23,
+            "code": 7210,
+            "fclass": "nature_reserve",
+            "name": "自然保护地"
+          }
+        ]
+      },
+      {
+        "id": "classify-land-special",
+        "geometryType": "POLYGON",
+        "groupId": "land-special",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "cemetery",
+                "military",
+                "quarry"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    7206,
+                    7213,
+                    7214
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 24,
+            "code": 7206,
+            "fclass": "cemetery",
+            "name": "墓地"
+          },
+          {
+            "sourceRow": 25,
+            "code": 7213,
+            "fclass": "military",
+            "name": "军事用地"
+          },
+          {
+            "sourceRow": 26,
+            "code": 7214,
+            "fclass": "quarry",
+            "name": "采石场/采掘用地"
+          }
+        ]
+      },
+      {
+        "id": "classify-water-body",
+        "geometryType": "POLYGON",
+        "groupId": "water-body",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "water",
+                "reservoir",
+                "riverbank",
+                "dock",
+                "wetland"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    8200,
+                    8201,
+                    8202,
+                    8203,
+                    8221
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 27,
+            "code": 8200,
+            "fclass": "water",
+            "name": "一般水体"
+          },
+          {
+            "sourceRow": 28,
+            "code": 8201,
+            "fclass": "reservoir",
+            "name": "水库"
+          },
+          {
+            "sourceRow": 29,
+            "code": 8202,
+            "fclass": "riverbank",
+            "name": "河道水面/河岸围合水体"
+          },
+          {
+            "sourceRow": 30,
+            "code": 8203,
+            "fclass": "dock",
+            "name": "船坞/港池"
+          },
+          {
+            "sourceRow": 31,
+            "code": 8221,
+            "fclass": "wetland",
+            "name": "湿地"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-motorway",
+        "geometryType": "LINE",
+        "groupId": "road-motorway",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "motorway"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5111
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 32,
+            "code": 5111,
+            "fclass": "motorway",
+            "name": "高速公路"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-trunk",
+        "geometryType": "LINE",
+        "groupId": "road-trunk",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "trunk"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5112
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 33,
+            "code": 5112,
+            "fclass": "trunk",
+            "name": "干线公路"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-primary",
+        "geometryType": "LINE",
+        "groupId": "road-primary",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "primary"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5113
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 34,
+            "code": 5113,
+            "fclass": "primary",
+            "name": "一级主干道路"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-secondary",
+        "geometryType": "LINE",
+        "groupId": "road-secondary",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "secondary"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5114
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 35,
+            "code": 5114,
+            "fclass": "secondary",
+            "name": "二级主干道路"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-tertiary",
+        "geometryType": "LINE",
+        "groupId": "road-tertiary",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "tertiary"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5115
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 36,
+            "code": 5115,
+            "fclass": "tertiary",
+            "name": "三级道路"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-local",
+        "geometryType": "LINE",
+        "groupId": "road-local",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "unclassified",
+                "residential",
+                "living_street",
+                "pedestrian",
+                "busway"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5121,
+                    5122,
+                    5123,
+                    5124,
+                    5125
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 37,
+            "code": 5121,
+            "fclass": "unclassified",
+            "name": "未分级普通道路"
+          },
+          {
+            "sourceRow": 38,
+            "code": 5122,
+            "fclass": "residential",
+            "name": "居住区道路"
+          },
+          {
+            "sourceRow": 39,
+            "code": 5123,
+            "fclass": "living_street",
+            "name": "生活街区道路"
+          },
+          {
+            "sourceRow": 40,
+            "code": 5124,
+            "fclass": "pedestrian",
+            "name": "步行街/步行区道路"
+          },
+          {
+            "sourceRow": 41,
+            "code": 5125,
+            "fclass": "busway",
+            "name": "公交专用道"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-link",
+        "geometryType": "LINE",
+        "groupId": "road-link",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "motorway_link",
+                "trunk_link",
+                "primary_link",
+                "secondary_link",
+                "tertiary_link"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5131,
+                    5132,
+                    5133,
+                    5134,
+                    5135
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 42,
+            "code": 5131,
+            "fclass": "motorway_link",
+            "name": "高速连接匝道"
+          },
+          {
+            "sourceRow": 43,
+            "code": 5132,
+            "fclass": "trunk_link",
+            "name": "干线连接匝道"
+          },
+          {
+            "sourceRow": 44,
+            "code": 5133,
+            "fclass": "primary_link",
+            "name": "一级道路连接匝道"
+          },
+          {
+            "sourceRow": 45,
+            "code": 5134,
+            "fclass": "secondary_link",
+            "name": "二级道路连接匝道"
+          },
+          {
+            "sourceRow": 46,
+            "code": 5135,
+            "fclass": "tertiary_link",
+            "name": "三级道路连接匝道"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-service-track",
+        "geometryType": "LINE",
+        "groupId": "road-service-track",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "service",
+                "track",
+                "track_grade1",
+                "track_grade2",
+                "track_grade3",
+                "track_grade4",
+                "track_grade5"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5141,
+                    5142,
+                    5143,
+                    5144,
+                    5145,
+                    5146,
+                    5147
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 47,
+            "code": 5141,
+            "fclass": "service",
+            "name": "服务/内部道路"
+          },
+          {
+            "sourceRow": 48,
+            "code": 5142,
+            "fclass": "track",
+            "name": "机耕道/土路/轨迹道路（未细分等级）"
+          },
+          {
+            "sourceRow": 49,
+            "code": 5143,
+            "fclass": "track_grade1",
+            "name": "1级 track（路面较坚实）"
+          },
+          {
+            "sourceRow": 50,
+            "code": 5144,
+            "fclass": "track_grade2",
+            "name": "2级 track"
+          },
+          {
+            "sourceRow": 51,
+            "code": 5145,
+            "fclass": "track_grade3",
+            "name": "3级 track"
+          },
+          {
+            "sourceRow": 52,
+            "code": 5146,
+            "fclass": "track_grade4",
+            "name": "4级 track"
+          },
+          {
+            "sourceRow": 53,
+            "code": 5147,
+            "fclass": "track_grade5",
+            "name": "5级 track（路况较弱）"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-path",
+        "geometryType": "LINE",
+        "groupId": "road-path",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "bridleway",
+                "cycleway",
+                "footway",
+                "path",
+                "steps"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5151,
+                    5152,
+                    5153,
+                    5154,
+                    5155
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 54,
+            "code": 5151,
+            "fclass": "bridleway",
+            "name": "骑马道"
+          },
+          {
+            "sourceRow": 55,
+            "code": 5152,
+            "fclass": "cycleway",
+            "name": "自行车道"
+          },
+          {
+            "sourceRow": 56,
+            "code": 5153,
+            "fclass": "footway",
+            "name": "人行道/步道"
+          },
+          {
+            "sourceRow": 57,
+            "code": 5154,
+            "fclass": "path",
+            "name": "未指定用途的小径"
+          },
+          {
+            "sourceRow": 58,
+            "code": 5155,
+            "fclass": "steps",
+            "name": "台阶"
+          }
+        ]
+      },
+      {
+        "id": "classify-road-other",
+        "geometryType": "LINE",
+        "groupId": "road-other",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "unknown"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    5199
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 59,
+            "code": 5199,
+            "fclass": "unknown",
+            "name": "未知道路类型"
+          }
+        ]
+      },
+      {
+        "id": "classify-rail-main",
+        "geometryType": "LINE",
+        "groupId": "rail-main",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "rail",
+                "narrow_gauge",
+                "miniature_railway",
+                "funicular"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    6101,
+                    6106,
+                    6107,
+                    6108
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 60,
+            "code": 6101,
+            "fclass": "rail",
+            "name": "普通铁路"
+          },
+          {
+            "sourceRow": 65,
+            "code": 6106,
+            "fclass": "narrow_gauge",
+            "name": "窄轨铁路"
+          },
+          {
+            "sourceRow": 66,
+            "code": 6107,
+            "fclass": "miniature_railway",
+            "name": "微型铁路"
+          },
+          {
+            "sourceRow": 67,
+            "code": 6108,
+            "fclass": "funicular",
+            "name": "缆索铁路"
+          }
+        ]
+      },
+      {
+        "id": "classify-rail-urban",
+        "geometryType": "LINE",
+        "groupId": "rail-urban",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "light_rail",
+                "subway",
+                "tram",
+                "monorail"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    6102,
+                    6103,
+                    6104,
+                    6105
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 61,
+            "code": 6102,
+            "fclass": "light_rail",
+            "name": "轻轨"
+          },
+          {
+            "sourceRow": 62,
+            "code": 6103,
+            "fclass": "subway",
+            "name": "地铁"
+          },
+          {
+            "sourceRow": 63,
+            "code": 6104,
+            "fclass": "tram",
+            "name": "有轨电车"
+          },
+          {
+            "sourceRow": 64,
+            "code": 6105,
+            "fclass": "monorail",
+            "name": "单轨"
+          }
+        ]
+      },
+      {
+        "id": "classify-hydro-river",
+        "geometryType": "LINE",
+        "groupId": "hydro-river",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "river"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    8101
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 68,
+            "code": 8101,
+            "fclass": "river",
+            "name": "河流"
+          }
+        ]
+      },
+      {
+        "id": "classify-hydro-stream",
+        "geometryType": "LINE",
+        "groupId": "hydro-stream",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "stream"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    8102
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 69,
+            "code": 8102,
+            "fclass": "stream",
+            "name": "溪流/小河"
+          }
+        ]
+      },
+      {
+        "id": "classify-hydro-canal-drain",
+        "geometryType": "LINE",
+        "groupId": "hydro-canal-drain",
+        "filter": {
+          "op": "or",
+          "conditions": [
+            {
+              "op": "in",
+              "field": "fclass",
+              "value": [
+                "canal",
+                "drain"
+              ]
+            },
+            {
+              "op": "and",
+              "conditions": [
+                {
+                  "op": "missingOrEmpty",
+                  "field": "fclass"
+                },
+                {
+                  "op": "in",
+                  "field": "code",
+                  "value": [
+                    8103,
+                    8104
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "sourceClasses": [
+          {
+            "sourceRow": 70,
+            "code": 8103,
+            "fclass": "canal",
+            "name": "人工运河/渠道"
+          },
+          {
+            "sourceRow": 71,
+            "code": 8104,
+            "fclass": "drain",
+            "name": "排水沟/排水渠"
+          }
+        ]
+      }
+    ],
+    "fallbackGroupByGeometry": {
+      "POINT": "unknown-point",
+      "LINE": "unknown-line",
+      "POLYGON": "unknown-polygon"
+    }
+  },
+  "styles": [
+    {
+      "id": "style-admin-country",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 3,
+      "maxZoom": 22,
+      "renderOrder": 30,
+      "symbol": {
+        "fillColor": "#7c8da6",
+        "fillOpacity": 0.05,
+        "strokeColor": "#7c8da6",
+        "strokeWidth": 1,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": "id",
+        "minZoom": 7,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-admin-province",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 5,
+      "maxZoom": 22,
+      "renderOrder": 30,
+      "symbol": {
+        "fillColor": "#7c8da6",
+        "fillOpacity": 0.05,
+        "strokeColor": "#7c8da6",
+        "strokeWidth": 1,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": "id",
+        "minZoom": 7,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-admin-city",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 6,
+      "maxZoom": 22,
+      "renderOrder": 30,
+      "symbol": {
+        "fillColor": "#8b9bb1",
+        "fillOpacity": 0.05,
+        "strokeColor": "#8b9bb1",
+        "strokeWidth": 1,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": "id",
+        "minZoom": 7,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-admin-county",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 9,
+      "maxZoom": 22,
+      "renderOrder": 30,
+      "symbol": {
+        "fillColor": "#a0adbd",
+        "fillOpacity": 0.05,
+        "strokeColor": "#a0adbd",
+        "strokeWidth": 1,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": "id",
+        "minZoom": 7,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-building-outline",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 15,
+      "maxZoom": 22,
+      "renderOrder": 50,
+      "symbol": {
+        "fillColor": "#b4becb",
+        "fillOpacity": 0.58,
+        "strokeColor": "#b4becb",
+        "strokeWidth": 0.6,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "GRID_BELOW_ZOOM",
+        "gridPixels": 36,
+        "belowZoom": 16
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-land-urban",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 12,
+      "maxZoom": 22,
+      "renderOrder": 10,
+      "symbol": {
+        "fillColor": "#d3cdc3",
+        "fillOpacity": 0.58,
+        "strokeColor": "#d3cdc3",
+        "strokeWidth": 0.6,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-land-park",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 10,
+      "maxZoom": 22,
+      "renderOrder": 10,
+      "symbol": {
+        "fillColor": "#91b49b",
+        "fillOpacity": 0.58,
+        "strokeColor": "#91b49b",
+        "strokeWidth": 0.6,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-land-forest",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 8,
+      "maxZoom": 22,
+      "renderOrder": 10,
+      "symbol": {
+        "fillColor": "#8cab91",
+        "fillOpacity": 0.58,
+        "strokeColor": "#8cab91",
+        "strokeWidth": 0.6,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-land-farm",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 10,
+      "maxZoom": 22,
+      "renderOrder": 10,
+      "symbol": {
+        "fillColor": "#bdc5a2",
+        "fillOpacity": 0.58,
+        "strokeColor": "#bdc5a2",
+        "strokeWidth": 0.6,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-land-reserve",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 7,
+      "maxZoom": 22,
+      "renderOrder": 10,
+      "symbol": {
+        "fillColor": "#95b5a3",
+        "fillOpacity": 0.58,
+        "strokeColor": "#95b5a3",
+        "strokeWidth": 0.6,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-land-special",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 13,
+      "maxZoom": 22,
+      "renderOrder": 10,
+      "symbol": {
+        "fillColor": "#c6bdb2",
+        "fillOpacity": 0.58,
+        "strokeColor": "#c6bdb2",
+        "strokeWidth": 0.6,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-water-body",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "minZoom": 8,
+      "maxZoom": 22,
+      "renderOrder": 20,
+      "symbol": {
+        "fillColor": "#97c3d9",
+        "fillOpacity": 0.58,
+        "strokeColor": "#97c3d9",
+        "strokeWidth": 0.6,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": [
+        {
+          "id": "riverbank-detail",
+          "filter": {
+            "op": "in",
+            "field": "fclass",
+            "value": [
+              "riverbank"
+            ]
+          },
+          "minZoom": 9,
+          "maxZoom": 22,
+          "symbol": {
+            "fillColor": "#8dbbd2",
+            "strokeColor": "#8dbbd2"
+          }
+        },
+        {
+          "id": "wetland-detail",
+          "filter": {
+            "op": "in",
+            "field": "fclass",
+            "value": [
+              "wetland"
+            ]
+          },
+          "minZoom": 11,
+          "maxZoom": 22,
+          "symbol": {
+            "fillColor": "#9bbcb4",
+            "strokeColor": "#9bbcb4"
+          }
+        },
+        {
+          "id": "dock-detail",
+          "filter": {
+            "op": "in",
+            "field": "fclass",
+            "value": [
+              "dock"
+            ]
+          },
+          "minZoom": 13,
+          "maxZoom": 22,
+          "symbol": {
+            "fillColor": "#a3c5d5",
+            "strokeColor": "#a3c5d5"
+          }
+        }
+      ]
+    },
+    {
+      "id": "style-road-motorway",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 6,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#e4b262",
+        "width": 2.2,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-road-trunk",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 8,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#e7c38b",
+        "width": 1.5,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-road-primary",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 10,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#cdbb98",
+        "width": 1.5,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-road-secondary",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 11,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#c8bea8",
+        "width": 1.2,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-road-tertiary",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 12,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#b9b5a6",
+        "width": 1,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-road-local",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 14,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#bcc5d2",
+        "width": 1,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": [
+        {
+          "id": "pedestrian-detail",
+          "filter": {
+            "op": "in",
+            "field": "fclass",
+            "value": [
+              "pedestrian"
+            ]
+          },
+          "minZoom": 16,
+          "maxZoom": 22,
+          "symbol": {
+            "color": "#c4b6ac",
+            "width": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "style-road-link",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 10,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#cdbb98",
+        "width": 1.2,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": [
+        {
+          "id": "local-road-links",
+          "filter": {
+            "op": "in",
+            "field": "fclass",
+            "value": [
+              "primary_link",
+              "secondary_link",
+              "tertiary_link"
+            ]
+          },
+          "minZoom": 12,
+          "maxZoom": 22,
+          "symbol": {
+            "color": "#cdbb98",
+            "width": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "style-road-service-track",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 15,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#c9d0d9",
+        "width": 1,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": [
+        {
+          "id": "track-detail",
+          "filter": {
+            "op": "in",
+            "field": "fclass",
+            "value": [
+              "track",
+              "track_grade1",
+              "track_grade2",
+              "track_grade3",
+              "track_grade4",
+              "track_grade5"
+            ]
+          },
+          "minZoom": 16,
+          "maxZoom": 22,
+          "symbol": {
+            "color": "#b5b19e",
+            "width": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "style-road-path",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 16,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#c4b6ac",
+        "width": 1,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-road-other",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 15,
+      "maxZoom": 22,
+      "renderOrder": 60,
+      "symbol": {
+        "color": "#c4c6c9",
+        "width": 1,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-rail-main",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 7,
+      "maxZoom": 22,
+      "renderOrder": 70,
+      "symbol": {
+        "color": "#7e8a9b",
+        "width": 1.1,
+        "opacity": 1,
+        "dashArray": [
+          4,
+          3
+        ]
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": [
+        {
+          "id": "special-rail-detail",
+          "filter": {
+            "op": "in",
+            "field": "fclass",
+            "value": [
+              "narrow_gauge",
+              "miniature_railway",
+              "funicular"
+            ]
+          },
+          "minZoom": 14,
+          "maxZoom": 22,
+          "symbol": {
+            "color": "#9f97a9",
+            "width": 1.1
+          }
+        }
+      ]
+    },
+    {
+      "id": "style-rail-urban",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 11,
+      "maxZoom": 22,
+      "renderOrder": 70,
+      "symbol": {
+        "color": "#917e9f",
+        "width": 1.1,
+        "opacity": 1,
+        "dashArray": [
+          4,
+          3
+        ]
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-hydro-river",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 8,
+      "maxZoom": 22,
+      "renderOrder": 40,
+      "symbol": {
+        "color": "#6ba9ce",
+        "width": 1.5,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-hydro-stream",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 13,
+      "maxZoom": 22,
+      "renderOrder": 40,
+      "symbol": {
+        "color": "#94bfd3",
+        "width": 1,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-hydro-canal-drain",
+      "geometryType": "LINE",
+      "enabled": true,
+      "minZoom": 11,
+      "maxZoom": 22,
+      "renderOrder": 40,
+      "symbol": {
+        "color": "#83b4cf",
+        "width": 1.5,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": true,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": [
+        {
+          "id": "drain-detail",
+          "filter": {
+            "op": "in",
+            "field": "fclass",
+            "value": [
+              "drain"
+            ]
+          },
+          "minZoom": 15,
+          "maxZoom": 22,
+          "symbol": {
+            "color": "#a2c4d3",
+            "width": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "style-unknown-point",
+      "geometryType": "POINT",
+      "enabled": false,
+      "minZoom": 12,
+      "maxZoom": 22,
+      "renderOrder": 90,
+      "symbol": {
+        "color": "#b2927c",
+        "radius": 6,
+        "opacity": 1,
+        "strokeColor": "#b2927c",
+        "strokeWidth": 0
+      },
+      "labels": {
+        "enabled": false,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "GRID",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-unknown-line",
+      "geometryType": "LINE",
+      "enabled": false,
+      "minZoom": 14,
+      "maxZoom": 22,
+      "renderOrder": 90,
+      "symbol": {
+        "color": "#b2927c",
+        "width": 1.5,
+        "opacity": 1
+      },
+      "labels": {
+        "enabled": false,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    },
+    {
+      "id": "style-unknown-polygon",
+      "geometryType": "POLYGON",
+      "enabled": false,
+      "minZoom": 14,
+      "maxZoom": 22,
+      "renderOrder": 90,
+      "symbol": {
+        "fillColor": "#b2927c",
+        "fillOpacity": 0.58,
+        "strokeColor": "#b2927c",
+        "strokeWidth": 1,
+        "strokeOpacity": 1
+      },
+      "labels": {
+        "enabled": false,
+        "field": "name",
+        "fallbackField": null,
+        "minZoom": 13,
+        "collisionAvoidance": true
+      },
+      "aggregation": {
+        "mode": "DENSITY_BUDGET_ONLY",
+        "gridPixels": 36
+      },
+      "overrides": []
+    }
+  ],
+  "styleResolution": {
+    "precedence": [
+      "LAYER_CUSTOM_STYLE",
+      "GROUP_DEFAULT_STYLE"
+    ],
+    "groupOverride": {
+      "evaluation": "FIRST_MATCH",
+      "patchMode": "MERGE_WITH_BASE_SYMBOL",
+      "scope": "AUTOMATIC_GROUP_ASSIGNMENTS_ONLY"
+    },
+    "manualGroupAssignment": "INHERIT_TARGET_BASE_STYLE_OR_KEEP_EXPLICIT_CUSTOM_STYLE",
+    "layerCustomStyleReplacesGroupZoomBounds": true,
+    "zoomInterval": "MIN_INCLUSIVE_MAX_EXCLUSIVE",
+    "ancestorsMustBeEnabled": true,
+    "noMatchingVisibleStyle": "DO_NOT_FETCH_GEOMETRY",
+    "unknownWithoutExplicitConfiguration": "DO_NOT_FETCH_GEOMETRY",
+    "groupVisibilityIncludesLeaf": true
+  },
+  "unknownPolicy": {
+    "groupId": "unknown",
+    "defaultLayerEnabled": false,
+    "requireExplicitStyleConfigurationBeforeDisplay": true,
+    "automaticReclassification": false,
+    "allowImportDirectlyToUnknown": true,
+    "forceUnknownBypassesClassification": true,
+    "unknownPointIsNotRecognizedPoi": true,
+    "inheritUnknownDefaultStyle": false
+  },
+  "manualLayerPolicy": {
+    "allowMoveWithinDataset": true,
+    "targetNodes": "ASSIGNABLE_CLASSIFICATION_ONLY",
+    "requireSameDataset": true,
+    "requireSameGeometryType": true,
+    "mixedGeometryMustBePartitionedBeforeMove": true,
+    "styleModes": [
+      "INHERIT_TARGET_GROUP",
+      "CUSTOM"
+    ],
+    "allowCustomStyleWhileRemainingUnknown": true,
+    "configurableFields": [
+      "enabled",
+      "minZoom",
+      "maxZoom",
+      "symbol"
+    ],
+    "customStyleBounds": {
+      "minZoom": 0,
+      "maxStartZoom": 18,
+      "maxZoom": 22,
+      "minLessThanMax": true
+    },
+    "preserveOriginalProperties": true,
+    "preserveSourceReferences": true,
+    "modifyOriginalFiles": false,
+    "reparseSourceOnMove": false,
+    "rerunClassificationOnMove": false,
+    "affectOtherLayers": false,
+    "globalRenderPolicyOverridable": false,
+    "applyGroupAndStyleUpdateAtomically": true,
+    "onCancel": "DISCARD_DRAFT",
+    "mergeLayersOnMove": false,
+    "symbolFieldsByGeometry": {
+      "POINT": ["color", "radius", "opacity", "strokeColor", "strokeWidth"],
+      "LINE": ["color", "width", "opacity", "dashArray"],
+      "POLYGON": ["fillColor", "fillOpacity", "strokeColor", "strokeWidth", "strokeOpacity"]
+    },
+    "symbolConstraints": {
+      "colorPattern": "^#[0-9a-fA-F]{6}$",
+      "opacity": {"min": 0, "max": 1},
+      "sizePixels": {"min": 0.5, "max": 12},
+      "strokeWidthPixels": {"min": 0, "max": 12}
+    }
+  },
+  "renderPolicy": {
+    "requireViewport": true,
+    "requireZoom": true,
+    "viewportIncludes": [
+      "bbox",
+      "widthPixels",
+      "heightPixels"
+    ],
+    "minZoom": 0,
+    "maxZoom": 18,
+    "queryMode": "VIEWPORT_OR_VECTOR_TILE_ONLY",
+    "applyClassificationAndStyleFiltersBeforeGeometryFetch": true,
+    "visibilityPredicate": "GROUP_AND_ALL_ANCESTORS_ENABLED_AND_LAYER_ENABLED_AND_STYLE_CONFIGURED_AND_MIN_ZOOM_LE_ZOOM_LT_MAX_ZOOM",
+    "styleZoomSource": "REQUEST_CONTINUOUS_ZOOM",
+    "allowFullDatasetGeometryLoad": false,
+    "allowFullSampleGeometryPreview": false,
+    "onNoVisibleFeatures": "EMPTY_RESPONSE_NO_UNFILTERED_FALLBACK",
+    "onBudgetExceeded": "INCREASE_AGGREGATION_OR_GENERALIZATION_NO_RAW_FALLBACK",
+    "onAggregationUnavailable": "REPORT_UNAVAILABLE_DO_NOT_FETCH_RAW",
+    "densityBudget": {
+      "scope": "WHOLE_VIEWPORT_ACROSS_ALL_ENABLED_LAYERS",
+      "pixelSpace": "CSS_PIXELS",
+      "formula": "CLAMP(FLOOR(widthPixels * heightPixels / pixelsPerObject), minObjects, maxObjects)",
+      "pixelsPerObject": 800,
+      "minObjects": 32,
+      "maxObjects": 600,
+      "includeLayerCustomStyles": true,
+      "countAggregatesAsOneDisplayObject": true
+    },
+    "pixelFilters": {
+      "polygonMinAreaPixels": 3,
+      "polygonExemptGroupParentIds": [
+        "admin"
+      ],
+      "lineMinProjectedLengthPixels": 1.5
+    },
+    "aggregation": {
+      "gridPixels": 36,
+      "adaptiveGrid": true,
+      "coarsenUntilWithinBudget": true,
+      "groupBy": [
+        "groupId"
+      ],
+      "preserveUnderlyingMembers": true
+    },
+    "generalization": {
+      "space": "SCREEN_PIXELS",
+      "maxErrorPixels": 1,
+      "preserveTopology": true,
+      "preserveSourceGeometry": true
+    },
+    "labels": {
+      "collisionAvoidance": true,
+      "fontSizePixels": 11,
+      "pixelsPerLabel": 7000,
+      "maxCountFormula": "CEIL(widthPixels * heightPixels / pixelsPerLabel)"
+    },
+    "cacheIdentityFields": [
+      "datasetId",
+      "datasetStyleVersion",
+      "dataVersion",
+      "layerAssignmentVersion",
+      "customStyleVersion",
+      "enabledGroupIds",
+      "enabledLayerIds",
+      "displayZoom",
+      "tileOrViewport",
+      "viewportBudget"
+    ]
+  },
+  "derivations": [
+    {
+      "id": "province-from-cities",
+      "enabled": false,
+      "sourceGroupId": "admin-city",
+      "targetGroupId": "admin-province",
+      "operation": "DISSOLVE_BY_ADMIN_CODE_PREFIX",
+      "sourceIdField": "id",
+      "prefixLength": 2,
+      "outputIdSuffix": "0000",
+      "requireCompleteAdministrativeCoverage": true,
+      "incompleteCoveragePolicy": "SKIP_AND_REPORT",
+      "missingNamePolicy": "KEEP_NULL_USE_ID_FOR_LABEL",
+      "description": "映射表中的省域面为市级面融合派生项；须单独实现并显式启用，不在导入时自动制造省界。"
+    }
+  ]
+}
+

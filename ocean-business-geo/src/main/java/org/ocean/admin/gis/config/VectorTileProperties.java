@@ -1,6 +1,5 @@
 package org.ocean.admin.gis.config;
 
-import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
@@ -15,10 +14,6 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties(prefix = "gis.vector.tiles")
 public class VectorTileProperties {
-    @Min(8) @Max(128)
-    private int gridPixels = 64;
-    @Min(0) @Max(22)
-    private int maxZoom = 22;
     @Positive
     private int maxTileBytes = 2 * 1024 * 1024;
     @Min(1) @Max(16)
@@ -35,6 +30,4 @@ public class VectorTileProperties {
     private int tileCacheTtlSeconds = 120;
     @Positive
     private int maxCachedTiles = 64;
-    @AssertTrue(message = "gridPixels 必须整除256，以保证跨瓦片聚合网格一致")
-    public boolean isGridAligned() { return gridPixels > 0 && 256 % gridPixels == 0; }
 }

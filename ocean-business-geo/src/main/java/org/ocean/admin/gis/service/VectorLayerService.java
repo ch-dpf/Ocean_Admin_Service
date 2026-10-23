@@ -7,6 +7,7 @@ import org.ocean.admin.gis.entity.GisVectorFeature;
 import org.ocean.admin.gis.entity.GisVectorLayer;
 import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.util.GeoJsonFeatureReader;
+import org.ocean.admin.gis.util.VectorTemplateRules;
 import org.ocean.admin.gis.vo.GisVectorVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.http.HttpStatus;
@@ -31,11 +32,15 @@ public class VectorLayerService {
     private final GisVectorMapper mapper;
     private final ObjectMapper json;
     private final GeoJsonFeatureReader reader;
+    private final VectorTemplateRules templateRules;
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
-    public PageResult<List<GisVectorVO.Layer>> page(Long dataSetId, int current, int size) {
+    public PageResult<List<GisVectorVO.Layer>> page(Long dataSetId, Long groupId, Long sourceFileId, int current, int size) {
         if (current < 1 || size < 1 || size > 100 || (dataSetId != null && dataSetId < 1)) throw badRequest("页码须大于0，每页1至100条");
-        Page<GisVectorLayer> page = mapper.pageLayers(new Page<>(current, size), dataSetId);
+        if (groupId != null && (dataSetId == null || groupId < 1 || mapper.group(dataSetId, groupId) == null))
+            throw badRequest("分组查询须指定正确的数据集及分组");
+        if (sourceFileId != null && sourceFileId < 1) throw badRequest("来源文件ID无效");
+        Page<GisVectorLayer> page = mapper.pageLayers(new Page<>(current, size), dataSetId, groupId, sourceFileId);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords().stream().map(this::toVO).toList());
     }
 
@@ -54,7 +59,7 @@ public class VectorLayerService {
         boolean more = false;
         long last = after;
         for (GisVectorFeature row : rows) {
-            long rowBytes = row.getGeometryJson().getBytes(StandardCharsets.UTF_8).length
+            long rowBytes = (row.getGeometryJson() == null ? 0 : row.getGeometryJson().getBytes(StandardCharsets.UTF_8).length)
                     + (row.getPropertiesJson() == null ? 4 : row.getPropertiesJson().getBytes(StandardCharsets.UTF_8).length) + 256L;
             if (features.size() == limit || (bytes + rowBytes > MAX_PAGE_BYTES && !features.isEmpty())) { more = true; break; }
             features.add(toFeature(row));
@@ -73,22 +78,25 @@ public class VectorLayerService {
 
     @Transactional(rollbackFor = Exception.class)
     public GisVectorVO.Feature createFeature(Long layerId, JsonNode body) {
-        ready(layerId, true);
+        GisVectorLayer layer = ready(layerId, true);
         GisVectorFeature feature = parsedFeature(layerId, body);
+        requireKind(layer, body);
         feature.setId(IdWorker.getId());
         validateTopology(feature);
         mapper.insertFeatures(List.of(feature));
         mapper.refreshLayer(layerId);
+        mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
         return toFeature(requireFeature(layerId, feature.getId()));
     }
 
     @Transactional(rollbackFor = Exception.class)
     public GisVectorVO.Feature updateFeature(Long layerId, Long id, String ifMatch, JsonNode body) {
-        ready(layerId, true);
+        GisVectorLayer layer = ready(layerId, true);
         GisVectorFeature existing = requireFeature(layerId, id);
         requireMatch(ifMatch, featureEtag(id, existing.getVersion()));
         if (body != null && body.has("id") && !id.toString().equals(body.get("id").asText())) throw badRequest("Feature.id 与路径不一致");
         GisVectorFeature feature = parsedFeature(layerId, body);
+        requireKind(layer, body);
         feature.setId(id);
         // XYZ 编辑须显式提交高程，防止二维拖动误删已有 Z。
         JsonNode oldGeometry = json.readTree(existing.getGeometryJson());
@@ -96,35 +104,40 @@ public class VectorLayerService {
         validateTopology(feature);
         if (mapper.updateFeature(feature, existing.getVersion()) != 1) throw preconditionFailed();
         mapper.refreshLayer(layerId);
+        mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
         return toFeature(requireFeature(layerId, id));
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void deleteFeature(Long layerId, Long id, String ifMatch) {
-        ready(layerId, true);
+        GisVectorLayer layer = ready(layerId, true);
         GisVectorFeature existing = requireFeature(layerId, id);
         requireMatch(ifMatch, featureEtag(id, existing.getVersion()));
         if (mapper.deleteFeature(layerId, id, existing.getVersion()) != 1) throw preconditionFailed();
         mapper.refreshLayer(layerId);
+        mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void deleteLayer(Long id, String ifMatch) {
         GisVectorLayer layer = requireLayer(id, true);
         if ("IMPORTING".equals(layer.getLayerStatus())) throw new ResponseStatusException(HttpStatus.CONFLICT, "正在导入的图层不能删除");
-        requireMatch(ifMatch, layerEtag(id, layer.getDataVersion()));
+        requireMatch(ifMatch, layerEtag(id, layer.getDataVersion(), layer.getPresentationVersion()));
         mapper.deleteLayer(id);
+        mapper.bumpDataSetRevision(layer.getDataSetId(), true, true);
     }
 
     public GisVectorVO.Layer toVO(GisVectorLayer layer) {
         return new GisVectorVO.Layer(layer.getId().toString(), layer.getDataSetId().toString(),
                 layer.getSourceFileId() == null ? null : layer.getSourceFileId().toString(),
                 layer.getLayerKey(), layer.getLayerName(), layer.getLayerStatus(), layer.getFeatureCount(),
-                tree(layer.getGeographicExtent()), tree(layer.getGeometryTypes()), layer.getDataVersion(), layer.getCreateTime(), layer.getUpdateTime());
+                tree(layer.getGeographicExtent()), tree(layer.getGeometryTypes()), layer.getDataVersion(), layer.getCreateTime(), layer.getUpdateTime(),
+                layer.getGroupId().toString(), layer.getOriginalGroupId().toString(), layer.getGeometryType(), layer.getAssignmentMode(),
+                Boolean.TRUE.equals(layer.getEnabled()), layer.getStyleMode(), layer.getPresentationVersion());
     }
 
     public static String featureEtag(Long id, long version) { return "\"feature-" + id + "-v" + version + "\""; }
-    public static String layerEtag(Long id, long version) { return "\"layer-" + id + "-v" + version + "\""; }
+    public static String layerEtag(Long id, long version, long presentation) { return "\"layer-" + id + "-d" + version + "-p" + presentation + "\""; }
 
     private GisVectorLayer ready(Long id, boolean lock) {
         GisVectorLayer layer = requireLayer(id, lock);
@@ -134,9 +147,21 @@ public class VectorLayerService {
 
     private GisVectorLayer requireLayer(Long id, boolean lock) {
         if (id == null || id < 1) throw badRequest("图层ID须大于0");
+        if (lock) {
+            var existing = mapper.layer(id);
+            if (existing == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "图层不存在或已删除");
+            if (mapper.lockDataSetStyle(existing.getDataSetId()) == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "数据集尚未初始化样式");
+        }
         GisVectorLayer layer = lock ? mapper.lockLayer(id) : mapper.layer(id);
         if (layer == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "图层不存在或已删除");
+        if (layer.getGroupId() == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "存量图层尚未分类，须单独迁移");
         return layer;
+    }
+
+    private void requireKind(GisVectorLayer layer, JsonNode body) {
+        try {
+            if (!layer.getGeometryType().equals(templateRules.kind(body.get("geometry")))) throw badRequest("几何类别与图层不一致");
+        } catch (IllegalArgumentException ex) { throw badRequest(ex.getMessage()); }
     }
 
     private GisVectorFeature requireFeature(Long layerId, Long id) {
@@ -164,7 +189,9 @@ public class VectorLayerService {
 
     private GisVectorVO.Feature toFeature(GisVectorFeature feature) {
         return new GisVectorVO.Feature("Feature", feature.getId().toString(), tree(feature.getGeometryJson()),
-                tree(feature.getPropertiesJson()), feature.getVersion(), feature.getLayerId().toString());
+                tree(feature.getPropertiesJson()), feature.getVersion(), feature.getLayerId().toString(),
+                feature.getSourceFeatureIndex() == null ? null : new GisVectorVO.SourceReference(feature.getSourceFeatureIndex(),
+                        tree(feature.getSourceFeatureId()), feature.getSourceGeometryPath(), feature.getClassificationRuleKey()));
     }
 
     private JsonNode tree(String value) { return value == null ? null : json.readTree(value); }
@@ -179,7 +206,7 @@ public class VectorLayerService {
     }
 
     private Double[] parseBox(String value) {
-        if (value == null) return new Double[4];
+        if (value == null) throw badRequest("属性分页查询必须指定bbox，地图显示请使用数据集瓦片");
         try {
             String[] parts = value.split(",", -1);
             if (parts.length != 4) throw new IllegalArgumentException();
@@ -189,7 +216,7 @@ public class VectorLayerService {
                 if (!Double.isFinite(box[i])) throw new IllegalArgumentException();
             }
             if (Math.abs(box[0]) > 180 || Math.abs(box[2]) > 180 || Math.abs(box[1]) > 90
-                    || Math.abs(box[3]) > 90 || box[1] >= box[3] || box[0].equals(box[2])) throw new IllegalArgumentException();
+                    || Math.abs(box[3]) > 90 || box[1] >= box[3] || box[0].doubleValue() == box[2].doubleValue()) throw new IllegalArgumentException();
             return box;
         } catch (IllegalArgumentException ex) { throw badRequest("bbox 须为 west,south,east,north；west>east 表示跨日期变更线"); }
     }

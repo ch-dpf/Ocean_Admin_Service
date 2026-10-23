@@ -23,6 +23,8 @@ public class GisFileMeta {
 
     /** 所属数据集 */
     private Long dataSetId;
+    private String vectorPlacement;
+    private Long vectorDatasetStyleId;
 
     /** 用户上传时的文件名 */
     private String originalName;

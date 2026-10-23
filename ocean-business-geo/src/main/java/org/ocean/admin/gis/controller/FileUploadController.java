@@ -44,6 +44,7 @@ public class FileUploadController {
             @RequestHeader("Upload-Total-Size") Long totalSize,
             @RequestHeader("Upload-Offset") Long offset,
             @RequestHeader("Upload-Chunk-Size") Long chunkSize,
+            @RequestHeader(value = "Upload-Vector-Placement", defaultValue = "AUTO") String vectorPlacement,
             HttpServletRequest request) throws IOException {
         long contentLength = request.getContentLengthLong();
         if (contentLength >= 0 && contentLength != chunkSize) {
@@ -60,7 +61,8 @@ public class FileUploadController {
                 fileSize,
                 totalSize,
                 offset,
-                chunkSize);
+                chunkSize,
+                vectorPlacement);
         return ResponseResult.success(fileUploadService.uploadChunk(
                 command, request.getInputStream()));
     }
