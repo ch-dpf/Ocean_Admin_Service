@@ -3,6 +3,8 @@ package org.ocean.admin.gis.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Delete;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 import org.ocean.admin.gis.entity.GisDataSet;
 
@@ -12,6 +14,19 @@ import org.ocean.admin.gis.entity.GisDataSet;
  */
 @Mapper
 public interface GisDataSetMapper extends BaseMapper<GisDataSet> {
+    @Select("SELECT * FROM ocean_gis.gis_data_set WHERE id = #{id} AND deleted = 0 FOR UPDATE")
+    GisDataSet selectActiveByIdForUpdate(@Param("id") Long id);
+
+    @Delete("DELETE FROM ocean_gis.gis_data_set WHERE id = #{id} AND deleted = 0")
+    int physicallyDeleteById(@Param("id") Long id);
+
+    @Select("""
+            SELECT count(*) FROM ocean_gis.gis_file_transfer_record
+            WHERE data_set_id = #{dataSetId} AND deleted = 0
+              AND record_status IN ('QUEUED', 'RUNNING')
+            """)
+    long countActiveTransfersByDataSetId(@Param("dataSetId") Long dataSetId);
+
     @Update("""
             UPDATE ocean_gis.gis_data_set
             SET file_count = file_count + #{countDelta},

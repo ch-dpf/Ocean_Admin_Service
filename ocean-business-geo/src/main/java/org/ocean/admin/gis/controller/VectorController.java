@@ -20,7 +20,6 @@ import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.JsonNode;
@@ -272,12 +271,6 @@ public class VectorController {
 
     private ResponseEntity<GisVectorVO.Feature> featureResponse(GisVectorVO.Feature feature, HttpStatus status) {
         return ResponseEntity.status(status).eTag(VectorLayerService.featureEtag(Long.valueOf(feature.id()), feature.version())).body(feature);
-    }
-
-    @ExceptionHandler(ResponseStatusException.class)
-    public ResponseEntity<ResponseResult<Void>> handleVectorError(ResponseStatusException exception) {
-        return ResponseEntity.status(exception.getStatusCode()).header("Cache-Control","no-store").contentType(MediaType.APPLICATION_JSON)
-                .body(ResponseResult.error(exception.getStatusCode().value(), exception.getReason()));
     }
 
     private JsonNode readFeature(HttpServletRequest request) {

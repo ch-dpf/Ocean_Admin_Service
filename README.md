@@ -50,7 +50,7 @@ mvn -pl ocean-bootstrap -am spring-boot:run
 
 首期提取 GeoTIFF（`.tif/.tiff`）与 GeoJSON（`.geojson/.json`）。GeoJSON 必须使用 WGS84 经度、纬度顺序；默认按 RFC 7946 读取，文件顶层也接受下文列出的旧式 WGS84 命名 `crs` 声明。配套附件标记 `NOT_APPLICABLE`，其他主格式返回 `UNSUPPORTED_FORMAT`，原文件保留。
 
-文件分页接口 `GET /api/gis/filemeta/page` 默认返回所有未删除文件，可显式传入 `metadataStatus=QUEUED/RUNNING/COMPLETED/FAILED/NOT_APPLICABLE` 按元数据状态筛选。回收站 `GET /api/gis/filemeta/deleted/page` 支持同样的筛选参数。
+文件分页接口 `GET /api/gis/filemeta/page` 返回当前管理文件，可显式传入 `metadataStatus=QUEUED/RUNNING/COMPLETED/FAILED/NOT_APPLICABLE` 按元数据状态筛选。`DELETE /api/gis/filemeta/{id}` 会永久删除文件元数据和物理文件；活动处理任务引用时返回冲突，调用方必须进行二次确认。
 
 ```text
 GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=INTERSECTS

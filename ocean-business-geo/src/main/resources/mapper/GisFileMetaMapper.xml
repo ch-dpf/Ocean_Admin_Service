@@ -40,8 +40,8 @@
         SELECT fm.*, ds.category_id
         FROM ocean_gis.gis_file_meta fm
         JOIN ocean_gis.gis_data_set ds ON ds.id = fm.data_set_id
-        WHERE fm.deleted = #{deleted}
-        <if test="deleted == 0">AND ds.deleted = 0</if>
+        WHERE fm.deleted = 0
+          AND ds.deleted = 0
         <if test="q.metadataStatus != null">AND fm.metadata_status = #{q.metadataStatus}</if>
         <if test="q.dataSetId != null">AND fm.data_set_id = #{q.dataSetId}</if>
         <if test="q.categoryId != null">AND ds.category_id = #{q.categoryId}</if>
@@ -88,32 +88,26 @@
         </foreach>
     </insert>
 
-    <select id="selectDeletedById" resultType="org.ocean.admin.gis.entity.GisFileMeta">
+    <select id="selectActiveByIdForUpdate" resultType="org.ocean.admin.gis.entity.GisFileMeta">
         SELECT *
         FROM ocean_gis.gis_file_meta
         WHERE id = #{id}
-          AND deleted = 1
+          AND deleted = 0
         FOR UPDATE
     </select>
 
-    <update id="restoreDeletedById">
-        UPDATE ocean_gis.gis_file_meta
-        SET deleted = 0,
-            update_time = #{updateTime}
-        WHERE id = #{id}
-          AND deleted = 1
-    </update>
-
-    <delete id="permanentlyDeleteById">
-        DELETE FROM ocean_gis.gis_file_meta
-        WHERE id = #{id}
-          AND deleted = 1
-    </delete>
-
-    <select id="countAllByDataSetId" resultType="long">
-        SELECT COUNT(*)
+    <select id="selectAllByDataSetIdForUpdate" resultType="org.ocean.admin.gis.entity.GisFileMeta">
+        SELECT *
         FROM ocean_gis.gis_file_meta
         WHERE data_set_id = #{dataSetId}
+        ORDER BY id
+        FOR UPDATE
     </select>
+
+    <delete id="physicallyDeleteActiveById">
+        DELETE FROM ocean_gis.gis_file_meta
+        WHERE id = #{id}
+          AND deleted = 0
+    </delete>
 
 </mapper>

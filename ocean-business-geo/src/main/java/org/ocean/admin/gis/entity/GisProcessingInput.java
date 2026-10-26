@@ -17,7 +17,14 @@ public class GisProcessingInput {
     private Integer sequenceNo;
     private String inputKind;
     private String inputStatus;
+    /** 任务执行期间使用的实时文件引用；任务进入终态或源文件删除后置空。 */
     private Long fileMetaId;
+    /** 数据管理文件提交任务时保存的不可变来源快照。 */
+    private Long sourceFileMetaId;
+    private Long sourceDataSetId;
+    private String sourceDataSetName;
+    private String sourceStorageType;
+    private String sourceStorageKey;
     private String workspaceCode;
     private String relativePath;
     private String storageKey;

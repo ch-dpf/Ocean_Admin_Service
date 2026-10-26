@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 import java.util.*;
 import java.util.regex.Pattern;
 
-/** 数据集模板协议；与图层样式协议各司其职，不转换或猜测历史模板。 */
+/** 矢量模板协议 */
 @Component
 @RequiredArgsConstructor
 public class VectorTemplateRules {

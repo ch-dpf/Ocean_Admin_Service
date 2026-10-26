@@ -10,14 +10,17 @@ import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
+import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.vo.GisDataSetVO;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
@@ -43,6 +46,7 @@ public class DataSetService {
 
     private final GisDataSetMapper gisDataSetMapper;
     private final GisFileMetaMapper gisFileMetaMapper;
+    private final GisProcessingInputMapper processingInputMapper;
     private final GisFileSpatialMetadataMapper spatialMetadataMapper;
     private final FileUploadUtil fileUploadUtil;
     private final ObjectMapper objectMapper;
@@ -153,7 +157,7 @@ public class DataSetService {
 
         GisDataSet existing = gisDataSetMapper.selectById(reqVO.getId());
         if (existing == null) {
-            throw new IllegalArgumentException("数据集不存在或已删除: " + reqVO.getId());
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数据集不存在或已删除: " + reqVO.getId());
         }
 
         String dataSetName = reqVO.getDataSetName().trim();
@@ -187,20 +191,46 @@ public class DataSetService {
         if (id == null) {
             throw new IllegalArgumentException("数据集ID不能为空");
         }
-        if (gisDataSetMapper.selectById(id) == null) {
-            throw new IllegalArgumentException("数据集不存在或已删除: " + id);
+        GisDataSet dataSet = gisDataSetMapper.selectActiveByIdForUpdate(id);
+        if (dataSet == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数据集不存在或已删除: " + id);
         }
-        if (gisFileMetaMapper.countAllByDataSetId(id) > 0) {
-            throw new IllegalStateException("数据集下仍存在文件，请先彻底删除全部文件");
+        if (gisDataSetMapper.countActiveTransfersByDataSetId(id) > 0) {
+            throw new IllegalStateException("数据集存在正在上传或下载的文件，请等待传输结束后重试");
         }
-        if (vectorMapper.countDataSetReferences(id) > 0) {
-            throw new IllegalStateException("数据集下仍存在矢量图层，请先删除全部图层");
+        List<GisProcessingInputMapper.ActiveTaskReference> activeTasks =
+                processingInputMapper.selectActiveByDataSetId(id);
+        if (!activeTasks.isEmpty()) {
+            var task = activeTasks.getFirst();
+            throw new IllegalStateException("数据集文件正在被处理任务使用，请等待任务结束后重试: "
+                    + task.taskName() + " (" + task.taskNo() + ", " + task.taskStatus() + ")");
         }
-        if (gisDataSetMapper.deleteById(id) != 1) {
-            throw new IllegalStateException("数据集删除失败: " + id);
+
+        List<GisFileMeta> files = gisFileMetaMapper.selectAllByDataSetIdForUpdate(id);
+        if (files.stream().anyMatch(file -> "RUNNING".equals(file.getMetadataStatus()))) {
+            throw new IllegalStateException("数据集仍有文件正在提取空间元数据，请等待处理结束后重试");
+        }
+        List<GisFileMeta> unsupportedStorage = files.stream()
+                .filter(file -> file.getStorageKey() != null && !file.getStorageKey().isBlank())
+                .filter(file -> !"LOCAL".equals(file.getStorageType()))
+                .toList();
+        if (!unsupportedStorage.isEmpty()) {
+            throw new IllegalStateException("暂不支持物理删除 "
+                    + unsupportedStorage.getFirst().getStorageType() + " 存储中的数据集文件");
+        }
+
+        fileUploadUtil.stageStoredForTransactionalDeletion(files.stream()
+                .map(GisFileMeta::getStorageKey)
+                .filter(java.util.Objects::nonNull)
+                .filter(key -> !key.isBlank())
+                .toList());
+        processingInputMapper.detachTerminalByDataSetId(id);
+        if (gisDataSetMapper.physicallyDeleteById(id) != 1) {
+            throw new IllegalStateException("数据集物理删除失败: " + id);
         }
         fileUploadUtil.deleteEmptyDataSetDirectory(id);
-        log.info("删除 GIS 数据集成功: id={}", id);
+        log.info("永久删除 GIS 数据集成功: id={}, name={}, fileCount={}",
+                id, dataSet.getDataSetName(), files.size());
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -226,7 +256,7 @@ public class DataSetService {
         }
         GisDataSet dataSet = gisDataSetMapper.selectById(id);
         if (dataSet == null) {
-            throw new IllegalArgumentException("数据集不存在或已删除: " + id);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数据集不存在或已删除: " + id);
         }
         GisDataSetVO result = toVO(dataSet);
         if (Long.valueOf(2).equals(dataSet.getCategoryId())) {

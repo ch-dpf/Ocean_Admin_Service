@@ -62,7 +62,7 @@ public class GisDataSet {
     private LocalDateTime updateTime;
 
     /**
-     * 逻辑删除：0-未删除，1-已删除
+     * 框架保留删除标记；管理接口执行物理删除。
      */
     @TableLogic
     private Integer deleted;

@@ -4,10 +4,13 @@ import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.entity.GisProcessingInput;
+import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisTileSet;
 import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
+import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisTileSetMapper;
+import org.ocean.admin.gis.processing.GisInputSourceType;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.processing.GisSubmitProcessingCommand;
@@ -21,6 +24,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.Objects;
 import java.util.List;
 
 /** 在单一事务中创建任务、处理作业、输入快照和唯一瓦片集。 */
@@ -29,12 +33,14 @@ import java.util.List;
 public class ProcessingTaskService {
     private final ProcessingTaskRecordService taskService;
     private final GisProcessingInputMapper inputMapper;
+    private final GisFileMetaMapper fileMetaMapper;
     private final GisTileSetMapper tileSetMapper;
     private final ObjectMapper objectMapper;
 
     @Transactional(rollbackFor = Exception.class)
     public CreatedProcessingTask create(String taskNo, GisSubmitProcessingCommand command,
             GisProcessingWorkspace workspace, List<GisProcessingInput> inputs) {
+        lockManagedInputs(command, inputs);
         LocalDateTime now = LocalDateTime.now();
         String parametersJson = writeParameters(command);
         GisProcessingTask task = createQueuedTask(
@@ -76,6 +82,32 @@ public class ProcessingTaskService {
         return new CreatedProcessingTask(task.getId(), tileSet.getId());
     }
 
+    /** 与物理删除共用文件行锁，关闭“校验完成但任务引用尚未落库”的竞态窗口。 */
+    private void lockManagedInputs(
+            GisSubmitProcessingCommand command, List<GisProcessingInput> inputs) {
+        if (command.sourceType() != GisInputSourceType.MANAGED_FILE) {
+            return;
+        }
+        for (GisProcessingInput input : inputs.stream()
+                .sorted(java.util.Comparator.comparing(GisProcessingInput::getSourceFileMetaId))
+                .toList()) {
+            GisFileMeta current = fileMetaMapper.selectActiveByIdForUpdate(
+                    input.getSourceFileMetaId());
+            if (current == null) {
+                throw new IllegalStateException(
+                        "已管理文件已被删除，处理任务未创建: " + input.getSourceFileMetaId());
+            }
+            if (!Objects.equals(current.getDataSetId(), input.getSourceDataSetId())
+                    || !Objects.equals(current.getStorageType(), input.getSourceStorageType())
+                    || !Objects.equals(current.getStorageKey(), input.getSourceStorageKey())
+                    || !Objects.equals(current.getSha256(), input.getSha256())) {
+                throw new IllegalStateException(
+                        "已管理文件在任务提交期间发生变化，请重新提交: "
+                                + input.getSourceFileMetaId());
+            }
+        }
+    }
+
     private GisProcessingTask createQueuedTask(
             String taskNo, String taskName, long totalCount, LocalDateTime now) {
         GisProcessingTask task = new GisProcessingTask();
@@ -108,7 +140,10 @@ public class ProcessingTaskService {
                 .append('|').append(command.sourceType().name()).append('|')
                 .append(parametersJson);
         for (GisProcessingInput input : inputs) {
-            value.append('|').append(input.getFileMetaId())
+            value.append('|').append(input.getSourceFileMetaId())
+                    .append('|').append(input.getSourceDataSetId())
+                    .append('|').append(input.getSourceStorageType())
+                    .append('|').append(input.getSourceStorageKey())
                     .append('|').append(input.getWorkspaceCode())
                     .append('|').append(input.getRelativePath())
                     .append('|').append(input.getStorageKey())

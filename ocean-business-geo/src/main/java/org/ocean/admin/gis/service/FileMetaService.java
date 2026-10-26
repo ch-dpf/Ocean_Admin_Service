@@ -14,6 +14,7 @@ import org.ocean.admin.gis.dto.GisFileQuery;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordItemMapper;
+import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
 import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.util.FileDownloadUtil;
 import org.ocean.admin.gis.util.FileUploadUtil;
@@ -46,6 +47,7 @@ public class FileMetaService {
 
     private final GisFileMetaMapper gisFileMetaMapper;
     private final GisFileTransferRecordItemMapper gisFileTransferRecordItemMapper;
+    private final GisProcessingInputMapper processingInputMapper;
     private final GisDataSetMapper gisDataSetMapper;
     private final DataSetService dataSetService;
     private final FileTransferRecordService fileTransferRecordService;
@@ -56,10 +58,10 @@ public class FileMetaService {
     private final VectorDataSetStyleService vectorDataSetStyles;
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
-    public PageResult<List<GisFileMetaVO>> getFileMetaPage(GisFileQuery query, boolean deleted) {
+    public PageResult<List<GisFileMetaVO>> getFileMetaPage(GisFileQuery query) {
         query.validate();
         Page<GisFileMetaVO> page = gisFileMetaMapper.selectFilePage(
-                new Page<>(query.getCurrent(), query.getSize()), query, deleted ? 1 : 0);
+                new Page<>(query.getCurrent(), query.getSize()), query);
         spatialMetadataService.populate(page.getRecords(), query.isIncludeGeometry());
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
     }
@@ -71,40 +73,6 @@ public class FileMetaService {
         if (!"FAILED".equals(meta.getMetadataStatus())) throw new IllegalStateException("仅提取失败的文件可以重试");
         fileTransferRecordService.reopenMetadataImport(id);
         spatialMetadataService.invalidate(id);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void restoreDeletedFileMeta(Long id) {
-        GisFileMeta deletedMeta = getRequiredDeleted(id);
-        ensureDataSetExists(deletedMeta.getDataSetId());
-        String storageKey = trimToNull(deletedMeta.getStorageKey());
-        if (storageKey != null) {
-            ensureStorageKeyAvailable(deletedMeta.getStorageType(), storageKey, deletedMeta.getId());
-        }
-        if (gisFileMetaMapper.restoreDeletedById(id, LocalDateTime.now()) != 1) {
-            throw new IllegalStateException("回收站文件恢复失败: " + id);
-        }
-        deletedMeta.setDeleted(0);
-        dataSetService.updateFileStatistics(null, deletedMeta);
-        log.info("恢复回收站 GIS 文件成功: id={}, dataSetId={}", id, deletedMeta.getDataSetId());
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void permanentlyDeleteFileMeta(Long id) {
-        GisFileMeta deletedMeta = getRequiredDeleted(id);
-        ensureVectorSourceUnreferenced(id);
-        validatePermanentDeleteStorage(deletedMeta);
-
-        gisFileTransferRecordItemMapper.clearFileMetaReference(id);
-        if (gisFileMetaMapper.permanentlyDeleteById(id) != 1) {
-            throw new IllegalStateException("回收站文件彻底删除失败: " + id);
-        }
-        String storageKey = trimToNull(deletedMeta.getStorageKey());
-        if (storageKey != null) {
-            fileUploadUtil.deleteStored(storageKey);
-        }
-        fileUploadUtil.deleteEmptyDataSetDirectory(deletedMeta.getDataSetId());
-        log.info("彻底删除回收站 GIS 文件成功: id={}, storageKey={}", id, storageKey);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -215,11 +183,30 @@ public class FileMetaService {
         GisFileMeta existing = getRequiredForUpdate(id);
         ensureMutable(existing);
         ensureVectorSourceUnreferenced(id);
-        if (gisFileMetaMapper.deleteById(id) != 1) {
-            throw new IllegalStateException("文件元数据删除失败: " + id);
+        ensureNoActiveProcessingTask(id);
+        validatePermanentDeleteStorage(existing);
+        String storageKey = trimToNull(existing.getStorageKey());
+        if (storageKey != null) {
+            fileUploadUtil.stageStoredForTransactionalDeletion(List.of(storageKey));
+        }
+        processingInputMapper.detachTerminalByFileMetaId(id);
+        gisFileTransferRecordItemMapper.clearFileMetaReference(id);
+        if (gisFileMetaMapper.physicallyDeleteActiveById(id) != 1) {
+            throw new IllegalStateException("文件物理删除失败: " + id);
         }
         dataSetService.updateFileStatistics(existing, null);
-        log.info("删除 GIS 文件元数据成功: id={}", id);
+        fileUploadUtil.deleteEmptyDataSetDirectory(existing.getDataSetId());
+        log.info("永久删除 GIS 文件成功: id={}, storageKey={}", id, storageKey);
+    }
+
+    private void ensureNoActiveProcessingTask(Long id) {
+        List<GisProcessingInputMapper.ActiveTaskReference> active =
+                processingInputMapper.selectActiveByFileMetaId(id);
+        if (!active.isEmpty()) {
+            var task = active.getFirst();
+            throw new IllegalStateException("文件正在被处理任务使用，请等待任务结束后重试: "
+                    + task.taskName() + " (" + task.taskNo() + ", " + task.taskStatus() + ")");
+        }
     }
 
     private void ensureVectorSourceUnreferenced(Long id) {
@@ -276,8 +263,7 @@ public class FileMetaService {
 
     private GisFileMeta getRequiredForUpdate(Long id) {
         if (id == null) throw new IllegalArgumentException("文件元数据ID不能为空");
-        GisFileMeta meta = gisFileMetaMapper.selectOne(new LambdaQueryWrapper<GisFileMeta>()
-                .eq(GisFileMeta::getId, id).last("FOR UPDATE"));
+        GisFileMeta meta = gisFileMetaMapper.selectActiveByIdForUpdate(id);
         if (meta == null) throw new IllegalArgumentException("文件元数据不存在或已删除: " + id);
         return meta;
     }
@@ -289,17 +275,6 @@ public class FileMetaService {
                         .eq(GisFileTransferRecordItem::getOperationStatus, "RUNNING")) > 0) {
             throw new IllegalStateException("文件导入或元数据提取进行中，暂不支持修改或删除");
         }
-    }
-
-    private GisFileMeta getRequiredDeleted(Long id) {
-        if (id == null) {
-            throw new IllegalArgumentException("文件元数据ID不能为空");
-        }
-        GisFileMeta meta = gisFileMetaMapper.selectDeletedById(id);
-        if (meta == null) {
-            throw new IllegalArgumentException("回收站文件元数据不存在: " + id);
-        }
-        return meta;
     }
 
     private void validatePermanentDeleteStorage(GisFileMeta meta) {

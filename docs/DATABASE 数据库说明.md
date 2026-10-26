@@ -51,9 +51,13 @@ GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验
 
 `gis_file_meta.metadata_status` 为 QUEUED、RUNNING、COMPLETED、FAILED 或 NOT_APPLICABLE。metadata_version 和 metadata_lease_expires_at 用于领取与过期执行隔离。空间元数据、矢量图层 READY 与文件 COMPLETED 状态在同一事务提交；原上传批次的成功计数也在此后更新。数据集文件数不随提取状态变化；图层可用性以 READY 状态为准。
 
-`gis_data_set.file_count` 与 `total_size_bytes` 采用相同口径：分别统计未删除且 `upload_status = 'READY'` 的管理文件数量与大小总和（字节），包含配套文件及空间元数据提取失败的文件，排除回收站、分片、成果和缓存。两者由文件入库、新增、修改、逻辑删除和恢复事务原子维护；元数据重试及回收站彻底删除不重复增减。大小不代表磁盘实际占用量。
+`gis_data_set.file_count` 与 `total_size_bytes` 采用相同口径：分别统计当前 `upload_status = 'READY'` 的管理文件数量与大小总和（字节），包含配套文件及空间元数据提取失败的文件，排除分片、成果和缓存。两者由文件入库、新增、修改和永久删除事务原子维护。大小不代表磁盘实际占用量。
 
-数据集分页自动返回 `filePoints`，批量读取 `gis_file_meta.representative_longitude`、`representative_latitude`、`representative_layer_key`、`representative_extent_kind`，每个可定位文件一个点，不查询或计算覆盖几何。代表点与 COMPLETED 状态在同一元数据提交事务内保存；数据库约束要求 COMPLETED 文件具有完整、合法的点位和来源信息，其他状态的点位必须为空。失效、分类变化与任务重新领取会清空点位；逻辑删除保留点位但查询过滤，恢复后按元数据状态展示。
+数据集分页自动返回 `filePoints`，批量读取 `gis_file_meta.representative_longitude`、`representative_latitude`、`representative_layer_key`、`representative_extent_kind`，每个可定位文件一个点，不查询或计算覆盖几何。代表点与 COMPLETED 状态在同一元数据提交事务内保存；数据库约束要求 COMPLETED 文件具有完整、合法的点位和来源信息，其他状态的点位必须为空。失效、分类变化与任务重新领取会清空点位；文件永久删除后点位随元数据一并删除。
+
+`MANAGED_FILE` 处理输入同时保存可空的实时 `file_meta_id` 和不可变来源快照，包括源文件ID、数据集ID与名称、存储类型与Key、原始文件名、大小和SHA-256。QUEUED、RUNNING任务保留实时外键并阻止源文件或数据集删除；任务进入COMPLETED、PARTIAL_FAILED、FAILED后解除实时外键，任务查询继续使用快照。应用内删除不会主动破坏活动任务，外部文件丢失则由任务记录明确失败原因。
+
+文件与数据集管理接口执行永久删除。LOCAL文件先原子移动到上传根目录下的事务待删除区，数据库提交后清理，回滚时恢复原路径。数据集删除级联清理文件元数据、空间元数据、传输记录以及数据集自有矢量数据；存在活动传输、空间元数据提取或处理任务时拒绝删除。已发布影像/地形服务只依赖独立瓦片集，删除原始数据集时发布记录的 `data_set_id` 自动置空，服务继续可用。
 
 代表点从文件所有图层的覆盖分块中选择：优先取最大面积面的内部点，否则取最长线的中点，否则使用点本身。面积、长度通过 geography 按平方米、米比较；同值按图层键（C排序）及分块序号选择。多区域、孔洞及跨日期变更线的面分块保持独立，不对经纬度直接平均。GeoJSON 当前只有包围范围，来源类型保留为 VECTOR_ENVELOPE，不能承诺点在真实要素内。
 

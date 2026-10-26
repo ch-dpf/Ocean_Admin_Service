@@ -32,7 +32,7 @@ CREATE TABLE ocean_gis.gis_data_set (
 COMMENT ON TABLE ocean_gis.gis_data_set IS 'GIS 数据集';
 COMMENT ON COLUMN ocean_gis.gis_data_set.total_size_bytes IS '未删除且上传状态为 READY 的管理文件总大小（字节），包含配套文件，与元数据提取状态无关';
 COMMENT ON COLUMN ocean_gis.gis_data_set.category_id IS '数据类别：0-影像数据，1-地形数据，2-矢量数据';
-COMMENT ON COLUMN ocean_gis.gis_data_set.deleted IS '逻辑删除：0-未删除，1-已删除';
+COMMENT ON COLUMN ocean_gis.gis_data_set.deleted IS '保留的框架删除标记；管理接口执行物理删除';
 
 CREATE UNIQUE INDEX uk_gis_data_set_active_name
     ON ocean_gis.gis_data_set (data_set_name)
@@ -53,7 +53,7 @@ CREATE INDEX idx_gis_data_set_create_time
 
 CREATE TABLE ocean_gis.gis_vector_dataset_style (
     id BIGINT PRIMARY KEY,
-    data_set_id BIGINT NOT NULL UNIQUE REFERENCES ocean_gis.gis_data_set(id),
+    data_set_id BIGINT NOT NULL UNIQUE REFERENCES ocean_gis.gis_data_set(id) ON DELETE CASCADE,
     template_id VARCHAR(100) NOT NULL,
     template_version INTEGER NOT NULL CHECK (template_version > 0),
     schema_version INTEGER NOT NULL CHECK (schema_version > 0),
@@ -87,8 +87,8 @@ CREATE TABLE ocean_gis.gis_vector_group (
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (data_set_id,id),
     UNIQUE (data_set_id,group_key),
-    FOREIGN KEY (data_set_id,dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id),
-    FOREIGN KEY (data_set_id,parent_id) REFERENCES ocean_gis.gis_vector_group(data_set_id,id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (data_set_id,dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id) ON DELETE CASCADE,
+    FOREIGN KEY (data_set_id,parent_id) REFERENCES ocean_gis.gis_vector_group(data_set_id,id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
     CHECK (assignable = (node_type IN ('CLASSIFICATION','UNKNOWN_CLASSIFICATION'))),
     CHECK (NOT assignable OR (geometry_type IS NOT NULL AND default_style_key IS NOT NULL))
 );
@@ -126,8 +126,8 @@ CREATE TABLE ocean_gis.gis_file_transfer_record (
     CONSTRAINT uk_gis_file_transfer_record_no
         UNIQUE (record_no),
     CONSTRAINT fk_gis_file_transfer_record_data_set
-        FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id),
-    FOREIGN KEY (data_set_id,vector_dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id),
+        FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id) ON DELETE CASCADE,
+    FOREIGN KEY (data_set_id,vector_dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id) ON DELETE CASCADE,
     CONSTRAINT ck_gis_file_transfer_record_operation
         CHECK (operation_type IN ('IMPORT', 'EXPORT')),
     CONSTRAINT ck_gis_file_transfer_record_status
@@ -220,7 +220,8 @@ CREATE TABLE ocean_gis.gis_file_meta (
     deleted                  INTEGER       NOT NULL DEFAULT 0,
     CONSTRAINT ck_gis_file_meta_storage_type
         CHECK (storage_type IN ('LOCAL', 'MINIO', 'S3')),
-    FOREIGN KEY (data_set_id,vector_dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id),
+    FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set(id) ON DELETE CASCADE,
+    FOREIGN KEY (data_set_id,vector_dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id) ON DELETE CASCADE,
     CONSTRAINT ck_gis_file_meta_metadata_status
         CHECK (metadata_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'NOT_APPLICABLE')),
     CONSTRAINT ck_gis_file_meta_metadata_version CHECK (metadata_version >= 0),
@@ -335,7 +336,7 @@ COMMENT ON COLUMN ocean_gis.gis_file_spatial_metadata.recommended_max_zoom IS '�
 
 CREATE TABLE ocean_gis.gis_vector_layer (
     id BIGINT PRIMARY KEY,
-    data_set_id BIGINT NOT NULL REFERENCES ocean_gis.gis_data_set(id),
+    data_set_id BIGINT NOT NULL REFERENCES ocean_gis.gis_data_set(id) ON DELETE CASCADE,
     source_file_id BIGINT REFERENCES ocean_gis.gis_file_meta(id),
     group_id BIGINT NOT NULL,
     original_group_id BIGINT NOT NULL,
@@ -356,8 +357,8 @@ CREATE TABLE ocean_gis.gis_vector_layer (
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
     UNIQUE (source_file_id, layer_key),
-    FOREIGN KEY (data_set_id,group_id) REFERENCES ocean_gis.gis_vector_group(data_set_id,id),
-    FOREIGN KEY (data_set_id,original_group_id) REFERENCES ocean_gis.gis_vector_group(data_set_id,id),
+    FOREIGN KEY (data_set_id,group_id) REFERENCES ocean_gis.gis_vector_group(data_set_id,id) ON DELETE CASCADE,
+    FOREIGN KEY (data_set_id,original_group_id) REFERENCES ocean_gis.gis_vector_group(data_set_id,id) ON DELETE CASCADE,
     CHECK (style_mode != 'UNCONFIGURED' OR NOT enabled),
     CHECK (deleted = 1 OR source_file_id IS NOT NULL),
     CHECK (geographic_extent IS NULL OR
@@ -524,9 +525,9 @@ CREATE TABLE ocean_gis.gis_file_transfer_record_item (
     create_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time         TIMESTAMP,
     CONSTRAINT fk_gis_file_transfer_record_item_record
-        FOREIGN KEY (record_id) REFERENCES ocean_gis.gis_file_transfer_record (id),
+        FOREIGN KEY (record_id) REFERENCES ocean_gis.gis_file_transfer_record (id) ON DELETE CASCADE,
     CONSTRAINT fk_gis_file_transfer_record_item_file
-        FOREIGN KEY (file_meta_id) REFERENCES ocean_gis.gis_file_meta (id),
+        FOREIGN KEY (file_meta_id) REFERENCES ocean_gis.gis_file_meta (id) ON DELETE SET NULL,
     CONSTRAINT uk_gis_file_transfer_record_item_sequence
         UNIQUE (record_id, sequence_no),
     CONSTRAINT ck_gis_file_transfer_record_item_status
@@ -628,6 +629,11 @@ CREATE TABLE ocean_gis.gis_processing_input (
     input_kind      VARCHAR(16)  NOT NULL,
     input_status    VARCHAR(20)  NOT NULL DEFAULT 'READY',
     file_meta_id    BIGINT,
+    source_file_meta_id BIGINT,
+    source_data_set_id BIGINT,
+    source_data_set_name VARCHAR(100),
+    source_storage_type VARCHAR(20),
+    source_storage_key VARCHAR(1000),
     workspace_code  VARCHAR(64),
     relative_path   VARCHAR(1000),
     storage_key     VARCHAR(1000),
@@ -654,17 +660,29 @@ CREATE TABLE ocean_gis.gis_processing_input (
         CHECK (size_bytes IS NULL OR size_bytes >= 0),
     CONSTRAINT ck_gis_processing_input_locator
         CHECK (
-            (file_meta_id IS NOT NULL AND workspace_code IS NULL
+            (source_file_meta_id IS NOT NULL AND source_data_set_id IS NOT NULL
+                AND source_data_set_name IS NOT NULL AND source_storage_type IS NOT NULL
+                AND source_storage_key IS NOT NULL AND workspace_code IS NULL
                 AND relative_path IS NULL AND storage_key IS NULL)
-            OR (file_meta_id IS NULL AND workspace_code IS NOT NULL
+            OR (source_file_meta_id IS NULL AND file_meta_id IS NULL
+                AND workspace_code IS NOT NULL
                 AND relative_path IS NOT NULL AND storage_key IS NULL)
-            OR (file_meta_id IS NULL AND workspace_code IS NULL
+            OR (source_file_meta_id IS NULL AND file_meta_id IS NULL
+                AND workspace_code IS NULL
                 AND relative_path IS NULL AND storage_key IS NOT NULL)
-        )
+        ),
+    CONSTRAINT ck_gis_processing_input_live_file
+        CHECK (file_meta_id IS NULL OR source_file_meta_id IS NOT NULL),
+    CONSTRAINT ck_gis_processing_input_source_storage_type
+        CHECK (source_storage_type IS NULL OR source_storage_type IN ('LOCAL', 'MINIO', 'S3'))
 );
 
 COMMENT ON TABLE ocean_gis.gis_processing_input IS '处理任务输入快照，统一上传、受控工作空间和已管理文件';
 COMMENT ON COLUMN ocean_gis.gis_processing_input.relative_path IS '受控工作空间根目录下的相对路径，禁止保存绝对路径';
+COMMENT ON COLUMN ocean_gis.gis_processing_input.file_meta_id IS '仅在数据管理源文件仍需任务执行时保留的实时外键；任务终态后置空';
+COMMENT ON COLUMN ocean_gis.gis_processing_input.source_file_meta_id IS '数据管理源文件ID快照，不设外键';
+COMMENT ON COLUMN ocean_gis.gis_processing_input.source_data_set_id IS '数据管理源数据集ID快照，不设外键';
+COMMENT ON COLUMN ocean_gis.gis_processing_input.source_storage_key IS '任务提交时的源文件存储Key快照';
 
 CREATE INDEX idx_gis_processing_input_task
     ON ocean_gis.gis_processing_input (task_id, sequence_no);
@@ -672,6 +690,10 @@ CREATE INDEX idx_gis_processing_input_task
 CREATE INDEX idx_gis_processing_input_file
     ON ocean_gis.gis_processing_input (file_meta_id)
     WHERE file_meta_id IS NOT NULL;
+
+CREATE INDEX idx_gis_processing_input_source_data_set
+    ON ocean_gis.gis_processing_input (source_data_set_id, task_id)
+    WHERE source_data_set_id IS NOT NULL;
 
 -- =========================================================
 -- GIS 静态瓦片集
@@ -833,7 +855,7 @@ CREATE TABLE ocean_gis.gis_publication (
     CONSTRAINT fk_gis_publication_tile_set
         FOREIGN KEY (tile_set_id) REFERENCES ocean_gis.gis_tile_set (id),
     CONSTRAINT fk_gis_publication_data_set
-        FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id),
+        FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id) ON DELETE SET NULL,
     CONSTRAINT ck_gis_publication_status
         CHECK (status IN ('PUBLISHED', 'DISABLED')),
     CONSTRAINT ck_gis_publication_deleted

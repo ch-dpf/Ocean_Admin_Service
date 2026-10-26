@@ -44,6 +44,11 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
             input.setInputKind("FILE");
             input.setInputStatus("READY");
             input.setFileMetaId(meta.getId());
+            input.setSourceFileMetaId(meta.getId());
+            input.setSourceDataSetId(meta.getDataSetId());
+            input.setSourceDataSetName(requireDataSet(meta).getDataSetName());
+            input.setSourceStorageType(meta.getStorageType());
+            input.setSourceStorageKey(meta.getStorageKey());
             input.setOriginalName(meta.getOriginalName());
             input.setExtension(meta.getExtension());
             input.setSizeBytes(meta.getSizeBytes());
@@ -56,11 +61,13 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
     @Override
     public List<Path> resolveRuntime(List<GisProcessingInput> inputs) {
         return inputs.stream().map(input -> {
-            GisFileMeta meta = fileMetaService.getRequiredEntity(input.getFileMetaId());
-            if (!"READY".equals(meta.getUploadStatus()) || !"COMPLETED".equals(meta.getMetadataStatus()) || !"LOCAL".equals(meta.getStorageType())) {
-                throw new IllegalStateException("已管理文件当前不可用于处理: " + input.getFileMetaId());
+            if (!"LOCAL".equals(input.getSourceStorageType())
+                    || input.getSourceStorageKey() == null
+                    || input.getSourceStorageKey().isBlank()) {
+                throw new IllegalStateException(
+                        "已管理文件快照当前不可用于处理: " + input.getSourceFileMetaId());
             }
-            return fileUploadUtil.resolveStoredPath(meta.getStorageKey());
+            return fileUploadUtil.resolveStoredPath(input.getSourceStorageKey());
         }).toList();
     }
 
@@ -69,10 +76,18 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
         if (!"READY".equals(meta.getUploadStatus()) || !"COMPLETED".equals(meta.getMetadataStatus()) || !"LOCAL".equals(meta.getStorageType())) {
             throw new IllegalStateException("当前只支持处理已完成空间元数据提取的 LOCAL 已管理文件: " + id);
         }
-        GisDataSet dataSet = dataSetMapper.selectById(meta.getDataSetId());
+        GisDataSet dataSet = requireDataSet(meta);
         if (dataSet == null || !command.processingType().categoryId().equals(dataSet.getCategoryId())) {
             throw new IllegalArgumentException("处理类型与文件所属数据集类别不匹配: " + id);
         }
         return meta;
+    }
+
+    private GisDataSet requireDataSet(GisFileMeta meta) {
+        GisDataSet dataSet = dataSetMapper.selectById(meta.getDataSetId());
+        if (dataSet == null) {
+            throw new IllegalArgumentException("文件所属数据集不存在: " + meta.getDataSetId());
+        }
+        return dataSet;
     }
 }

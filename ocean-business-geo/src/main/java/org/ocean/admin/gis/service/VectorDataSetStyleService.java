@@ -22,7 +22,10 @@ import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** 数据集拥有自己的不可变模板；可变开关只保存在关系表，不双写模板。 */
+/**
+ * 矢量数据集样式服务
+ * 数据集级模板快照、分类目录和版本基线
+ */
 @Service
 @RequiredArgsConstructor
 public class VectorDataSetStyleService {
@@ -97,10 +100,6 @@ public class VectorDataSetStyleService {
                 json.readTree(s.getDefinitionJson()));
     }
 
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
-    public List<GisVectorVO.Group> tree(Long dataSetId) {
-        return groupTree(dataSetId).groups();
-    }
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public GisVectorVO.GroupTree groupTree(Long dataSetId) {
         var snapshot = require(dataSetId, false);

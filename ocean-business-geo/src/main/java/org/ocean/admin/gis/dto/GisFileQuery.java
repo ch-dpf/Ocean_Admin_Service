@@ -6,7 +6,7 @@ import lombok.Data;
 import java.util.Locale;
 import java.util.Set;
 
-/** 文件列表和回收站共用的查询条件；经纬度顺序为 X=经度、Y=纬度。 */
+/** 文件列表查询条件；经纬度顺序为 X=经度、Y=纬度。 */
 @Data
 public class GisFileQuery {
     private Integer current = 1;

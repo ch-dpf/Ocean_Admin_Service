@@ -5,6 +5,8 @@ import org.ocean.admin.gis.config.FileUploadConfig;
 import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -26,6 +28,7 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -414,6 +417,54 @@ public class FileUploadUtil {
         delete(resolveKey(storageKey));
     }
 
+    /**
+     * 将正式文件先原子移入待删除区；数据库提交后再清理，回滚时恢复原路径。
+     */
+    public void stageStoredForTransactionalDeletion(List<String> storageKeys) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("物理文件删除必须在数据库事务中执行");
+        }
+        String deletionId = UUID.randomUUID().toString().replace("-", "");
+        Path deletionDirectory = resolveKey(".deleting/" + deletionId);
+        List<StagedDeletion> staged = new ArrayList<>();
+        try {
+            int index = 0;
+            for (String storageKey : storageKeys.stream().filter(java.util.Objects::nonNull)
+                    .filter(key -> !key.isBlank()).distinct().toList()) {
+                Path source = resolveKey(storageKey);
+                if (!Files.exists(source)) {
+                    continue;
+                }
+                if (!Files.isRegularFile(source)) {
+                    throw new IllegalStateException("待删除存储路径不是文件: " + storageKey);
+                }
+                Files.createDirectories(deletionDirectory);
+                Path target = deletionDirectory.resolve(index++ + "-" + source.getFileName());
+                move(source, target);
+                staged.add(new StagedDeletion(source, target));
+            }
+        } catch (IOException | RuntimeException ex) {
+            restoreStagedDeletions(staged);
+            deleteDirectoryQuietly(deletionDirectory);
+            throw ex instanceof RuntimeException runtime
+                    ? runtime
+                    : new IllegalStateException("文件移入待删除区失败", ex);
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_COMMITTED) {
+                    deleteDirectoryQuietly(deletionDirectory);
+                } else {
+                    restoreStagedDeletions(staged);
+                    deleteDirectoryQuietly(deletionDirectory);
+                }
+            }
+        });
+    }
+
     /** 删除数据集目录，但仅在目录为空时执行。 */
     public void deleteEmptyDataSetDirectory(Long dataSetId) {
         Path directory = resolveKey(dataSetDirectoryKey(dataSetId));
@@ -610,4 +661,50 @@ public class FileUploadUtil {
             log.warn("清理文件失败: {}", path, cleanupEx);
         }
     }
+
+    private void restoreStagedDeletions(List<StagedDeletion> staged) {
+        for (int index = staged.size() - 1; index >= 0; index--) {
+            StagedDeletion deletion = staged.get(index);
+            try {
+                if (!Files.exists(deletion.staged())) {
+                    continue;
+                }
+                Files.createDirectories(deletion.source().getParent());
+                move(deletion.staged(), deletion.source());
+            } catch (IOException restoreEx) {
+                log.error("数据库回滚后恢复待删除文件失败: source={}, staged={}",
+                        deletion.source(), deletion.staged(), restoreEx);
+            }
+        }
+    }
+
+    private void deleteDirectoryQuietly(Path directory) {
+        if (!Files.exists(directory)) {
+            return;
+        }
+        try {
+            Files.walkFileTree(directory, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes)
+                        throws IOException {
+                    Files.deleteIfExists(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path current, IOException error)
+                        throws IOException {
+                    if (error != null) {
+                        throw error;
+                    }
+                    Files.deleteIfExists(current);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException cleanupEx) {
+            log.error("清理待删除目录失败: {}", directory, cleanupEx);
+        }
+    }
+
+    private record StagedDeletion(Path source, Path staged) { }
 }

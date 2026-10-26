@@ -81,8 +81,8 @@ public class ProcessingTaskRecordService {
                         .orderByDesc(GisProcessingTask::getCreateTime);
         if (dataSetId != null) {
             query.apply("EXISTS (SELECT 1 FROM ocean_gis.gis_processing_input pi "
-                    + "JOIN ocean_gis.gis_file_meta fm ON fm.id = pi.file_meta_id "
-                    + "WHERE pi.task_id = gis_processing_task.id AND fm.data_set_id = {0})",
+                    + "WHERE pi.task_id = gis_processing_task.id "
+                    + "AND pi.source_data_set_id = {0})",
                     dataSetId);
         }
         Page<GisProcessingTask> page = taskMapper.selectPage(
@@ -180,12 +180,14 @@ public class ProcessingTaskRecordService {
         if (updated != 1) {
             throw new IllegalStateException("GIS处理任务结束状态更新失败: " + taskId);
         }
+        inputMapper.detachTaskFileReferences(taskId);
         task.setTaskStatus(status);
         return task;
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public void markFailed(Long taskId, String errorMessage) {
-        taskMapper.update(null,
+        int updated = taskMapper.update(null,
                 new LambdaUpdateWrapper<GisProcessingTask>()
                         .eq(GisProcessingTask::getId, taskId)
                         .notIn(GisProcessingTask::getTaskStatus,
@@ -198,6 +200,9 @@ public class ProcessingTaskRecordService {
                                 abbreviate(errorMessage, 1000))
                         .set(GisProcessingTask::getFinishTime, LocalDateTime.now())
                         .set(GisProcessingTask::getUpdateTime, LocalDateTime.now()));
+        if (updated > 0) {
+            inputMapper.detachTaskFileReferences(taskId);
+        }
     }
 
     private GisProcessingTaskSummaryVO toSummary(GisProcessingTask task) {
@@ -381,7 +386,9 @@ public class ProcessingTaskRecordService {
     private GisProcessingTaskDetailVO.InputVO toInputVO(GisProcessingInput input) {
         return new GisProcessingTaskDetailVO.InputVO(
                 input.getId(), input.getSequenceNo(), input.getInputKind(),
-                input.getInputStatus(), input.getFileMetaId(), input.getWorkspaceCode(),
+                input.getInputStatus(), input.getFileMetaId(), input.getSourceFileMetaId(),
+                input.getSourceDataSetId(), input.getSourceDataSetName(),
+                input.getSourceStorageType(), input.getSourceStorageKey(), input.getWorkspaceCode(),
                 input.getRelativePath(), input.getStorageKey(), input.getOriginalName(),
                 input.getExtension(), input.getSizeBytes(), input.getSha256(),
                 input.getErrorMessage(), input.getCreateTime(), input.getUpdateTime());
