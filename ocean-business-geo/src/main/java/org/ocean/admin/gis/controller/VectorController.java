@@ -88,10 +88,15 @@ public class VectorController {
             @PathVariable int z, @PathVariable int x, @PathVariable int y,
             @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
         byte[] body = tiles.getTile(dataSetId,tileVersion,z,x,y);
-        String etag = "\"" + org.ocean.admin.gis.service.VectorRenderPlanner.digest(body) + "\"";
-        return ResponseEntity.status(etag.equals(ifNoneMatch) ? HttpStatus.NOT_MODIFIED : HttpStatus.OK)
-                .header("Cache-Control","private, max-age=300, immutable").eTag(etag)
-                .body(etag.equals(ifNoneMatch) ? null : body);
+        // 同一MVT可由HTTP层协商为gzip或identity；强ETag会阻止Tomcat压缩。
+        String tag = "\"" + org.ocean.admin.gis.service.VectorRenderPlanner.digest(body) + "\"";
+        String etag = "W/" + tag;
+        boolean unchanged = ifNoneMatch != null && java.util.Arrays.stream(ifNoneMatch.split(","))
+                .map(String::trim).anyMatch(value -> value.equals("*") || value.equals(tag) || value.equals(etag));
+        return ResponseEntity.status(unchanged ? HttpStatus.NOT_MODIFIED : HttpStatus.OK)
+                .header("Cache-Control","private, max-age=300, immutable")
+                .header("Vary","Accept-Encoding").eTag(etag)
+                .body(unchanged ? null : body);
     }
 
     @GetMapping("/datasets/{dataSetId}/cartography")

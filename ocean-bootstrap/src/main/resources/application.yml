@@ -86,7 +86,9 @@ knife4j:
 gis:
   vector:
     tiles:
+      # 与已启用的MVT GZIP压缩一致；解码体积另设硬上限保护服务端和浏览器。
       max-tile-bytes: ${GIS_VECTOR_TILE_MAX_BYTES:2097152}
+      max-decoded-tile-bytes: ${GIS_VECTOR_TILE_MAX_DECODED_BYTES:16777216}
       max-concurrent-queries: ${GIS_VECTOR_TILE_MAX_CONCURRENT:4}
       max-queued-queries: ${GIS_VECTOR_TILE_MAX_QUEUED:32}
       queue-wait-ms: ${GIS_VECTOR_TILE_QUEUE_WAIT_MS:10000}

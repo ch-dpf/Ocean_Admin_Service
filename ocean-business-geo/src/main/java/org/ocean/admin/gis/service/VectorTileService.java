@@ -15,6 +15,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.Base64;
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -25,6 +27,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
+import java.util.zip.GZIPOutputStream;
 
 /** 同一数据版本生成一致的显示瓦片；原始要素查询和编辑仍由图层服务负责。 */
 @Service
@@ -107,9 +110,15 @@ public class VectorTileService {
                     throw new ResponseStatusException(HttpStatus.GONE, "瓦片版本已过期，请重新读取地图定义");
                 mapper.setTileQueryTimeout(properties.getQueryTimeoutMs());
                 var payload = mapper.dataSetTile(dataSetId, contract.policy(),
-                        z, x, y, properties.getMaxTileBytes());
-                if (payload == null || payload.body() == null || payload.byteSize() > properties.getMaxTileBytes())
-                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "当前瓦片超过字节预算，请使用更高层级；未截断要素");
+                        z, x, y, properties.getMaxDecodedTileBytes());
+                if (payload == null) throw unavailable("瓦片编码未返回结果，请稍后重试");
+                if (payload.byteSize() > properties.getMaxDecodedTileBytes())
+                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "当前瓦片超过解码体积上限；未截断要素");
+                if (payload.body() == null) throw unavailable("瓦片编码失败，请稍后重试");
+                // HTTP层已启用MVT GZIP；不能用未压缩体积误判传输预算。
+                if (payload.body().length > properties.getMaxTileBytes()
+                        && gzipSize(payload.body()) > properties.getMaxTileBytes())
+                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "当前瓦片压缩后仍超过传输体积上限；未截断要素");
                 cache(key, payload.body());
                 return payload.body();
             });
@@ -117,6 +126,16 @@ public class VectorTileService {
             return body;
         } catch (RuntimeException | Error ex) { result.completeExceptionally(ex); throw ex; }
         finally { inFlight.remove(key, result); }
+    }
+
+    private int gzipSize(byte[] body) {
+        var compressed = new ByteArrayOutputStream(Math.min(body.length, properties.getMaxTileBytes()));
+        try (var gzip = new GZIPOutputStream(compressed)) {
+            gzip.write(body);
+        } catch (IOException ex) {
+            throw new IllegalStateException("瓦片压缩体积计算失败", ex);
+        }
+        return compressed.size();
     }
 
     private void requireTile(int z, int x, int y, int maxZoom) {

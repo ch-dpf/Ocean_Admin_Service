@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
 
-/** 动态矢量瓦片的资源预算；不以任意截取要素代替完整查询。 */
+/** 压缩体积与解码体积分开限制，不以任意截取要素代替完整查询。 */
 @Data
 @Component
 @Validated
@@ -16,6 +16,8 @@ import org.springframework.validation.annotation.Validated;
 public class VectorTileProperties {
     @Positive
     private int maxTileBytes = 2 * 1024 * 1024;
+    @Positive
+    private int maxDecodedTileBytes = 16 * 1024 * 1024;
     @Min(1) @Max(16)
     private int maxConcurrentQueries = 4;
     @Min(0) @Max(128)
