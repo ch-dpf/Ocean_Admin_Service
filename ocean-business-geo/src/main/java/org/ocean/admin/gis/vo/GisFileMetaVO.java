@@ -4,10 +4,13 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import org.ocean.admin.gis.dto.TaskInfo;
+import org.ocean.admin.gis.dto.TaskStatus;
 import tools.jackson.databind.JsonNode;
 
 /** GIS 文件元数据请求及响应对象。 */
@@ -19,6 +22,14 @@ public class GisFileMetaVO {
 
     @Schema(description = "所属数据集 ID", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long dataSetId;
+    @Schema(description = "文件来源：UPLOAD 或 WORKSPACE", accessMode = Schema.AccessMode.READ_ONLY)
+    private String sourceType;
+    @Schema(accessMode = Schema.AccessMode.READ_ONLY)
+    private String workspaceCode;
+    @Schema(description = "工作区内的相对文件路径", accessMode = Schema.AccessMode.READ_ONLY)
+    private String relativePath;
+    @Schema(description = "登记时的源文件修改时间，Unix 毫秒", accessMode = Schema.AccessMode.READ_ONLY)
+    private Long sourceModifiedAt;
     @Pattern(regexp = "AUTO|UNKNOWN", message = "矢量归组方式须为AUTO或UNKNOWN")
     private String vectorPlacement;
     @Schema(accessMode = Schema.AccessMode.READ_ONLY)
@@ -56,12 +67,12 @@ public class GisFileMetaVO {
     @Pattern(regexp = "(?i)[0-9a-f]{64}", message = "SHA-256 必须为64位十六进制字符串")
     private String sha256;
 
-    @Schema(description = "上传人 ID")
-    private Long uploadedBy;
+    @Schema(description = "登记人 ID", accessMode = Schema.AccessMode.READ_ONLY)
+    private Long createdBy;
 
-    @Schema(description = "上传状态", allowableValues = {"PENDING", "READY", "FAILED"}, example = "READY")
-    @Pattern(regexp = "(?i)PENDING|READY|FAILED", message = "上传状态只能为 PENDING、READY 或 FAILED")
-    private String uploadStatus;
+    @Schema(description = "源文件状态", allowableValues = {"PENDING", "READY", "FAILED"}, example = "READY")
+    @Pattern(regexp = "(?i)PENDING|READY|FAILED", message = "文件状态只能为 PENDING、READY 或 FAILED")
+    private String fileStatus;
 
     @Schema(description = "失败文件资源清理状态",
             allowableValues = {"NOT_REQUIRED", "PENDING", "COMPLETED", "FAILED"},
@@ -100,4 +111,21 @@ public class GisFileMetaVO {
 
     @Schema(description = "更新时间", accessMode = Schema.AccessMode.READ_ONLY)
     private LocalDateTime updateTime;
+
+    public record WorkspaceRequest(
+            @NotBlank @Size(max = 64) String workspaceCode,
+            @NotBlank @Size(max = 1000) String relativePath,
+            @Schema(description = "目录接入是否包含所有层级子目录，默认false", defaultValue = "false") Boolean includeSubdirectories,
+            @Pattern(regexp = "AUTO|UNKNOWN") String vectorPlacement) { }
+
+    public record WorkspaceItem(Long fileMetaId, String relativePath, String status, String errorMessage) { }
+
+    public record WorkspaceSubmission(
+            @Schema(description = "工作区实时进度标识，对应WebSocket TaskInfo.taskId，不是处理任务数据库主键") String progressTaskId,
+            Long dataSetId, String taskType, TaskStatus status) { }
+
+    /** 实时进度短期查询；文件明细仍使用现有文件分页接口。 */
+    public record WorkspaceProgress(TaskInfo task, Long dataSetId, String entryType,
+            long scannedCount, long registeredCount, long duplicateCount, long unsupportedCount,
+            long registrationFailedCount, boolean scanComplete) { }
 }

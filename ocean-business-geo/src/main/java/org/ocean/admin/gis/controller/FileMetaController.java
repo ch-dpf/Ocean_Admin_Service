@@ -63,8 +63,8 @@ public class FileMetaController {
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "永久删除文件",
-            description = "永久删除文件元数据和物理文件；活动处理任务引用时拒绝删除")
+    @Operation(summary = "删除管理文件",
+            description = "删除文件元数据；上传来源同时删除托管文件，工作区来源保留源文件；活动处理任务引用时拒绝删除")
     @OperationLog(module = "GIS_FILE_META", type = OperationType.DELETE, description = "永久删除GIS文件")
     public ResponseResult<String> deleteFileMeta(@PathVariable Long id) {
         fileMetaService.deleteFileMeta(id);

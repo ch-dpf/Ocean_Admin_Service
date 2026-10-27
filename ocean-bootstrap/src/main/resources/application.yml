@@ -114,6 +114,7 @@ gis:
     imagery-max-tile-count: ${GIS_IMAGERY_MAX_TILE_COUNT:200000}
     imagery-overview-min-size: ${GIS_IMAGERY_OVERVIEW_MIN_SIZE:512}
     archive-compression-level: ${GIS_ARCHIVE_COMPRESSION_LEVEL:1}
+    workspace-max-scan-entries: ${GIS_WORKSPACE_MAX_SCAN_ENTRIES:10000}
     workspaces:
       default: ${GIS_PROCESSING_WORKSPACE_DEFAULT:gis/workspaces/default}
   publication:

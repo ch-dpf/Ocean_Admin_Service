@@ -11,7 +11,7 @@
                COUNT(*) FILTER (WHERE fm.metadata_status = 'FAILED') AS failed_metadata_file_count,
                COUNT(*) FILTER (WHERE fm.metadata_status = 'NOT_APPLICABLE') AS not_applicable_file_count
         FROM ocean_gis.gis_file_meta fm
-        WHERE fm.deleted = 0 AND fm.upload_status = 'READY' AND fm.data_set_id IN
+        WHERE fm.deleted = 0 AND fm.file_status = 'READY' AND fm.data_set_id IN
         <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
         GROUP BY fm.data_set_id
     </select>
@@ -21,7 +21,7 @@
                representative_longitude AS longitude, representative_latitude AS latitude,
                representative_layer_key AS layer_key, representative_extent_kind AS extent_kind
         FROM ocean_gis.gis_file_meta
-        WHERE deleted = 0 AND upload_status = 'READY' AND metadata_status = 'COMPLETED'
+        WHERE deleted = 0 AND file_status = 'READY' AND metadata_status = 'COMPLETED'
           AND data_set_id IN
         <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
         ORDER BY data_set_id, id
@@ -45,9 +45,10 @@
         <if test="q.metadataStatus != null">AND fm.metadata_status = #{q.metadataStatus}</if>
         <if test="q.dataSetId != null">AND fm.data_set_id = #{q.dataSetId}</if>
         <if test="q.categoryId != null">AND ds.category_id = #{q.categoryId}</if>
+        <if test="q.sourceType != null">AND fm.source_type = #{q.sourceType}</if>
         <if test="q.originalName != null">AND fm.original_name LIKE CONCAT('%', #{q.originalName}, '%')</if>
         <if test="q.extension != null">AND fm.extension = #{q.extension}</if>
-        <if test="q.uploadStatus != null">AND fm.upload_status = #{q.uploadStatus}</if>
+        <if test="q.fileStatus != null">AND fm.file_status = #{q.fileStatus}</if>
         <if test="q.hasBounds() or q.requiredZoom != null">
             AND fm.metadata_status = 'COMPLETED'
             AND EXISTS (
@@ -73,16 +74,16 @@
         INSERT INTO ocean_gis.gis_file_meta (
             id, data_set_id, original_name, vector_placement, vector_dataset_style_id,
             storage_name, storage_key, storage_type, extension,
-            size_bytes, sha256, uploaded_by,
-            upload_status, cleanup_status, error_message,
+            size_bytes, sha256, created_by,
+            file_status, cleanup_status, error_message,
             create_time, update_time, deleted
         ) VALUES
         <foreach collection="records" item="item" separator=",">
             (
                 #{item.id}, #{item.dataSetId}, #{item.originalName}, #{item.vectorPlacement}, #{item.vectorDatasetStyleId},
                 #{item.storageName}, #{item.storageKey}, #{item.storageType}, #{item.extension},
-                #{item.sizeBytes}, #{item.sha256}, #{item.uploadedBy},
-                #{item.uploadStatus}, #{item.cleanupStatus}, #{item.errorMessage},
+                #{item.sizeBytes}, #{item.sha256}, #{item.createdBy},
+                #{item.fileStatus}, #{item.cleanupStatus}, #{item.errorMessage},
                 #{item.createTime}, #{item.updateTime}, #{item.deleted}
             )
         </foreach>

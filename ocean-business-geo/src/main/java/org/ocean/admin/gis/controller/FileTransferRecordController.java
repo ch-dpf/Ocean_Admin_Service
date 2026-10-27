@@ -47,7 +47,7 @@ public class FileTransferRecordController {
             @RequestParam(required = false) String recordStatus,
             @RequestParam(required = false) String originalName,
             @RequestParam(required = false) String extension,
-            @RequestParam(required = false) String uploadStatus,
+            @RequestParam(required = false) String fileStatus,
             @Parameter(description = "创建时间起点，ISO-8601格式")
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
@@ -58,7 +58,7 @@ public class FileTransferRecordController {
             LocalDateTime createTimeEnd) {
         return ResponseResult.success(fileTransferRecordService.getRecordPage(
                 current, size, dataSetId, categoryId, recordNo, operationType, recordStatus,
-                originalName, extension, uploadStatus, createTimeStart, createTimeEnd));
+                originalName, extension, fileStatus, createTimeStart, createTimeEnd));
     }
 
     @GetMapping("/{recordNo}")

@@ -82,7 +82,7 @@ public class FileUploadService {
             GisFileTransferRecord record = fileTransferRecordService.requireImportRecord(recordNo);
             validateBatchOwner(record);
             var failed = fileTransferRecordService.getImportItems(record.getId()).stream()
-                    .filter(item -> "FAILED".equals(item.getOperationStatus()) && "READY".equals(item.getUploadStatus())
+                    .filter(item -> "FAILED".equals(item.getOperationStatus()) && "READY".equals(item.getFileStatus())
                             && item.getFileMetaId() != null).toList();
             if (failed.isEmpty() && record.getRecordStatus() != TaskStatus.RUNNING) {
                 throw new IllegalStateException("批次没有可重试的已上传文件；传输失败的文件需要重新上传");
@@ -137,7 +137,7 @@ public class FileUploadService {
             ensureProgressTask(record);
             List<GisFileTransferRecordItem> items = fileTransferRecordService.getImportItems(record.getId());
             int expectedFileIndex = (int) items.stream()
-                    .filter(i -> "READY".equals(i.getUploadStatus()) || "FAILED".equals(i.getOperationStatus())).count();
+                    .filter(i -> "READY".equals(i.getFileStatus()) || "FAILED".equals(i.getOperationStatus())).count();
             if (command.fileIndex() > expectedFileIndex) {
                 throw new IllegalStateException(
                         "文件必须按顺序上传，当前应上传fileIndex=" + expectedFileIndex);
@@ -601,8 +601,8 @@ public class FileUploadService {
         meta.setExtension(FileUploadUtil.extensionOf(command.fileName()));
         meta.setSizeBytes(storedFile.getSizeBytes());
         meta.setSha256(storedFile.getSha256());
-        meta.setUploadedBy(getCurrentOperatorId());
-        meta.setUploadStatus("READY");
+        meta.setCreatedBy(getCurrentOperatorId());
+        meta.setFileStatus("READY");
         meta.setMetadataStatus("QUEUED");
         meta.setMetadataVersion(0L);
         meta.setCleanupStatus("NOT_REQUIRED");
@@ -652,7 +652,7 @@ public class FileUploadService {
         result.put("fileIndex", command.fileIndex());
         result.put("nextOffset", nextOffset(record, command, item));
         result.put("duplicate", duplicate);
-        result.put("fileCompleted", item != null && "READY".equals(item.getUploadStatus()));
+        result.put("fileCompleted", item != null && "READY".equals(item.getFileStatus()));
         result.put("importCompleted", item != null && "SUCCESS".equals(item.getOperationStatus()));
         result.put("currentStage", record.getCurrentStage());
         result.put("fileFailed", fileFailed
@@ -673,7 +673,7 @@ public class FileUploadService {
             GisFileTransferRecord record,
             GisUploadChunkCommand command,
             GisFileTransferRecordItem item) {
-        if (item != null && "READY".equals(item.getUploadStatus())) {
+        if (item != null && "READY".equals(item.getFileStatus())) {
             return command.fileSize();
         }
         if (item != null && "FAILED".equals(item.getOperationStatus())) {
@@ -695,14 +695,14 @@ public class FileUploadService {
 
     private boolean isItemFinished(GisFileTransferRecordItem item) {
         return "SUCCESS".equals(item.getOperationStatus())
-                || "READY".equals(item.getUploadStatus())
+                || "READY".equals(item.getFileStatus())
                 || "FAILED".equals(item.getOperationStatus());
     }
 
     private long successfulBytes(List<GisFileTransferRecordItem> items) {
         long completed = 0L;
         for (GisFileTransferRecordItem item : items) {
-            if ("READY".equals(item.getUploadStatus())) {
+            if ("READY".equals(item.getFileStatus())) {
                 completed = Math.addExact(completed, item.getSizeBytes());
             }
         }

@@ -98,6 +98,12 @@ public class ProcessingTaskService {
                         "已管理文件已被删除，处理任务未创建: " + input.getSourceFileMetaId());
             }
             if (!Objects.equals(current.getDataSetId(), input.getSourceDataSetId())
+                    || !"READY".equals(current.getFileStatus()) || !"COMPLETED".equals(current.getMetadataStatus())
+                    || !Objects.equals(current.getSourceType(), input.getSourceLocatorType())
+                    || !Objects.equals(current.getWorkspaceCode(), input.getWorkspaceCode())
+                    || !Objects.equals(current.getRelativePath(), input.getRelativePath())
+                    || !Objects.equals(current.getSourceModifiedAt(), input.getSourceModifiedAt())
+                    || !Objects.equals(current.getSizeBytes(), input.getSizeBytes())
                     || !Objects.equals(current.getStorageType(), input.getSourceStorageType())
                     || !Objects.equals(current.getStorageKey(), input.getSourceStorageKey())
                     || !Objects.equals(current.getSha256(), input.getSha256())) {
@@ -144,6 +150,9 @@ public class ProcessingTaskService {
                     .append('|').append(input.getSourceDataSetId())
                     .append('|').append(input.getSourceStorageType())
                     .append('|').append(input.getSourceStorageKey())
+                    .append('|').append(input.getSourceLocatorType())
+                    .append('|').append(input.getSourceModifiedAt())
+                    .append('|').append(input.getSizeBytes())
                     .append('|').append(input.getWorkspaceCode())
                     .append('|').append(input.getRelativePath())
                     .append('|').append(input.getStorageKey())

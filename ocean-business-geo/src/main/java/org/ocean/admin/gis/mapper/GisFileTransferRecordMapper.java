@@ -24,7 +24,7 @@ public interface GisFileTransferRecordMapper extends BaseMapper<GisFileTransferR
             @Param("recordStatus") TaskStatus recordStatus,
             @Param("originalName") String originalName,
             @Param("extension") String extension,
-            @Param("uploadStatus") String uploadStatus,
+            @Param("fileStatus") String fileStatus,
             @Param("createTimeStart") LocalDateTime createTimeStart,
             @Param("createTimeEnd") LocalDateTime createTimeEnd);
 

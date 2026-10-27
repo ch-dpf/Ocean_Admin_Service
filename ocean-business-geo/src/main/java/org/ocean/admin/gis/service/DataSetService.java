@@ -16,6 +16,7 @@ import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.vo.GisDataSetVO;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
@@ -50,6 +51,7 @@ public class DataSetService {
     private final GisFileSpatialMetadataMapper spatialMetadataMapper;
     private final FileUploadUtil fileUploadUtil;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher events;
 
     /** 调用方必须在文件写入事务内提供变更前后快照；文件数与大小均只统计未删除的 READY 文件。 */
     @Transactional(propagation = Propagation.MANDATORY)
@@ -72,7 +74,7 @@ public class DataSetService {
     }
 
     private boolean contributesToStatistics(GisFileMeta file) {
-        return Integer.valueOf(0).equals(file.getDeleted()) && "READY".equals(file.getUploadStatus());
+        return Integer.valueOf(0).equals(file.getDeleted()) && "READY".equals(file.getFileStatus());
     }
 
     private record FileStatisticsDelta(int count, long sizeBytes) {
@@ -211,6 +213,7 @@ public class DataSetService {
             throw new IllegalStateException("数据集仍有文件正在提取空间元数据，请等待处理结束后重试");
         }
         List<GisFileMeta> unsupportedStorage = files.stream()
+                .filter(file -> "UPLOAD".equals(file.getSourceType()))
                 .filter(file -> file.getStorageKey() != null && !file.getStorageKey().isBlank())
                 .filter(file -> !"LOCAL".equals(file.getStorageType()))
                 .toList();
@@ -220,6 +223,7 @@ public class DataSetService {
         }
 
         fileUploadUtil.stageStoredForTransactionalDeletion(files.stream()
+                .filter(file -> "UPLOAD".equals(file.getSourceType()))
                 .map(GisFileMeta::getStorageKey)
                 .filter(java.util.Objects::nonNull)
                 .filter(key -> !key.isBlank())
@@ -229,6 +233,7 @@ public class DataSetService {
             throw new IllegalStateException("数据集物理删除失败: " + id);
         }
         fileUploadUtil.deleteEmptyDataSetDirectory(id);
+        events.publishEvent(new FileSpatialMetadataService.MetadataProgress(files.stream().map(GisFileMeta::getId).toList(), false));
         log.info("永久删除 GIS 数据集成功: id={}, name={}, fileCount={}",
                 id, dataSet.getDataSetName(), files.size());
     }

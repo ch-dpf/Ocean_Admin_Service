@@ -42,7 +42,7 @@ import java.util.Set;
 public class FileTransferRecordService {
     private static final String UPLOAD_CLEANUP_PENDING = "UPLOAD_CLEANUP_PENDING";
     private static final Set<String> OPERATION_TYPES = Set.of("IMPORT", "EXPORT");
-    private static final Set<String> UPLOAD_STATUSES = Set.of("PENDING", "READY", "FAILED");
+    private static final Set<String> FILE_STATUSES = Set.of("PENDING", "READY", "FAILED");
 
     public PageResult<List<GisFileTransferRecordVO>> getRecordPage(
             Integer current,
@@ -54,7 +54,7 @@ public class FileTransferRecordService {
             String recordStatus,
             String originalName,
             String extension,
-            String uploadStatus,
+            String fileStatus,
             LocalDateTime createTimeStart,
             LocalDateTime createTimeEnd) {
         long currentPage = current == null || current < 1 ? 1L : current;
@@ -64,9 +64,9 @@ public class FileTransferRecordService {
         TaskStatus normalizedRecordStatus = normalizeTaskStatus(recordStatus);
         String normalizedOriginalName = trimToNull(originalName);
         String normalizedExtension = normalizeLower(extension);
-        String normalizedUploadStatus = normalizeUpper(uploadStatus);
+        String normalizedFileStatus = normalizeUpper(fileStatus);
         validateQuery(normalizedOperationType, normalizedRecordStatus,
-                normalizedUploadStatus, createTimeStart, createTimeEnd);
+                normalizedFileStatus, createTimeStart, createTimeEnd);
 
         Page<GisFileTransferRecordVO> page = recordMapper.selectRecordPage(
                 new Page<>(currentPage, pageSize),
@@ -77,7 +77,7 @@ public class FileTransferRecordService {
                 normalizedRecordStatus,
                 normalizedOriginalName,
                 normalizedExtension,
-                normalizedUploadStatus,
+                normalizedFileStatus,
                 createTimeStart,
                 createTimeEnd);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
@@ -122,7 +122,7 @@ public class FileTransferRecordService {
         List<GisFileTransferRecordItem> items = recordItemMapper.selectList(new LambdaQueryWrapper<GisFileTransferRecordItem>()
                 .eq(GisFileTransferRecordItem::getFileMetaId, fileId)
                 .in(GisFileTransferRecordItem::getOperationStatus, "RUNNING", "FAILED")
-                .eq(GisFileTransferRecordItem::getUploadStatus, "READY"));
+                .eq(GisFileTransferRecordItem::getFileStatus, "READY"));
         for (GisFileTransferRecordItem item : items) {
             if ("FAILED".equals(item.getOperationStatus())) reopenImportItem(item);
         }
@@ -254,8 +254,8 @@ public class FileTransferRecordService {
         item.setExtension(extension);
         item.setOperationStatus("RUNNING");
         item.setSizeBytes(sizeBytes);
-        item.setUploadedBy(operatorId);
-        item.setUploadStatus("PENDING");
+        item.setCreatedBy(operatorId);
+        item.setFileStatus("PENDING");
         item.setCleanupStatus("NOT_REQUIRED");
         item.setCreateTime(now);
         item.setUpdateTime(now);
@@ -326,7 +326,7 @@ public class FileTransferRecordService {
         if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) {
             return null;
         }
-        if (getImportItems(recordId).stream().anyMatch(item -> "READY".equals(item.getUploadStatus())
+        if (getImportItems(recordId).stream().anyMatch(item -> "READY".equals(item.getFileStatus())
                 && "RUNNING".equals(item.getOperationStatus()))) {
             return null;
         }
@@ -357,7 +357,7 @@ public class FileTransferRecordService {
                 .eq("record_id", recordId)
                 .eq("operation_status", "RUNNING")
                 .set("operation_status", "FAILED")
-                .set("upload_status", "FAILED")
+                .set("file_status", "FAILED")
                 .set("cleanup_status", "PENDING")
                 .set("error_message", errorMessage)
                 .set("update_time", now));
@@ -444,8 +444,8 @@ public class FileTransferRecordService {
                         .set("error_message", null)
                         .set("size_bytes", item.getSizeBytes())
                         .set("sha256", item.getSha256())
-                        .set("uploaded_by", item.getUploadedBy())
-                        .set("upload_status", item.getUploadStatus())
+                        .set("created_by", item.getCreatedBy())
+                        .set("file_status", item.getFileStatus())
                         .set("cleanup_status", item.getCleanupStatus())
                         .set("update_time", now));
         if (itemUpdated != 1) {
@@ -480,7 +480,7 @@ public class FileTransferRecordService {
         List<GisFileTransferRecordItem> items = getImportItems(record.getId());
         int completed = (int) items.stream().filter(i -> "SUCCESS".equals(i.getOperationStatus())).count();
         int failed = (int) items.stream().filter(i -> "FAILED".equals(i.getOperationStatus())).count();
-        long transferred = items.stream().filter(i -> "READY".equals(i.getUploadStatus()) || "FAILED".equals(i.getOperationStatus())).count();
+        long transferred = items.stream().filter(i -> "READY".equals(i.getFileStatus()) || "FAILED".equals(i.getOperationStatus())).count();
         boolean terminal = completed + failed == record.getTotalCount();
         TaskStatus state = !terminal ? TaskStatus.RUNNING : failed == 0 ? TaskStatus.COMPLETED
                 : completed == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED;
@@ -512,7 +512,7 @@ public class FileTransferRecordService {
                 .eq("id", item.getId())
                 .eq("operation_status", "RUNNING")
                 .set("operation_status", "FAILED")
-                .set("upload_status", "FAILED")
+                .set("file_status", "FAILED")
                 .set("error_message", abbreviate(errorMessage, 1000))
                 .set("update_time", now)) != 1) {
             throw new IllegalStateException("上传文件失败状态提交冲突: " + sequenceNo);
@@ -579,13 +579,13 @@ public class FileTransferRecordService {
     private void validateQuery(
             String operationType,
             TaskStatus recordStatus,
-            String uploadStatus,
+            String fileStatus,
             LocalDateTime createTimeStart,
             LocalDateTime createTimeEnd) {
         if (operationType != null && !OPERATION_TYPES.contains(operationType)) {
             throw new IllegalArgumentException("传输类型只能为 IMPORT 或 EXPORT");
         }
-        if (uploadStatus != null && !UPLOAD_STATUSES.contains(uploadStatus)) {
+        if (fileStatus != null && !FILE_STATUSES.contains(fileStatus)) {
             throw new IllegalArgumentException("文件状态只能为 PENDING、READY 或 FAILED");
         }
         if (createTimeStart != null && createTimeEnd != null
@@ -610,8 +610,8 @@ public class FileTransferRecordService {
                 item.getExtension(),
                 item.getSizeBytes(),
                 item.getSha256(),
-                item.getUploadedBy(),
-                item.getUploadStatus(),
+                item.getCreatedBy(),
+                item.getFileStatus(),
                 item.getCleanupStatus(),
                 item.getErrorMessage(),
                 item.getCreateTime(),

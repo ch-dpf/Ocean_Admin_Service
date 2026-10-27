@@ -30,6 +30,11 @@ public final class TaskNoGenerator {
         return generate("archive", LocalDateTime.now());
     }
 
+    /** 工作区接入仅生成实时进度编号，不创建gis_processing_task记录。 */
+    public static String generateWorkspaceImportTaskNo() {
+        return generate("workspace", LocalDateTime.now());
+    }
+
     public static String generateProcessingTaskNo(GisProcessingType type) {
         if (type == null) {
             throw new IllegalArgumentException("GIS 处理类型不能为空");

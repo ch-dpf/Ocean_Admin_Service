@@ -23,6 +23,12 @@ public class GisFileMeta {
 
     /** 所属数据集 */
     private Long dataSetId;
+    /** UPLOAD 使用托管存储，WORKSPACE 原位引用受控服务器文件。 */
+    private String sourceType = "UPLOAD";
+    private String workspaceCode;
+    private String relativePath;
+    /** 登记时的源文件修改时间，Unix 毫秒。 */
+    private Long sourceModifiedAt;
     private String vectorPlacement;
     private Long vectorDatasetStyleId;
 
@@ -47,11 +53,11 @@ public class GisFileMeta {
     /** 文件内容 SHA-256，用于完整性校验和去重 */
     private String sha256;
 
-    /** 上传人 */
-    private Long uploadedBy;
+    /** 登记人 */
+    private Long createdBy;
 
     /** PENDING、READY、FAILED */
-    private String uploadStatus;
+    private String fileStatus;
 
     /** NOT_REQUIRED、PENDING、COMPLETED、FAILED */
     private String cleanupStatus;
@@ -73,7 +79,7 @@ public class GisFileMeta {
     private String representativeLayerKey;
     private String representativeExtentKind;
 
-    /** 上传时间 */
+    /** 登记时间 */
     private LocalDateTime createTime;
 
     /** 修改或解析完成时间 */

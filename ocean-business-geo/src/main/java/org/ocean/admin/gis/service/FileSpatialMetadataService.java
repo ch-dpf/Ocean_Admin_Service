@@ -17,12 +17,13 @@ import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.mapper.GisVectorMapper;
-import org.ocean.admin.gis.util.FileUploadUtil;
+import org.ocean.admin.gis.processing.input.ControlledWorkspaceResolver;
 import org.ocean.admin.gis.util.GeoJsonFeatureReader;
 import org.ocean.admin.gis.util.RasterFootprintBuilder;
 import org.ocean.admin.gis.util.VectorTemplateRules;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
@@ -48,16 +49,23 @@ public class FileSpatialMetadataService {
     private final GisFileMetaMapper fileMapper;
     private final GisDataSetMapper dataSetMapper;
     private final FileTransferRecordService transferService;
-    private final FileUploadUtil files;
+    private final ControlledWorkspaceResolver sources;
     private final GisVectorMapper vectorMapper;
     private final VectorDataSetStyleService vectorDataSetStyles;
     private final VectorTemplateRules templateRules;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactions;
+    private final ApplicationEventPublisher events;
+
+    /** null表示领取或心跳，true/false表示已提交的解析或删除结果。事件不创建业务任务。 */
+    public record MetadataProgress(List<Long> fileIds, Boolean succeeded) {
+        public MetadataProgress { fileIds = List.copyOf(fileIds); }
+    }
 
     public void extract(Long fileId) {
         GisFileMeta claim = transactions.execute(status -> spatialMapper.claim(fileId, LocalDateTime.now().plusMinutes(15)));
         if (claim == null) return;
+        events.publishEvent(new MetadataProgress(List.of(fileId), null));
         GisFileSpatialMetadata metadata = null;
         VectorExtraction vectorResult = null;
         String errorCode = null;
@@ -75,7 +83,11 @@ public class FileSpatialMetadataService {
                     extra.put("vectorDatasetStyleId", claim.getVectorDatasetStyleId().toString());
                     metadata.setExtraMetadata(objectMapper.writeValueAsString(extra));
                 }
+                sources.resolveFile(claim);
             }
+        } catch (ControlledWorkspaceResolver.SourceException ex) {
+            errorCode = ex.code();
+            errorMessage = ex.getMessage();
         } catch (MetadataException ex) {
             if ("LEASE_LOST".equals(ex.code)) return;
             errorCode = ex.code;
@@ -131,9 +143,32 @@ public class FileSpatialMetadataService {
             if (updated != 1) throw new IllegalStateException("空间元数据结果提交失败: " + fileId);
             locked.setMetadataStatus(result);
             locked.setMetadataErrorMessage(abbreviate(message));
-            return transferService.completeMetadataExtraction(locked, code == null);
+            events.publishEvent(new MetadataProgress(List.of(fileId), code == null));
+            return "UPLOAD".equals(locked.getSourceType())
+                    ? transferService.completeMetadataExtraction(locked, code == null) : null;
         });
         transferService.publishImportProgress(record);
+    }
+
+    /** 按文件来源发现不可用时立即使空间查询失效，同时撤销旧提取任务的提交资格。 */
+    public void markSourceUnavailable(Long fileId, String code, String message) {
+        transactions.executeWithoutResult(status -> {
+            GisFileMeta source = fileMapper.selectActiveByIdForUpdate(fileId);
+            if (source == null || !"WORKSPACE".equals(source.getSourceType())) return;
+            fileMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()
+                    .eq(GisFileMeta::getId, fileId)
+                    .set(GisFileMeta::getMetadataStatus, "FAILED")
+                    .setSql("metadata_version = metadata_version + 1")
+                    .set(GisFileMeta::getMetadataLeaseExpiresAt, null)
+                    .set(GisFileMeta::getRepresentativeLongitude, null)
+                    .set(GisFileMeta::getRepresentativeLatitude, null)
+                    .set(GisFileMeta::getRepresentativeLayerKey, null)
+                    .set(GisFileMeta::getRepresentativeExtentKind, null)
+                    .set(GisFileMeta::getMetadataErrorCode, code)
+                    .set(GisFileMeta::getMetadataErrorMessage, abbreviate(message))
+                    .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
+            events.publishEvent(new MetadataProgress(List.of(fileId), false));
+        });
     }
 
     /** 来源变更及人工重试共用同一失效操作；旧空间记录立即退出查询。 */
@@ -185,6 +220,7 @@ public class FileSpatialMetadataService {
                 throw new MetadataException("LEASE_LOST", "解析任务租约已失效");
             }
             renewedAt[0] = now;
+            events.publishEvent(new MetadataProgress(List.of(claim.getId()), null));
         };
     }
 
@@ -211,7 +247,7 @@ public class FileSpatialMetadataService {
         Map<String, Long> counts = new LinkedHashMap<>();
         List<GisVectorFeature> batch = new ArrayList<>();
         long[] statistics = {0, 0, 0, 0};
-        long count = geoJsonReader.read(files.resolveStoredPath(source.getStorageKey()), parsed -> {
+        long count = geoJsonReader.read(sources.resolveFile(source), parsed -> {
             JsonNode properties = objectMapper.readTree(parsed.properties());
             for (var part : templateRules.parts(objectMapper.readTree(parsed.geometry()))) {
                 var match = templateRules.classify(template, properties, part.kind(), "UNKNOWN".equals(source.getVectorPlacement()));
@@ -287,8 +323,7 @@ public class FileSpatialMetadataService {
     }
 
     private GisFileSpatialMetadata read(GisFileMeta file, Runnable heartbeat) throws Exception {
-        if (!"LOCAL".equals(file.getStorageType())) throw new MetadataException("UNSUPPORTED_STORAGE", "首期空间解析仅支持本地文件存储");
-        Path path = files.resolveStoredPath(file.getStorageKey());
+        Path path = sources.resolveFile(file);
         GisFileSpatialMetadata metadata = new GisFileSpatialMetadata();
         metadata.setId(IdWorker.getId());
         metadata.setFileMetaId(file.getId());

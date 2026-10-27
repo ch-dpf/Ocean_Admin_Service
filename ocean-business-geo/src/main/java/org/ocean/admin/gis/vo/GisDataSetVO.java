@@ -42,14 +42,14 @@ public class GisDataSetVO {
     @Schema(description = "数据集编码", accessMode = Schema.AccessMode.READ_ONLY)
     private String dataSetCode;
 
-    @Schema(description = "未删除且上传完整的管理文件数量，与总大小同口径", accessMode = Schema.AccessMode.READ_ONLY)
+    @Schema(description = "未删除且源状态为READY的管理文件数量，包含工作区引用，与总大小同口径", accessMode = Schema.AccessMode.READ_ONLY)
     private Integer fileCount;
 
-    @Schema(description = "未删除且上传完整的管理文件总大小（字节），包含配套文件，与元数据提取状态无关",
+    @Schema(description = "未删除且源状态为READY的管理文件总大小（字节），包含工作区引用及配套文件，与元数据提取状态无关",
             accessMode = Schema.AccessMode.READ_ONLY)
     private Long totalSizeBytes;
 
-    @Schema(description = "上传完整的未删除文件及其轮廓处理状态摘要", accessMode = Schema.AccessMode.READ_ONLY)
+    @Schema(description = "源状态为READY的未删除文件及其轮廓处理状态摘要", accessMode = Schema.AccessMode.READ_ONLY)
     private FileSummary fileSummary;
 
     @Schema(description = "分页接口直接返回已保存的文件代表点，每个可定位文件一个点；其他接口为 null",

@@ -5,7 +5,7 @@ import java.util.Objects;
 
 /** 可供查询、缓存和实时推送的不可变任务快照。 */
 public record TaskInfo(
-        String taskId,  // 任务id
+        String taskId,  // 字符串实时进度标识：上传recordNo、处理taskNo或工作区progressTaskId；不是处理任务数据库主键
         String correlationId, // 客户端请求关联标识
         String taskName,  // 任务名称
         String taskType,  // 任务类型

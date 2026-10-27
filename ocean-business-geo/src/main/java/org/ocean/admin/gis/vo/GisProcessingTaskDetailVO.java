@@ -30,6 +30,8 @@ public class GisProcessingTaskDetailVO {
             String sourceDataSetName,
             String sourceStorageType,
             String sourceStorageKey,
+            String sourceLocatorType,
+            Long sourceModifiedAt,
             String workspaceCode,
             String relativePath,
             String storageKey,

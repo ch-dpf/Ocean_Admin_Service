@@ -30,7 +30,7 @@ CREATE TABLE ocean_gis.gis_data_set (
 );
 
 COMMENT ON TABLE ocean_gis.gis_data_set IS 'GIS 数据集';
-COMMENT ON COLUMN ocean_gis.gis_data_set.total_size_bytes IS '未删除且上传状态为 READY 的管理文件总大小（字节），包含配套文件，与元数据提取状态无关';
+COMMENT ON COLUMN ocean_gis.gis_data_set.total_size_bytes IS '未删除且源状态为 READY 的管理文件总大小（字节），包含工作区引用与配套文件，与元数据提取状态无关';
 COMMENT ON COLUMN ocean_gis.gis_data_set.category_id IS '数据类别：0-影像数据，1-地形数据，2-矢量数据';
 COMMENT ON COLUMN ocean_gis.gis_data_set.deleted IS '保留的框架删除标记；管理接口执行物理删除';
 
@@ -195,14 +195,18 @@ CREATE TABLE ocean_gis.gis_file_meta (
     vector_placement         VARCHAR(10) CHECK (vector_placement IN ('AUTO','UNKNOWN')),
     vector_dataset_style_id  BIGINT,
     original_name            VARCHAR(255)  NOT NULL,
+    source_type              VARCHAR(20) NOT NULL DEFAULT 'UPLOAD' CHECK (source_type IN ('UPLOAD', 'WORKSPACE')),
+    workspace_code           VARCHAR(64),
+    relative_path            VARCHAR(1000),
+    source_modified_at       BIGINT,
     storage_name             VARCHAR(255),
     storage_key              VARCHAR(1000),
-    storage_type             VARCHAR(20)   NOT NULL DEFAULT 'LOCAL',
+    storage_type             VARCHAR(20),
     extension                VARCHAR(32),
     size_bytes               BIGINT        NOT NULL DEFAULT 0,
     sha256                   VARCHAR(64),
-    uploaded_by              BIGINT,
-    upload_status            VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
+    created_by              BIGINT,
+    file_status            VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
     cleanup_status           VARCHAR(20)   NOT NULL DEFAULT 'NOT_REQUIRED',
     error_message            VARCHAR(1000),
     metadata_status          VARCHAR(24)   NOT NULL DEFAULT 'QUEUED',
@@ -244,27 +248,43 @@ CREATE TABLE ocean_gis.gis_file_meta (
         CHECK (size_bytes >= 0),
     CONSTRAINT ck_gis_file_meta_deleted
         CHECK (deleted IN (0, 1)),
-    CONSTRAINT ck_gis_file_meta_upload_status
-        CHECK (upload_status IN ('PENDING', 'READY', 'FAILED')),
+    CONSTRAINT ck_gis_file_meta_file_status
+        CHECK (file_status IN ('PENDING', 'READY', 'FAILED')),
     CONSTRAINT ck_gis_file_meta_cleanup_status
         CHECK (cleanup_status IN ('NOT_REQUIRED', 'PENDING', 'COMPLETED', 'FAILED')),
     CONSTRAINT ck_gis_file_meta_storage_required
-        CHECK (upload_status = 'FAILED' OR (storage_name IS NOT NULL AND storage_key IS NOT NULL)),
-    CONSTRAINT ck_gis_file_meta_cleanup_upload_status
-        CHECK (upload_status = 'FAILED' OR cleanup_status = 'NOT_REQUIRED'),
+        CHECK ((source_type = 'WORKSPACE'
+                    AND workspace_code IS NOT NULL AND workspace_code ~ '^[A-Z0-9_.-]{1,64}$'
+                    AND relative_path IS NOT NULL AND relative_path <> ''
+                    AND relative_path !~ '(^/|(^|/)\.\.(/|$)|:|\\)'
+                    AND source_modified_at IS NOT NULL
+                    AND storage_name IS NULL AND storage_key IS NULL AND storage_type IS NULL
+                    AND file_status = 'READY' AND cleanup_status = 'NOT_REQUIRED')
+            OR (source_type = 'UPLOAD'
+                    AND workspace_code IS NULL AND relative_path IS NULL AND source_modified_at IS NULL
+                    AND storage_type IS NOT NULL
+                    AND (file_status = 'FAILED' OR (storage_name IS NOT NULL AND storage_key IS NOT NULL)))),
+    CONSTRAINT ck_gis_file_meta_cleanup_file_status
+        CHECK (file_status = 'FAILED' OR cleanup_status = 'NOT_REQUIRED'),
     CONSTRAINT ck_gis_file_meta_cleanup_pending_key
         CHECK (
             cleanup_status NOT IN ('PENDING', 'FAILED')
-            OR (upload_status = 'FAILED' AND storage_key IS NOT NULL)
+            OR (file_status = 'FAILED' AND storage_key IS NOT NULL)
         ),
     CONSTRAINT ck_gis_file_meta_cleanup_completed
         CHECK (
             cleanup_status <> 'COMPLETED'
-            OR (upload_status = 'FAILED' AND storage_key IS NULL)
+            OR (file_status = 'FAILED' AND storage_key IS NULL)
         )
 );
 
 COMMENT ON TABLE ocean_gis.gis_file_meta IS 'GIS 文件元数据';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.source_type IS 'UPLOAD-上传托管文件；WORKSPACE-受控工作区原位引用，不产生接入传输记录';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.workspace_code IS '服务器配置的工作区编码，不保存服务器绝对路径';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.relative_path IS '工作区内规范化相对文件路径';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.source_modified_at IS '登记时源文件最后修改时间，Unix毫秒，与大小共同校验来源是否变化';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.file_status IS '源文件状态：PENDING、READY、FAILED；空间解析状态由metadata_status独立维护';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.created_by IS '文件登记人';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_key IS '相对存储路径或对象存储 Key';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_type IS '存储类型：LOCAL、MINIO 或 S3';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.cleanup_status IS '失败文件资源清理状态：NOT_REQUIRED、PENDING、COMPLETED、FAILED';
@@ -275,7 +295,11 @@ COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_extent_kind IS '代表�
 
 CREATE UNIQUE INDEX uk_gis_file_meta_active_storage
     ON ocean_gis.gis_file_meta (storage_type, storage_key)
-    WHERE deleted = 0;
+    WHERE deleted = 0 AND source_type = 'UPLOAD';
+
+CREATE UNIQUE INDEX uk_gis_file_meta_active_workspace
+    ON ocean_gis.gis_file_meta (data_set_id, workspace_code, relative_path)
+    WHERE deleted = 0 AND source_type = 'WORKSPACE';
 
 CREATE INDEX idx_gis_file_meta_data_set
     ON ocean_gis.gis_file_meta (data_set_id, create_time DESC)
@@ -287,7 +311,7 @@ CREATE INDEX idx_gis_file_meta_sha256
 
 CREATE INDEX idx_gis_file_meta_metadata_queue
     ON ocean_gis.gis_file_meta (metadata_status, metadata_lease_expires_at, create_time)
-    WHERE deleted = 0 AND upload_status = 'READY';
+    WHERE deleted = 0 AND file_status = 'READY';
 
 COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_status IS '元数据提取状态；COMPLETED 后空间信息可检索';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_version IS '领取或重新提取时递增，阻止过期任务提交';
@@ -519,8 +543,8 @@ CREATE TABLE ocean_gis.gis_file_transfer_record_item (
     storage_type        VARCHAR(20),
     extension           VARCHAR(32),
     sha256              VARCHAR(64),
-    uploaded_by         BIGINT,
-    upload_status       VARCHAR(20),
+    created_by         BIGINT,
+    file_status       VARCHAR(20),
     cleanup_status      VARCHAR(20),
     create_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time         TIMESTAMP,
@@ -544,8 +568,8 @@ COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.storage_key IS '操作
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.storage_type IS '操作发生时的存储类型快照';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.extension IS '操作发生时的扩展名快照';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.sha256 IS '操作发生时的 SHA-256 快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.uploaded_by IS '操作发生时的上传人快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.upload_status IS '操作发生时的上传状态快照';
+COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.created_by IS '操作发生时的文件登记人快照';
+COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.file_status IS '操作发生时的源文件状态快照';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.cleanup_status IS '操作发生时的资源清理状态快照';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.update_time IS '操作完成时的文件更新时间快照';
 
@@ -634,6 +658,8 @@ CREATE TABLE ocean_gis.gis_processing_input (
     source_data_set_name VARCHAR(100),
     source_storage_type VARCHAR(20),
     source_storage_key VARCHAR(1000),
+    source_locator_type VARCHAR(20) CHECK (source_locator_type IN ('UPLOAD', 'WORKSPACE')),
+    source_modified_at BIGINT,
     workspace_code  VARCHAR(64),
     relative_path   VARCHAR(1000),
     storage_key     VARCHAR(1000),
@@ -661,13 +687,20 @@ CREATE TABLE ocean_gis.gis_processing_input (
     CONSTRAINT ck_gis_processing_input_locator
         CHECK (
             (source_file_meta_id IS NOT NULL AND source_data_set_id IS NOT NULL
-                AND source_data_set_name IS NOT NULL AND source_storage_type IS NOT NULL
-                AND source_storage_key IS NOT NULL AND workspace_code IS NULL
-                AND relative_path IS NULL AND storage_key IS NULL)
+                AND source_locator_type IS NOT NULL
+                AND source_data_set_name IS NOT NULL AND storage_key IS NULL
+                AND ((source_locator_type = 'UPLOAD' AND source_storage_type IS NOT NULL
+                        AND source_storage_key IS NOT NULL AND workspace_code IS NULL
+                        AND relative_path IS NULL AND source_modified_at IS NULL)
+                    OR (source_locator_type = 'WORKSPACE' AND source_storage_type IS NULL
+                        AND source_storage_key IS NULL AND workspace_code IS NOT NULL
+                        AND relative_path IS NOT NULL AND source_modified_at IS NOT NULL)))
             OR (source_file_meta_id IS NULL AND file_meta_id IS NULL
+                AND source_locator_type IS NULL AND source_modified_at IS NULL
                 AND workspace_code IS NOT NULL
                 AND relative_path IS NOT NULL AND storage_key IS NULL)
             OR (source_file_meta_id IS NULL AND file_meta_id IS NULL
+                AND source_locator_type IS NULL AND source_modified_at IS NULL
                 AND workspace_code IS NULL
                 AND relative_path IS NULL AND storage_key IS NOT NULL)
         ),
@@ -683,6 +716,8 @@ COMMENT ON COLUMN ocean_gis.gis_processing_input.file_meta_id IS '仅在数据�
 COMMENT ON COLUMN ocean_gis.gis_processing_input.source_file_meta_id IS '数据管理源文件ID快照，不设外键';
 COMMENT ON COLUMN ocean_gis.gis_processing_input.source_data_set_id IS '数据管理源数据集ID快照，不设外键';
 COMMENT ON COLUMN ocean_gis.gis_processing_input.source_storage_key IS '任务提交时的源文件存储Key快照';
+COMMENT ON COLUMN ocean_gis.gis_processing_input.source_locator_type IS '已管理文件来源快照：UPLOAD或WORKSPACE；直接上传处理或直接工作区处理时为空';
+COMMENT ON COLUMN ocean_gis.gis_processing_input.source_modified_at IS '已管理工作区源文件的修改时间快照，Unix毫秒';
 
 CREATE INDEX idx_gis_processing_input_task
     ON ocean_gis.gis_processing_input (task_id, sequence_no);

@@ -7,6 +7,7 @@ public sealed interface TaskProgressUpdate permits
         TaskProgressUpdate.StageChanged, // 阶段变更
         TaskProgressUpdate.OverallProgressChanged, // 总体进度变更
         TaskProgressUpdate.ResultChanged, // 结果变更
+        TaskProgressUpdate.ResultSnapshotChanged, // 扫描发现对象时，总数和结果一并更新
         TaskProgressUpdate.ItemFinished { // 单项完成
 
     static TaskProgressUpdate stageChanged(TaskStage stage) {
@@ -23,6 +24,17 @@ public sealed interface TaskProgressUpdate permits
 
     static TaskProgressUpdate itemFinished(boolean succeeded) {
         return new ItemFinished(succeeded);
+    }
+
+    static TaskProgressUpdate resultSnapshot(long total, long succeeded, long failed) {
+        return new ResultSnapshotChanged(total, succeeded, failed);
+    }
+
+    record ResultSnapshotChanged(long total, long succeeded, long failed) implements TaskProgressUpdate {
+        public ResultSnapshotChanged {
+            if (total < 0 || succeeded < 0 || failed < 0 || succeeded + failed > total)
+                throw new IllegalArgumentException("任务工作量快照不合法");
+        }
     }
 
     record StageChanged(TaskStage stage) implements TaskProgressUpdate {

@@ -15,7 +15,8 @@ public record TaskStage(
         message = message == null ? "" : message;
         boolean noWorkload = completed == null && total == null && unit == null;
         boolean completeWorkload = completed != null && total != null && unit != null;
-        if (!noWorkload && !completeWorkload) {
+        boolean countingWorkload = completed != null && total == null && unit != null && completed >= 0;
+        if (!noWorkload && !completeWorkload && !countingWorkload) {
             throw new IllegalArgumentException("任务阶段工作量必须完整提供");
         }
         if (completeWorkload
@@ -39,6 +40,11 @@ public record TaskStage(
 
     public boolean determinate() {
         return total != null;
+    }
+
+    /** 扫描总量未知时只报告已扫描条目数，不计算百分比。 */
+    public static TaskStage counting(String code, String message, long completed, TaskProgressUnit unit) {
+        return new TaskStage(code, message, completed, null, unit);
     }
 
     public Integer percent() {

@@ -51,11 +51,11 @@ public class GisFileTransferRecordItem {
     /** 操作发生时的文件 SHA-256 快照。 */
     private String sha256;
 
-    /** 操作发生时的上传人快照。 */
-    private Long uploadedBy;
+    /** 操作发生时的文件登记人快照。 */
+    private Long createdBy;
 
-    /** 操作发生时的上传状态快照。 */
-    private String uploadStatus;
+    /** 操作发生时的源文件状态快照。 */
+    private String fileStatus;
 
     /** 操作发生时的失败资源清理状态快照。 */
     private String cleanupStatus;
@@ -73,8 +73,8 @@ public class GisFileTransferRecordItem {
         extension = fileMeta.getExtension();
         sizeBytes = fileMeta.getSizeBytes() == null ? 0L : fileMeta.getSizeBytes();
         sha256 = fileMeta.getSha256();
-        uploadedBy = fileMeta.getUploadedBy();
-        uploadStatus = fileMeta.getUploadStatus();
+        createdBy = fileMeta.getCreatedBy();
+        fileStatus = fileMeta.getFileStatus();
         cleanupStatus = fileMeta.getCleanupStatus();
         errorMessage = fileMeta.getErrorMessage();
         createTime = fileMeta.getCreateTime();

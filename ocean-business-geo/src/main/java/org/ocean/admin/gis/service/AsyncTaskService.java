@@ -71,6 +71,11 @@ public class AsyncTaskService {
                         continue;
                     }
                     TaskInfo info = objectMapper.readValue(raw, TaskInfo.class);
+                    // 工作区接入只有本进程内的执行上下文，Redis快照不能用来恢复目录扫描。
+                    if ("GIS_WORKSPACE_IMPORT".equals(info.taskType())) {
+                        deleteTaskFromRedis(info.taskId());
+                        continue;
+                    }
                     activeTaskMap.put(info.taskId(), TaskState.restore(info));
                     restored++;
                 } catch (Exception e) {
@@ -99,8 +104,8 @@ public class AsyncTaskService {
         if (taskId == null || taskId.isBlank()) {
             throw new IllegalArgumentException("任务ID不能为空");
         }
-        if (total < 1) {
-            throw new IllegalArgumentException("任务总数必须大于0");
+        if (total < 0) {
+            throw new IllegalArgumentException("任务总数不能为负数");
         }
         initializeTask(taskId, correlationId, taskName, total, taskType, resultUnit);
         return taskId;
@@ -135,15 +140,15 @@ public class AsyncTaskService {
      * 如果没有任务处理成功，则标记为失败。
      * 如果有任务处理成功但存在失败任务，则标记为部分失败。
      */
-    public void finalizeTaskResult(String taskId, String message) {
+    public TaskInfo finalizeTaskResult(String taskId, String message) {
         TaskState taskState = activeTaskMap.get(taskId);
         if (taskState == null) {
-            return;
+            return null;
         }
         TaskInfo published;
         synchronized (taskState) {
             if (activeTaskMap.get(taskId) != taskState || taskState.status.isTerminal()) {
-                return;
+                return null;
             }
             if (taskState.result.processed() != taskState.result.total()) {
                 throw new IllegalStateException("任务仍有未处理项，不能进入终态");
@@ -171,21 +176,22 @@ public class AsyncTaskService {
                 published.result().succeeded(), published.result().failed(), published.version());
         activeTaskMap.remove(taskId, taskState);
         deleteTaskFromRedis(taskId);
+        return published;
     }
 
     /**
      * 任务因系统异常、入库失败、引擎失败等原因被迫整体终止
      * 将任务标记为整体失败。
      */
-    public void finalizeTaskFailure(String taskId, String message) {
+    public TaskInfo finalizeTaskFailure(String taskId, String message) {
         TaskState taskState = activeTaskMap.get(taskId);
         if (taskState == null) {
-            return;
+            return null;
         }
         TaskInfo published;
         synchronized (taskState) {
             if (activeTaskMap.get(taskId) != taskState || taskState.status.isTerminal()) {
-                return;
+                return null;
             }
             taskState.result = taskState.result.failRemaining();
             taskState.status = TaskStatus.FAILED;
@@ -202,6 +208,7 @@ public class AsyncTaskService {
                 published.version(), published.currentStage().message());
         activeTaskMap.remove(taskId, taskState);
         deleteTaskFromRedis(taskId);
+        return published;
     }
 
     /*
@@ -392,7 +399,7 @@ public class AsyncTaskService {
                     correlationId,
                     taskName,
                     taskType,
-                    TaskStatus.RUNNING,
+                    TaskStatus.QUEUED,
                     null,
                     new TaskResult(total, 0, 0, resultUnit),
                     TaskStage.indeterminate("queued", "任务已创建"),
@@ -439,11 +446,14 @@ public class AsyncTaskService {
                 } else if (update instanceof TaskProgressUpdate.ResultChanged resultChanged) {
                     nextResult = nextResult.withCounts(
                             resultChanged.succeeded(), resultChanged.failed());
+                } else if (update instanceof TaskProgressUpdate.ResultSnapshotChanged changed) {
+                    nextResult = new TaskResult(changed.total(), changed.succeeded(), changed.failed(), result.unit());
                 } else if (update instanceof TaskProgressUpdate.ItemFinished itemFinished) {
                     nextResult = nextResult.finishItem(itemFinished.succeeded());
                 }
             }
             currentStage = nextStage;
+            status = TaskStatus.RUNNING;
             overallPercent = nextOverallPercent;
             result = nextResult;
             lastActivityTime = LocalDateTime.now();

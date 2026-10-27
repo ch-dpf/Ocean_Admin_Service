@@ -388,7 +388,8 @@ public class ProcessingTaskRecordService {
                 input.getId(), input.getSequenceNo(), input.getInputKind(),
                 input.getInputStatus(), input.getFileMetaId(), input.getSourceFileMetaId(),
                 input.getSourceDataSetId(), input.getSourceDataSetName(),
-                input.getSourceStorageType(), input.getSourceStorageKey(), input.getWorkspaceCode(),
+                input.getSourceStorageType(), input.getSourceStorageKey(), input.getSourceLocatorType(),
+                input.getSourceModifiedAt(), input.getWorkspaceCode(),
                 input.getRelativePath(), input.getStorageKey(), input.getOriginalName(),
                 input.getExtension(), input.getSizeBytes(), input.getSha256(),
                 input.getErrorMessage(), input.getCreateTime(), input.getUpdateTime());

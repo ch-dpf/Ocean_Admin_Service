@@ -51,7 +51,11 @@ GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验
 
 `gis_file_meta.metadata_status` 为 QUEUED、RUNNING、COMPLETED、FAILED 或 NOT_APPLICABLE。metadata_version 和 metadata_lease_expires_at 用于领取与过期执行隔离。空间元数据、矢量图层 READY 与文件 COMPLETED 状态在同一事务提交；原上传批次的成功计数也在此后更新。数据集文件数不随提取状态变化；图层可用性以 READY 状态为准。
 
-`gis_data_set.file_count` 与 `total_size_bytes` 采用相同口径：分别统计当前 `upload_status = 'READY'` 的管理文件数量与大小总和（字节），包含配套文件及空间元数据提取失败的文件，排除分片、成果和缓存。两者由文件入库、新增、修改和永久删除事务原子维护。大小不代表磁盘实际占用量。
+`gis_data_set.file_count` 与 `total_size_bytes` 采用相同口径：分别统计当前 `file_status = 'READY'` 的管理文件数量与大小总和（字节），包含上传文件、工作区原位引用文件、配套文件及空间元数据提取失败的文件，排除分片、成果和缓存。两者由文件登记、新增、修改和永久删除事务原子维护。大小不代表磁盘实际占用量。
+
+`gis_file_meta.source_type` 区分 `UPLOAD/WORKSPACE`。上传来源使用 `storage_type/storage_key/storage_name`；工作区来源使用 `workspace_code/relative_path/source_modified_at`，两组字段互斥，工作区不保存服务器绝对路径。`source_modified_at` 为Unix毫秒，与 `size_bytes` 共同验证源快照。工作区定位按 `(data_set_id, workspace_code, relative_path)` 对未删除记录唯一；删除记录或数据集时保留工作区原文件。文件登记人和源状态统一命名为 `created_by/file_status`，传输明细的快照字段同步命名。
+
+工作区接入不写入 `gis_file_transfer_record` 或逐文件传输明细；支持格式登记后直接进入现有元数据待办。处理任务引用工作区管理文件时，`gis_processing_input` 保存 `source_locator_type=WORKSPACE`、工作区编码、相对路径及修改时间快照，并保留源文件ID和源数据集快照。
 
 数据集分页自动返回 `filePoints`，批量读取 `gis_file_meta.representative_longitude`、`representative_latitude`、`representative_layer_key`、`representative_extent_kind`，每个可定位文件一个点，不查询或计算覆盖几何。代表点与 COMPLETED 状态在同一元数据提交事务内保存；数据库约束要求 COMPLETED 文件具有完整、合法的点位和来源信息，其他状态的点位必须为空。失效、分类变化与任务重新领取会清空点位；文件永久删除后点位随元数据一并删除。
 

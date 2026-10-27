@@ -25,6 +25,8 @@ public class GisProcessingInput {
     private String sourceDataSetName;
     private String sourceStorageType;
     private String sourceStorageKey;
+    private String sourceLocatorType;
+    private Long sourceModifiedAt;
     private String workspaceCode;
     private String relativePath;
     private String storageKey;

@@ -9,7 +9,7 @@
             id, record_id, file_meta_id, sequence_no, original_name,
             storage_name, storage_key, storage_type, extension,
             operation_status, error_message, size_bytes, sha256,
-            uploaded_by, upload_status, cleanup_status, create_time, update_time
+            created_by, file_status, cleanup_status, create_time, update_time
         ) VALUES
         <foreach collection="records" item="item" separator=",">
             (
@@ -17,7 +17,7 @@
                 #{item.originalName}, #{item.storageName}, #{item.storageKey},
                 #{item.storageType}, #{item.extension}, #{item.operationStatus},
                 #{item.errorMessage}, #{item.sizeBytes}, #{item.sha256},
-                #{item.uploadedBy}, #{item.uploadStatus}, #{item.cleanupStatus},
+                #{item.createdBy}, #{item.fileStatus}, #{item.cleanupStatus},
                 #{item.createTime}, #{item.updateTime}
             )
         </foreach>

@@ -13,9 +13,10 @@ public class GisFileQuery {
     private Integer size = 10;
     private Long dataSetId;
     private Long categoryId;
+    private String sourceType;
     private String originalName;
     private String extension;
-    private String uploadStatus;
+    private String fileStatus;
     private String metadataStatus;
     private Double west;
     private Double south;
@@ -38,15 +39,18 @@ public class GisFileQuery {
         originalName = trim(originalName);
         extension = trim(extension);
         if (extension != null) extension = extension.toLowerCase(Locale.ROOT).replaceFirst("^\\.", "");
-        uploadStatus = upper(uploadStatus);
+        fileStatus = upper(fileStatus);
+        sourceType = upper(sourceType);
+        if (sourceType != null && !Set.of("UPLOAD", "WORKSPACE").contains(sourceType))
+            throw new IllegalArgumentException("文件来源只能为 UPLOAD 或 WORKSPACE");
         metadataStatus = upper(metadataStatus);
         spatialRelation = upper(spatialRelation);
         if (spatialRelation == null) spatialRelation = "INTERSECTS";
         if (!Set.of("INTERSECTS", "COVERED_BY").contains(spatialRelation)) {
             throw new IllegalArgumentException("空间关系只能为 INTERSECTS 或 COVERED_BY");
         }
-        if (uploadStatus != null && !Set.of("PENDING", "READY", "FAILED").contains(uploadStatus)) {
-            throw new IllegalArgumentException("上传状态只能为 PENDING、READY 或 FAILED");
+        if (fileStatus != null && !Set.of("PENDING", "READY", "FAILED").contains(fileStatus)) {
+            throw new IllegalArgumentException("文件状态只能为 PENDING、READY 或 FAILED");
         }
         if (metadataStatus != null && !Set.of("QUEUED", "RUNNING", "COMPLETED", "FAILED", "NOT_APPLICABLE").contains(metadataStatus)) {
             throw new IllegalArgumentException("元数据状态无效");

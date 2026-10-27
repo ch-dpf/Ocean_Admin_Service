@@ -50,7 +50,7 @@ mvn -pl ocean-bootstrap -am spring-boot:run
 
 首期提取 GeoTIFF（`.tif/.tiff`）与 GeoJSON（`.geojson/.json`）。GeoJSON 必须使用 WGS84 经度、纬度顺序；默认按 RFC 7946 读取，文件顶层也接受下文列出的旧式 WGS84 命名 `crs` 声明。配套附件标记 `NOT_APPLICABLE`，其他主格式返回 `UNSUPPORTED_FORMAT`，原文件保留。
 
-文件分页接口 `GET /api/gis/filemeta/page` 返回当前管理文件，可显式传入 `metadataStatus=QUEUED/RUNNING/COMPLETED/FAILED/NOT_APPLICABLE` 按元数据状态筛选。`DELETE /api/gis/filemeta/{id}` 会永久删除文件元数据和物理文件；活动处理任务引用时返回冲突，调用方必须进行二次确认。
+文件分页接口 `GET /api/gis/filemeta/page` 返回当前管理文件，可显式传入 `metadataStatus=QUEUED/RUNNING/COMPLETED/FAILED/NOT_APPLICABLE` 按元数据状态筛选。`DELETE /api/gis/filemeta/{id}` 删除文件元数据；上传来源同时删除托管物理文件，工作区来源保留原文件。活动处理任务引用时返回冲突，调用方必须进行二次确认。
 
 ```text
 GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=INTERSECTS
@@ -66,6 +66,32 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 `POST /api/gis/filemeta/{id}/metadata/retry` 仅重新提交提取失败的文件；已成功生成且可能被编辑的矢量图层不会被覆盖。提取使用数据库待办、版本校验和 15 分钟租约，服务重启后自动恢复。扫描间隔由 `gis.metadata.poll-interval` 配置，默认 5000 毫秒；使用独立的两个执行线程。
 
 数据库须安装 PostGIS；部署镜像使用 `postgis/postgis:16-3.5-alpine`。业务表与索引统一维护在 `db/migration/V2__init_ocean_gis.sql`。已有开发库需先补齐最终结构，再依次执行 `mvn flyway:repair`、`mvn flyway:validate`；repair 本身不会修改业务表结构。
+
+## 从受控服务器工作区接入数据
+
+`POST /api/gis/dataSet/{id}/workspace-files` 原位接入服务器文件，不复制、不移动源文件，也不创建文件传输记录或切片处理任务。工作区沿用 `gis.processing.workspaces` 配置。接口只校验入口，立即以HTTP 202返回 `progressTaskId`、`dataSetId`、`taskType=GIS_WORKSPACE_IMPORT` 和初始 `status=QUEUED`，目录遍历、登记及空间提取进度均在后台推进。
+
+```json
+{"workspaceCode":"DEFAULT","relativePath":"survey/2026","includeSubdirectories":true,"vectorPlacement":"AUTO"}
+```
+
+服务端自动识别文件或目录。文件必须符合数据集分类支持的空间解析格式，否则直接失败且不登记。影像和地形当前支持 `.tif/.tiff`，矢量支持 `.geojson/.json`；扩展名通过后仍须解析真实内容。`vectorPlacement` 仅用于矢量数据集，可省略，默认AUTO。
+
+目录只登记匹配格式的普通文件；`includeSubdirectories` 默认false，仅扫描当前层，true递归扫描所有层级。不支持的文件跳过，同一数据集内已登记的工作区相对路径按重复跳过；无符合条件文件时任务失败。扫描不跟随链接或Windows目录联接，禁止绝对路径、上级目录和盘符路径。`gis.processing.workspace-max-scan-entries` 默认10000，计入目录和文件条目；后台边扫描边登记，超限明确停止，保留已登记文件，等待这些文件解析结束后报告失败。执行复用现有有界 `taskExecutor`，最多保留100个活动接入任务，繁忙时返回503。
+
+前端用 `progressTaskId` 匹配现有 `/ws/task` 消息中的 `task.taskId`。`SCANNING` 阶段 `overallPercent=null`，`currentStage.completed` 为已扫描条目数，`total=null`、`unit=ENTRY`，消息包含登记、重复、不支持和失败计数；此时 `result.total` 是动态增长的待处理文件数，不是已知目录总数。扫描结束进入 `EXTRACTING_METADATA`，再按最终处理数量计算整体百分比。推送通常每500毫秒最多一次，阶段变化与终态立即推送。只有新登记文件均完成空间提取后，任务才进入 `COMPLETED/PARTIAL_FAILED/FAILED`；矢量文件沿用现有图层READY条件。重复和不支持文件属于跳过，不计入解析结果分母。
+
+`GET /api/gis/dataSet/{id}/workspace-files/tasks/{progressTaskId}` 返回 `{task,dataSetId,entryType,scannedCount,registeredCount,duplicateCount,unsupportedCount,registrationFailedCount,scanComplete}`，用于提交响应与WebSocket推送之间的竞态补读、刷新或断线重连；只允许原创建者查询，终态在本实例保留30分钟。接口不返回整个目录的文件列表，明细使用现有文件分页，支持 `sourceType=UPLOAD/WORKSPACE` 筛选。任务运行上下文不持久化，重启后进度查询失效，重新提交原路径会跳过已登记文件；已入库文件的元数据待办仍按既有数据库队列恢复。
+
+文件模型和查询统一使用 `fileStatus`、`createdBy`，替代原 `uploadStatus`、`uploadedBy`；传输明细的文件快照同步使用新名称。工作区文件返回 `sourceType=WORKSPACE`、`workspaceCode`、`relativePath` 和Unix毫秒单位的 `sourceModifiedAt`，托管存储字段为空。读取时校验源大小和修改时间；发现变化或不可用时空间元数据标记失败。重试会刷新源文件快照，已生成的矢量图层仍按现有规则保护，避免覆盖编辑内容。源文件变化不会主动推送，须在读取或重新接入时验证。
+
+删除工作区文件记录或整个数据集都保留工作区源文件。下载和从已管理文件提交处理任务统一按来源解析路径；实际下载仍按既有规则记录导出传输记录。
+
+### 任务标识的关系
+
+`TaskInfo.taskId` 是WebSocket/Redis实时进度的字符串键，不等于处理任务数据库主键。上传进度使用传输记录 `recordNo=upload_...`；切片处理进度使用 `gis_processing_task.task_no`（例如 `imagery_...`）；工作区接入使用提交返回的 `progressTaskId=workspace_...`，没有对应的业务任务表记录。`taskType` 用于前端区分进度类别，统一使用 `version` 忽略乱序旧快照。
+
+现有切片处理提交响应中的 `taskId` 是 `gis_processing_task.id`，用于 `GET /api/gis/task/{taskId}`；同一响应中的 `taskNo` 才对应WebSocket `task.taskId`。文件的 `fileMetaId` 是独立的数据身份，一个接入进度可以产生多个文件，这些文件以后可被多个独立的切片处理任务引用。工作区进度编号不能传给处理任务详情接口。
 
 ## 可编辑矢量图层与要素
 

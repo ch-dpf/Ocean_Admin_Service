@@ -8,7 +8,6 @@ import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.processing.GisInputSourceType;
 import org.ocean.admin.gis.processing.GisSubmitProcessingCommand;
 import org.ocean.admin.gis.service.FileMetaService;
-import org.ocean.admin.gis.util.FileUploadUtil;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
@@ -22,7 +21,6 @@ import java.util.List;
 public class ManagedFileInputResolver implements GisProcessingInputResolver {
     private final FileMetaService fileMetaService;
     private final GisDataSetMapper dataSetMapper;
-    private final FileUploadUtil fileUploadUtil;
 
     @Override
     public GisInputSourceType type() {
@@ -49,6 +47,10 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
             input.setSourceDataSetName(requireDataSet(meta).getDataSetName());
             input.setSourceStorageType(meta.getStorageType());
             input.setSourceStorageKey(meta.getStorageKey());
+            input.setSourceLocatorType(meta.getSourceType());
+            input.setSourceModifiedAt(meta.getSourceModifiedAt());
+            input.setWorkspaceCode(meta.getWorkspaceCode());
+            input.setRelativePath(meta.getRelativePath());
             input.setOriginalName(meta.getOriginalName());
             input.setExtension(meta.getExtension());
             input.setSizeBytes(meta.getSizeBytes());
@@ -61,21 +63,25 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
     @Override
     public List<Path> resolveRuntime(List<GisProcessingInput> inputs) {
         return inputs.stream().map(input -> {
-            if (!"LOCAL".equals(input.getSourceStorageType())
-                    || input.getSourceStorageKey() == null
-                    || input.getSourceStorageKey().isBlank()) {
-                throw new IllegalStateException(
-                        "已管理文件快照当前不可用于处理: " + input.getSourceFileMetaId());
-            }
-            return fileUploadUtil.resolveStoredPath(input.getSourceStorageKey());
+            GisFileMeta snapshot = new GisFileMeta();
+            snapshot.setId(input.getSourceFileMetaId());
+            snapshot.setSourceType(input.getSourceLocatorType());
+            snapshot.setStorageType(input.getSourceStorageType());
+            snapshot.setStorageKey(input.getSourceStorageKey());
+            snapshot.setWorkspaceCode(input.getWorkspaceCode());
+            snapshot.setRelativePath(input.getRelativePath());
+            snapshot.setSourceModifiedAt(input.getSourceModifiedAt());
+            snapshot.setSizeBytes(input.getSizeBytes());
+            return fileMetaService.resolveSourcePath(snapshot);
         }).toList();
     }
 
     private GisFileMeta getValidMeta(Long id, GisSubmitProcessingCommand command) {
         GisFileMeta meta = fileMetaService.getRequiredEntity(id);
-        if (!"READY".equals(meta.getUploadStatus()) || !"COMPLETED".equals(meta.getMetadataStatus()) || !"LOCAL".equals(meta.getStorageType())) {
-            throw new IllegalStateException("当前只支持处理已完成空间元数据提取的 LOCAL 已管理文件: " + id);
+        if (!"READY".equals(meta.getFileStatus()) || !"COMPLETED".equals(meta.getMetadataStatus())) {
+            throw new IllegalStateException("只支持处理已就绪且完成空间元数据提取的文件: " + id);
         }
+        fileMetaService.resolveSourcePath(meta);
         GisDataSet dataSet = requireDataSet(meta);
         if (dataSet == null || !command.processingType().categoryId().equals(dataSet.getCategoryId())) {
             throw new IllegalArgumentException("处理类型与文件所属数据集类别不匹配: " + id);

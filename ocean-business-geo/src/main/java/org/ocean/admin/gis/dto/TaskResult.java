@@ -10,8 +10,8 @@ public record TaskResult(
         TaskProgressUnit unit) {
 
     public TaskResult {
-        if (total < 1) {
-            throw new IllegalArgumentException("任务处理对象总数必须大于0");
+        if (total < 0) {
+            throw new IllegalArgumentException("任务处理对象总数不能为负数");
         }
         if (succeeded < 0 || failed < 0 || succeeded + failed > total) {
             throw new IllegalArgumentException("任务处理结果计数不合法");
@@ -24,7 +24,7 @@ public record TaskResult(
     }
 
     public int percent() {
-        return (int) Math.floor((double) processed() * 100 / total);
+        return total == 0 ? 0 : (int) Math.floor((double) processed() * 100 / total);
     }
 
     public TaskResult withCounts(long newSucceeded, long newFailed) {

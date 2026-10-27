@@ -42,4 +42,8 @@ public class GisProcessingProperties {
     @Max(9)
     private int archiveCompressionLevel = 1;
     private Map<String, String> workspaces = new LinkedHashMap<>();
+    /** 每次接入最多扫描的目录和文件条目，超限时整次扫描失败，尚未登记任何文件。 */
+    @Min(1)
+    @Max(100000)
+    private int workspaceMaxScanEntries = 10000;
 }

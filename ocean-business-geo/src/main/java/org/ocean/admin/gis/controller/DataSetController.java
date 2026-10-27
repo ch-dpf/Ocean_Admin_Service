@@ -4,6 +4,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.ocean.admin.gis.service.FileMetaService;
+import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
@@ -27,6 +31,25 @@ import java.util.List;
 public class DataSetController {
 
     private final DataSetService dataSetService;
+    private final FileMetaService fileMetaService;
+
+    @PostMapping("/{id}/workspace-files")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @Operation(summary = "从受控服务器工作区接入数据",
+            description = "自动识别文件或目录，按数据集分类登记支持格式并异步提取空间元信息；原位引用，不创建传输记录")
+    @OperationLog(module = "GIS_DATASET", type = OperationType.SUBMIT, description = "工作区数据接入")
+    public ResponseResult<GisFileMetaVO.WorkspaceSubmission> addWorkspaceFiles(
+            @PathVariable Long id, @Valid @RequestBody GisFileMetaVO.WorkspaceRequest request) {
+        return ResponseResult.success("工作区接入已受理，请按progressTaskId跟踪进度",
+                fileMetaService.addWorkspaceFiles(id, request));
+    }
+
+    @GetMapping("/{id}/workspace-files/tasks/{progressTaskId}")
+    @Operation(summary = "查询工作区接入实时进度", description = "仅创建者可查询；终态保留30分钟，服务重启后失效；不是切片处理任务详情接口")
+    public ResponseResult<GisFileMetaVO.WorkspaceProgress> workspaceProgress(
+            @PathVariable Long id, @PathVariable String progressTaskId) {
+        return ResponseResult.success(fileMetaService.workspaceProgress(id, progressTaskId));
+    }
 
     @GetMapping("/page")
     @Operation(summary = "获取数据集分页")
@@ -68,7 +91,7 @@ public class DataSetController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除数据集",
-            description = "删除数据集、数据集内物理文件及自有矢量数据；")
+            description = "删除数据集、托管物理文件及自有矢量数据；工作区源文件保留")
     @OperationLog(module = "GIS_DATASET", type = OperationType.DELETE, description = "删除GIS数据集")
     public ResponseResult<String> deleteDataset(@PathVariable Long id) {
         dataSetService.deleteDataset(id);
