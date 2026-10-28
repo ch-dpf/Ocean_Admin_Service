@@ -24,7 +24,7 @@ public class SystemMetricsEventService {
     private ScheduledExecutorService scheduler;
 
     public SystemMetricsEventService(MonitorService monitorService,
-                                    @Qualifier("platformRealtimeSsePublisher") RealtimeEventPublisher publisher) {
+                                    @Qualifier("systemMetricsSsePublisher") RealtimeEventPublisher publisher) {
         this.monitorService = monitorService;
         this.publisher = publisher;
     }

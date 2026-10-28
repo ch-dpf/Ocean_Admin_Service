@@ -1,4 +1,4 @@
-package org.ocean.admin.platform.realtime.service;
+package org.ocean.admin.platform.workbench.service;
 
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -30,11 +30,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
-/** 平台域SSE通道，独立维护连接与资源上限；发布线程仅序列化和入队。 */
+/** 服务器资源指标SSE推送通道，维护连接与资源上限，沿用platform域主题筛选。 */
 @Slf4j
-@Component("platformRealtimeSsePublisher")
-public class PlatformRealtimeSsePublisher implements RealtimeEventPublisher {
-    public static final String REQUEST_EMITTER_ATTRIBUTE = PlatformRealtimeSsePublisher.class.getName() + ".emitter";
+@Component("systemMetricsSsePublisher")
+public class SystemMetricsSsePublisher implements RealtimeEventPublisher {
+    public static final String REQUEST_EMITTER_ATTRIBUTE = SystemMetricsSsePublisher.class.getName() + ".emitter";
     private static final String EVENT_DOMAIN = "platform";
     private static final int SEND_BATCH_SIZE = 16;
     private final ObjectMapper objectMapper;
@@ -50,7 +50,7 @@ public class PlatformRealtimeSsePublisher implements RealtimeEventPublisher {
     private final ThreadPoolExecutor completionExecutor;
     private final ScheduledExecutorService maintenance;
 
-    public PlatformRealtimeSsePublisher(ObjectMapper objectMapper,
+    public SystemMetricsSsePublisher(ObjectMapper objectMapper,
             @Value("${ocean.platform.realtime.sse.max-connections:256}") int maxConnections,
             @Value("${ocean.platform.realtime.sse.max-pending-messages:64}") int maxPendingMessages,
             @Value("${ocean.platform.realtime.sse.max-pending-bytes:524288}") long maxPendingBytes,
@@ -69,9 +69,9 @@ public class PlatformRealtimeSsePublisher implements RealtimeEventPublisher {
         this.heartbeatNanos = TimeUnit.MILLISECONDS.toNanos(heartbeatMillis);
         this.sendTimeoutNanos = TimeUnit.MILLISECONDS.toNanos(sendTimeoutMillis);
         this.connectionTimeoutMillis = connectionTimeoutMillis;
-        sendExecutor = pool(sendThreads, sendQueueCapacity, "platform-realtime-sse-send");
-        completionExecutor = pool(2, maxConnections, "platform-realtime-sse-close");
-        maintenance = Executors.newSingleThreadScheduledExecutor(threads("platform-realtime-sse-maintenance"));
+        sendExecutor = pool(sendThreads, sendQueueCapacity, "system-metrics-sse-send");
+        completionExecutor = pool(2, maxConnections, "system-metrics-sse-close");
+        maintenance = Executors.newSingleThreadScheduledExecutor(threads("system-metrics-sse-maintenance"));
         maintenance.scheduleWithFixedDelay(this::maintainSafely, 1, 1, TimeUnit.SECONDS);
     }
 
