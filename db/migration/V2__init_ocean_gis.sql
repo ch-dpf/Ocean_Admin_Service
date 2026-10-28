@@ -229,7 +229,7 @@ CREATE TABLE ocean_gis.gis_file_meta (
     FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set(id) ON DELETE CASCADE,
     FOREIGN KEY (data_set_id,vector_dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id) ON DELETE CASCADE,
     CONSTRAINT ck_gis_file_meta_metadata_status
-        CHECK (metadata_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'NOT_APPLICABLE')),
+        CHECK (metadata_status IN ('WAITING', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'NOT_APPLICABLE')),
     CONSTRAINT ck_gis_file_meta_metadata_version CHECK (metadata_version >= 0),
     CONSTRAINT ck_gis_file_meta_representative_point
         CHECK (
@@ -245,7 +245,8 @@ CREATE TABLE ocean_gis.gis_file_meta (
     CONSTRAINT ck_gis_file_meta_completed_point
         CHECK ((metadata_status = 'COMPLETED') = (representative_longitude IS NOT NULL)),
     CONSTRAINT ck_gis_file_meta_metadata_lease
-        CHECK ((metadata_status = 'RUNNING') = (metadata_lease_expires_at IS NOT NULL)),
+        CHECK ((metadata_status = 'RUNNING' OR (metadata_status = 'WAITING' AND source_type = 'WORKSPACE'))
+               = (metadata_lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_gis_file_meta_size
         CHECK (size_bytes >= 0),
     CONSTRAINT ck_gis_file_meta_deleted
@@ -315,9 +316,9 @@ CREATE INDEX idx_gis_file_meta_metadata_queue
     ON ocean_gis.gis_file_meta (metadata_status, metadata_lease_expires_at, create_time)
     WHERE deleted = 0 AND file_status = 'READY';
 
-COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_status IS '元数据提取状态；COMPLETED 后空间信息可检索';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_status IS '元数据提取状态：WAITING 等待整批上传或扫描登记结束，QUEUED 可领取，RUNNING 解析中；COMPLETED 后空间信息可检索';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_version IS '领取或重新提取时递增，阻止过期任务提交';
-COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_lease_expires_at IS '后台执行租约到期时间';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_lease_expires_at IS '解析执行或工作区扫描等待租约到期时间；扫描中断后等待文件转为失败';
 
 CREATE TABLE ocean_gis.gis_file_spatial_metadata (
     id                      BIGINT PRIMARY KEY,

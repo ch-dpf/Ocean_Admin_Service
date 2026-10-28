@@ -49,7 +49,7 @@ GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验
 
 数据集 data_revision 用于要素新增、修改、删除以及导入完成；display_revision 用于分类开关、图层挂载、显示样式等变化。地图渲染在 Redis 保存带 bbox、连续 displayZoom、CSS 宽高、版本、规则和预算的视窗上下文，MVT 查询必须引用该上下文。整个视窗的所有启用图层共用 `CLAMP(FLOOR(width*height/800),32,600)` 的逻辑显示对象预算，按属性与级别过滤后进行像素过滤和显示用简化；点、线、面均不网格聚合，点与行政边界受保护，其余线面按命中规则开始级别和可见屏幕尺寸筛选，等值桶不截断。上下文记录候选数、保留数及冻结的筛选阈值。面填充、源真实边界和唯一锚点标注分别编码为显示部件，预算仅计一次源分量。原始几何不回写，不新增概化表或离线概化任务。过期上下文返回410，版本变化返回409；不存在全量原始几何回退。属性分页必须有 bbox 且不返回几何，完整几何仅通过单要素编辑详情读取。
 
-`gis_file_meta.metadata_status` 为 QUEUED、RUNNING、COMPLETED、FAILED 或 NOT_APPLICABLE。metadata_version 和 metadata_lease_expires_at 用于领取与过期执行隔离。空间元数据、矢量图层 READY 与文件 COMPLETED 状态在同一事务提交；原上传批次的成功计数也在此后更新。数据集文件数不随提取状态变化；图层可用性以 READY 状态为准。
+`gis_file_meta.metadata_status` 为 WAITING、QUEUED、RUNNING、COMPLETED、FAILED 或 NOT_APPLICABLE。WAITING 文件等待整批上传或工作区扫描登记收口，不具备解析领取资格；前置阶段结束后统一转为 QUEUED，仍由独立元数据线程池并行解析。metadata_version 和 metadata_lease_expires_at 用于领取与过期执行隔离；工作区 WAITING 文件也持有扫描等待租约，每30秒续租，15分钟失联后转为 FAILED（SCAN_INTERRUPTED），可重新接入或人工重试。上传 WAITING 文件由上传批次超时回收流程收口。空间元数据、矢量图层 READY 与文件 COMPLETED 状态在同一事务提交；原上传批次的成功计数也在此后更新。数据集文件数不随提取状态变化；图层可用性以 READY 状态为准。
 
 `gis_data_set.file_count` 与 `total_size_bytes` 采用相同口径：分别统计当前 `file_status = 'READY'` 的管理文件数量与大小总和（字节），包含上传文件、工作区原位引用文件、配套文件及空间元数据提取失败的文件，排除分片、成果和缓存。两者由文件登记、新增、修改和永久删除事务原子维护。大小不代表磁盘实际占用量。
 

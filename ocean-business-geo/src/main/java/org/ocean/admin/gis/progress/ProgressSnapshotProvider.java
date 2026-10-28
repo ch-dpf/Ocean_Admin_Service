@@ -88,7 +88,7 @@ public class ProgressSnapshotProvider {
         return new ProgressSnapshot(id, correlation, type, category, title, status,
                 Overall.of(status == TaskStatus.COMPLETED ? 100 : null),
                 ProgressStage.indeterminate(stage == null ? status.name() : stage, "根据业务记录恢复"),
-                metrics, summary, resource, error == null ? null : new ErrorInfo("BUSINESS_FAILURE", error),
+                metrics, List.of(), summary, resource, error == null ? null : new ErrorInfo("BUSINESS_FAILURE", error),
                 start, status.isTerminal() ? (finish == null ? LocalDateTime.now() : finish) : null,
                 new Revision(epoch, 0));
     }

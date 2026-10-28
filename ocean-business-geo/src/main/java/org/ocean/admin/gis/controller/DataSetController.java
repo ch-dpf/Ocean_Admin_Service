@@ -36,7 +36,7 @@ public class DataSetController {
     @PostMapping("/{id}/workspace-files")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(summary = "从受控服务器工作区接入数据",
-            description = "自动识别文件或目录，按数据集分类登记支持格式并异步提取空间元信息；原位引用，不创建传输记录")
+            description = "自动识别文件或目录，扫描登记收口后再异步提取空间元信息；progress快照的activeFiles提供并行文件解析工作量。原位引用，不创建传输记录")
     @OperationLog(module = "GIS_DATASET", type = OperationType.SUBMIT, description = "工作区数据接入")
     public ResponseResult<GisFileMetaVO.WorkspaceSubmission> addWorkspaceFiles(
             @PathVariable Long id, @Valid @RequestBody GisFileMetaVO.WorkspaceRequest request) {

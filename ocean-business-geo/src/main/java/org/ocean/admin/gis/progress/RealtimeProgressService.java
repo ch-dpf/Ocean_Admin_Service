@@ -63,7 +63,7 @@ public class RealtimeProgressService {
                     throw new IllegalStateException("业务记录不存在，无法创建进度: " + id);
                 snapshot = new ProgressSnapshot(id, correlationId, type, null, title, TaskStatus.QUEUED,
                         Overall.of(null), ProgressStage.indeterminate("QUEUED", "已受理"),
-                        List.of(), new ProgressSummary(total, 0, 0, unit),
+                        List.of(), List.of(), new ProgressSummary(total, 0, 0, unit),
                         resource == null ? new Resource("WORKSPACE_IMPORT", id, "/api/gis/progress/" + id) : resource, null,
                         LocalDateTime.now(), null, new Revision(1, 0));
             }
@@ -132,6 +132,7 @@ public class RealtimeProgressService {
             ProgressStage stage = old.stage();
             Integer percent = old.overall().percent();
             ProgressSummary summary = old.summary();
+            List<FileWork> activeFiles = old.activeFiles();
             Map<String, Metric> metrics = new LinkedHashMap<>();
             old.metrics().forEach(m -> metrics.put(m.code(), m));
             for (ProgressUpdate update : updates) {
@@ -149,14 +150,17 @@ public class RealtimeProgressService {
                     metrics.put(changed.metric().code(), changed.metric());
                 } else if (update instanceof ProgressUpdate.SummaryChanged changed) {
                     summary = changed.summary();
+                } else if (update instanceof ProgressUpdate.ActiveFilesChanged changed) {
+                    activeFiles = changed.files();
                 } else {
                     throw new IllegalArgumentException("进度变更不能为空");
                 }
             }
-            boolean stageChanged = !stage.code().equals(old.stage().code());
+            boolean stageChanged = !stage.code().equals(old.stage().code())
+                    || fileStagesChanged(old.activeFiles(), activeFiles);
             state.snapshot = new ProgressSnapshot(old.progressId(), old.correlationId(), old.type(), old.category(),
                     old.title(), TaskStatus.RUNNING, Overall.of(percent), stage, new ArrayList<>(metrics.values()),
-                    summary, old.resource(), old.error(), old.startedAt() == null ? LocalDateTime.now() : old.startedAt(),
+                    activeFiles, summary, old.resource(), old.error(), old.startedAt() == null ? LocalDateTime.now() : old.startedAt(),
                     null, new Revision(old.revision().epoch(), old.revision().sequence() + 1));
             state.updatedAt = LocalDateTime.now();
             state.dirty = true;
@@ -179,7 +183,7 @@ public class RealtimeProgressService {
                 throw new IllegalStateException("存在失败项，不能发布全部成功");
             state.snapshot = new ProgressSnapshot(old.progressId(), old.correlationId(), old.type(), old.category(),
                     old.title(), status, Overall.of(status == TaskStatus.COMPLETED ? Integer.valueOf(100) : old.overall().percent()),
-                    ProgressStage.indeterminate(status.name(), message), old.metrics(), old.summary(), old.resource(),
+                    ProgressStage.indeterminate(status.name(), message), old.metrics(), List.of(), old.summary(), old.resource(),
                     status == TaskStatus.FAILED || status == TaskStatus.PARTIAL_FAILED
                             ? new ErrorInfo("BUSINESS_FAILURE", message) : null,
                     old.startedAt(), LocalDateTime.now(),
@@ -194,6 +198,18 @@ public class RealtimeProgressService {
 
     private Object lock(String id) {
         return locks[Math.floorMod(id.hashCode(), locks.length)];
+    }
+
+    private boolean fileStagesChanged(List<FileWork> previous, List<FileWork> current) {
+        if (previous.size() != current.size()) return true;
+        for (int i = 0; i < current.size(); i++) {
+            FileWork before = previous.get(i), after = current.get(i);
+            if (!before.fileId().equals(after.fileId()) || before.runVersion() != after.runVersion()
+                    || before.status() != after.status() || !before.stage().code().equals(after.stage().code())) return true;
+            if (after.stage().total() != null && after.stage().total().equals(after.stage().completed())
+                    && !after.stage().equals(before.stage())) return true;
+        }
+        return false;
     }
 
     private boolean owns(State state, Handle handle) {
@@ -252,6 +268,7 @@ public class RealtimeProgressService {
     }
 
     private void publish(ProgressSnapshot snapshot, String type) {
+        if ("GIS_UPLOAD".equals(snapshot.type())) return;
         try {
             publisher.publish(EventMessage.create(type, "ocean.gis", "progress/" + snapshot.progressId(),
                     snapshot.correlationId(), snapshot));

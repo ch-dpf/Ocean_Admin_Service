@@ -7,7 +7,7 @@
     <select id="selectDataSetFileSummaries" resultType="org.ocean.admin.gis.vo.GisDataSetVO$FileSummary">
         SELECT fm.data_set_id, COUNT(*) AS managed_file_count,
                COUNT(*) FILTER (WHERE fm.metadata_status = 'COMPLETED') AS footprint_file_count,
-               COUNT(*) FILTER (WHERE fm.metadata_status IN ('QUEUED', 'RUNNING')) AS pending_metadata_file_count,
+               COUNT(*) FILTER (WHERE fm.metadata_status IN ('WAITING', 'QUEUED', 'RUNNING')) AS pending_metadata_file_count,
                COUNT(*) FILTER (WHERE fm.metadata_status = 'FAILED') AS failed_metadata_file_count,
                COUNT(*) FILTER (WHERE fm.metadata_status = 'NOT_APPLICABLE') AS not_applicable_file_count
         FROM ocean_gis.gis_file_meta fm

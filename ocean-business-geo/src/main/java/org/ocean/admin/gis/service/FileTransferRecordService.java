@@ -1,27 +1,33 @@
 package org.ocean.admin.gis.service;
 
-import org.ocean.admin.gis.progress.RealtimeProgressService;
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileTransferRecord;
 import org.ocean.admin.gis.entity.GisFileTransferRecordItem;
-import org.ocean.admin.gis.dto.TaskStatus;
-import org.ocean.admin.gis.progress.ProgressStage;
-import org.ocean.admin.gis.progress.ProgressUnit;
-import org.ocean.admin.gis.progress.ProgressUpdate;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordItemMapper;
+import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.mapper.GisVectorMapper;
+import org.ocean.admin.gis.progress.ProgressSnapshot;
+import org.ocean.admin.gis.progress.ProgressStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
+import org.ocean.admin.gis.progress.ProgressUpdate;
+import org.ocean.admin.gis.progress.RealtimeProgressService;
 import org.ocean.admin.gis.util.FileUploadUtil;
 import org.ocean.admin.gis.vo.GisFileTransferRecordVO;
 import org.ocean.admin.kernel.common.PageResult;
+import org.ocean.admin.kernel.realtime.EventMessage;
+import org.ocean.admin.kernel.realtime.RealtimeEventPublisher;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -30,7 +36,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * GIS 原始文件上传、下载传输记录。
@@ -83,8 +94,7 @@ public class FileTransferRecordService {
                 createTimeStart,
                 createTimeEnd);
         page.getRecords().stream().filter(r -> "IMPORT".equals(r.getOperationType())).forEach(r ->
-                r.setProgress(org.ocean.admin.gis.progress.ProgressSnapshot.reference(
-                        r.getRecordNo(), "GIS_UPLOAD", r.getRecordStatus())));
+                r.setProgress(uploadReference(r.getRecordNo(), r.getRecordStatus())));
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
     }
 
@@ -99,8 +109,7 @@ public class FileTransferRecordService {
         }
         List<GisFileTransferRecordItem> recordItems = recordItemMapper.selectByRecordId(record.getId());
         if ("IMPORT".equals(record.getOperationType()))
-            record.setProgress(org.ocean.admin.gis.progress.ProgressSnapshot.reference(
-                    record.getRecordNo(), "GIS_UPLOAD", record.getRecordStatus()));
+            record.setProgress(uploadReference(record.getRecordNo(), record.getRecordStatus()));
         record.setFiles(recordItems.stream()
                 .map(this::toFileItemVO)
                 .toList());
@@ -112,8 +121,185 @@ public class FileTransferRecordService {
     private final GisFileTransferRecordItemMapper recordItemMapper;
     private final DataSetService dataSetService;
     private final GisVectorMapper vectorMapper;
+    private final GisFileSpatialMetadataMapper spatialMapper;
+    private final ApplicationEventPublisher events;
     private final RealtimeProgressService progress;
     private final FileUploadUtil files;
+    @Resource(name = "gisRealtimeSsePublisher")
+    private RealtimeEventPublisher uploadEvents;
+    private final Map<String, UploadState> uploadStates = new ConcurrentHashMap<>();
+
+    /** 一个批次一份实时快照；前置传输结束后才进入可并行的解析阶段。 */
+    public record UploadBatchProgress(String recordNo, String requestId, TaskStatus status,
+            String currentStage,
+            int totalFiles, int processedFiles, int succeededFiles, int failedFiles, Integer overallPercent,
+            long receivedBytes, long confirmedBytes, long totalBytes, Integer uploadPercent,
+            long metadataCompletedFiles, long metadataTotalFiles, Integer metadataPercent,
+            List<UploadFileWork> files, long epoch, long sequence) { }
+
+    public record UploadFileWork(int fileIndex, String fileName, String stage, String step, String message,
+            Long completed, Long total, ProgressUnit unit, Integer percent, TaskStatus status, long runVersion) {
+        public static UploadFileWork of(int index, String name, String stage, ProgressStage work,
+                TaskStatus status, long runVersion) {
+            return new UploadFileWork(index, name, stage, work.code(), work.message(), work.completed(),
+                    work.total(), work.unit(), work.percent(), status, runVersion);
+        }
+
+        public UploadFileWork failed(String reason) {
+            return new UploadFileWork(fileIndex, fileName, stage, step, reason, completed, total,
+                    unit, percent, TaskStatus.FAILED, runVersion);
+        }
+    }
+
+    private static final class UploadState {
+        final Map<Integer, UploadFileWork> files = new TreeMap<>();
+        long receivedBytes;
+        long sequence;
+        TaskStatus status;
+        LocalDateTime updatedAt = LocalDateTime.now();
+    }
+
+    public ProgressSnapshot.Reference uploadReference(String recordNo, TaskStatus status) {
+        return new ProgressSnapshot.Reference(recordNo, "GIS_UPLOAD", status,
+                "/api/gis/file-transfer-records/" + recordNo + "/progress",
+                "/api/gis/events/stream?topics=gis.upload.progress");
+    }
+
+    public UploadBatchProgress uploadProgress(String recordNo) {
+        GisFileTransferRecord record = requireImportRecord(recordNo);
+        progress.handle(recordNo);
+        UploadState state = uploadStates.computeIfAbsent(recordNo, ignored -> new UploadState());
+        synchronized (state) {
+            GisFileTransferRecord current = recordMapper.selectById(record.getId());
+            return uploadSnapshot(current == null ? record : current, state);
+        }
+    }
+
+    public void publishUploadWork(GisFileTransferRecord record, UploadFileWork work, Long receivedBytes) {
+        if (record == null) return;
+        try {
+            UploadState state = uploadStates.computeIfAbsent(record.getRecordNo(), ignored -> new UploadState());
+            synchronized (state) {
+                progress.handle(record.getRecordNo());
+                if (work != null) {
+                    UploadFileWork previous = state.files.get(work.fileIndex());
+                    if (previous != null && (work.runVersion() < previous.runVersion()
+                            || (work.runVersion() == previous.runVersion() && previous.status().isTerminal()))) return;
+                    if (work.status() == TaskStatus.FAILED && previous != null
+                            && work.runVersion() == previous.runVersion()) work = previous.failed(work.message());
+                    state.files.put(work.fileIndex(), work);
+                }
+                if (receivedBytes != null) state.receivedBytes = receivedBytes;
+                GisFileTransferRecord current = recordMapper.selectById(record.getId());
+                if (current == null) return;
+                if (work != null && work.status() == TaskStatus.FAILED)
+                    state.receivedBytes = current.getUploadedBytes();
+                state.sequence++;
+                state.updatedAt = LocalDateTime.now();
+                UploadBatchProgress snapshot = uploadSnapshot(current, state);
+                uploadEvents.publish(EventMessage.create("gis.upload.progress", "ocean.gis",
+                        "upload/" + current.getRecordNo(), current.getRequestId(), snapshot));
+            }
+        } catch (RuntimeException ex) {
+            log.warn("上传批次进度通知失败: recordNo={}, reason={}", record.getRecordNo(), ex.getMessage());
+        }
+    }
+
+    public void publishUploadProgress(GisFileTransferRecord record) {
+        publishUploadWork(record, null, null);
+    }
+
+    private UploadBatchProgress uploadSnapshot(GisFileTransferRecord record, UploadState state) {
+        state.status = record.getRecordStatus();
+        List<GisFileTransferRecordItem> items = getImportItems(record.getId());
+        for (GisFileTransferRecordItem item : items) {
+            int index = item.getSequenceNo() - 1;
+            UploadFileWork current = state.files.get(index);
+            if ("FAILED".equals(item.getOperationStatus()) && (current == null || !current.status().isTerminal())) {
+                state.files.put(index, current == null
+                        ? UploadFileWork.of(index, item.getOriginalName(), "UPLOADING",
+                                ProgressStage.indeterminate("FAILED", item.getErrorMessage()), TaskStatus.FAILED, 0)
+                        : current.failed(item.getErrorMessage()));
+            } else if ("SUCCESS".equals(item.getOperationStatus()) && (current == null || !current.status().isTerminal())) {
+                state.files.put(index, UploadFileWork.of(index, item.getOriginalName(), "EXTRACTING_METADATA",
+                        ProgressStage.indeterminate("COMPLETED", "文件处理完成"), TaskStatus.COMPLETED,
+                        current == null ? 0 : current.runVersion()));
+            } else if ("READY".equals(item.getFileStatus()) && "RUNNING".equals(item.getOperationStatus())
+                    && (current == null || current.runVersion() == 0 || current.status().isTerminal())) {
+                boolean parsing = "EXTRACTING_METADATA".equals(record.getCurrentStage());
+                state.files.put(index, UploadFileWork.of(index, item.getOriginalName(),
+                        parsing ? "EXTRACTING_METADATA" : "UPLOADING",
+                        ProgressStage.indeterminate(parsing ? "QUEUED" : "WAITING",
+                                parsing ? "等待空间元数据解析" : "文件已上传，等待整批传输结束"), TaskStatus.QUEUED, 0));
+            }
+        }
+        long metadataTotal = items.stream().filter(item -> item.getFileMetaId() != null).count();
+        long metadataDone = items.stream().filter(item -> item.getFileMetaId() != null
+                && ("SUCCESS".equals(item.getOperationStatus()) || "FAILED".equals(item.getOperationStatus()))).count();
+        long transferred = items.stream().filter(item -> "READY".equals(item.getFileStatus())
+                || "FAILED".equals(item.getOperationStatus())).count();
+        long received = Math.max(record.getUploadedBytes(), state.receivedBytes);
+        int processed = record.getCompletedCount() + record.getFailedCount();
+        return new UploadBatchProgress(record.getRecordNo(), record.getRequestId(), record.getRecordStatus(),
+                record.getCurrentStage(),
+                record.getTotalCount(), processed, record.getCompletedCount(), record.getFailedCount(),
+                (int) (processed * 100L / record.getTotalCount()), received, record.getUploadedBytes(),
+                record.getTotalBytes(), (int) (received * 100 / record.getTotalBytes()),
+                metadataDone, metadataTotal,
+                transferred == record.getTotalCount() && metadataTotal > 0
+                        ? (int) (metadataDone * 100 / metadataTotal) : null,
+                List.copyOf(state.files.values()), Math.max(1, record.getProgressEpoch()), state.sequence);
+    }
+
+    @Scheduled(fixedDelay = 60000)
+    public void cleanupUploadProgress() {
+        LocalDateTime expiry = LocalDateTime.now().minusMinutes(30);
+        uploadStates.entrySet().removeIf(entry -> {
+            UploadState state = entry.getValue();
+            synchronized (state) {
+                return state.status != null && state.status.isTerminal() && state.updatedAt.isBefore(expiry);
+            }
+        });
+    }
+
+    /** 领取任务时绑定原上传明细；每次回报检查租约版本，工作区来源不创建上传任务。 */
+    public Consumer<ProgressStage> metadataProgress(GisFileMeta claim) {
+        if (!"UPLOAD".equals(claim.getSourceType())) return work -> { };
+        try {
+            var items = recordItemMapper.selectList(new LambdaQueryWrapper<GisFileTransferRecordItem>()
+                    .eq(GisFileTransferRecordItem::getFileMetaId, claim.getId())
+                    .eq(GisFileTransferRecordItem::getOperationStatus, "RUNNING"));
+            if (items.isEmpty()) return work -> { };
+            var item = items.getFirst();
+            var record = recordMapper.selectById(item.getRecordId());
+            if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) return work -> { };
+            return ProgressStage.throttled(work -> {
+                try {
+                    GisFileMeta current = fileMetaMapper.selectById(claim.getId());
+                    if (current == null || !Objects.equals(current.getMetadataVersion(), claim.getMetadataVersion())) return;
+                    if ("RUNNING".equals(current.getMetadataStatus())
+                            && (current.getMetadataLeaseExpiresAt() == null
+                            || !current.getMetadataLeaseExpiresAt().isAfter(LocalDateTime.now()))) return;
+                    TaskStatus status = switch (current.getMetadataStatus()) {
+                        case "COMPLETED", "NOT_APPLICABLE" -> TaskStatus.COMPLETED;
+                        case "FAILED" -> TaskStatus.FAILED;
+                        case "RUNNING" -> TaskStatus.RUNNING;
+                        default -> null;
+                    };
+                    if (status == null) return;
+                    var file = UploadFileWork.of(item.getSequenceNo() - 1, item.getOriginalName(),
+                            "EXTRACTING_METADATA",
+                            work, status, claim.getMetadataVersion());
+                    publishUploadWork(record, file, null);
+                } catch (RuntimeException ex) {
+                    log.warn("文件解析进度通知失败: fileId={}, reason={}", claim.getId(), ex.getMessage());
+                }
+            });
+        } catch (RuntimeException ex) {
+            log.warn("文件解析进度初始化失败: fileId={}, reason={}", claim.getId(), ex.getMessage());
+            return work -> { };
+        }
+    }
 
     public GisFileTransferRecord requireImportRecord(String recordNo) {
         String name = trimToNull(recordNo);
@@ -139,6 +325,8 @@ public class FileTransferRecordService {
     private void reopenImportItem(GisFileTransferRecordItem item) {
         GisFileTransferRecord record = recordMapper.lockById(item.getRecordId());
         if (record == null || !"IMPORT".equals(record.getOperationType())) throw new IllegalStateException("原导入批次不可用");
+        if (getImportItems(record.getId()).size() < record.getTotalCount())
+            throw new IllegalStateException("原批次传输未完整收口，请重新上传");
         if (recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
                 .eq("id", item.getId()).eq("operation_status", "FAILED")
                 .set("operation_status", "RUNNING").set("error_message", null).set("update_time", LocalDateTime.now())) != 1) {
@@ -184,6 +372,7 @@ public class FileTransferRecordService {
                     progress.finish(progress.handle(record.getRecordNo()), record.getRecordStatus(), "导入结束，成功" + record.getCompletedCount()
                             + "个，失败" + record.getFailedCount() + "个");
                 }
+                publishUploadProgress(record);
             } catch (RuntimeException ex) {
                 log.warn("导入进度通知失败，数据库结果已保留: recordNo={}, reason={}", snapshot.getRecordNo(), ex.getMessage());
             }
@@ -338,10 +527,6 @@ public class FileTransferRecordService {
         if (record == null || record.getRecordStatus() != TaskStatus.RUNNING) {
             return null;
         }
-        if (getImportItems(recordId).stream().anyMatch(item -> "READY".equals(item.getFileStatus())
-                && "RUNNING".equals(item.getOperationStatus()))) {
-            return null;
-        }
         int completed = record.getCompletedCount();
         int failed = record.getTotalCount() - completed;
         TaskStatus terminalStatus = completed == 0
@@ -365,12 +550,13 @@ public class FileTransferRecordService {
         if (updated != 1) {
             return null;
         }
+        spatialMapper.failWaitingUpload(recordId, errorMessage);
         recordItemMapper.update(null, new UpdateWrapper<GisFileTransferRecordItem>()
                 .eq("record_id", recordId)
                 .eq("operation_status", "RUNNING")
                 .set("operation_status", "FAILED")
-                .set("file_status", "FAILED")
-                .set("cleanup_status", "PENDING")
+                .setSql("cleanup_status = CASE WHEN file_status = 'READY' THEN 'NOT_REQUIRED' ELSE 'PENDING' END")
+                .setSql("file_status = CASE WHEN file_status = 'READY' THEN 'READY' ELSE 'FAILED' END")
                 .set("error_message", errorMessage)
                 .set("update_time", now));
         return recordMapper.selectById(recordId);
@@ -507,6 +693,10 @@ public class FileTransferRecordService {
                         .map(GisFileTransferRecordItem::getErrorMessage).filter(java.util.Objects::nonNull).findFirst().orElse(null))
                 .set("finish_time", terminal ? LocalDateTime.now() : null)
                 .set("update_time", LocalDateTime.now()).setSql("version = version + 1"));
+        if ("EXTRACTING_METADATA".equals(stage)) {
+            List<Long> released = spatialMapper.releaseUploadBatch(record.getId());
+            if (!released.isEmpty()) events.publishEvent(new FileSpatialMetadataService.MetadataReady(released));
+        }
         return recordMapper.selectById(record.getId());
     }
 

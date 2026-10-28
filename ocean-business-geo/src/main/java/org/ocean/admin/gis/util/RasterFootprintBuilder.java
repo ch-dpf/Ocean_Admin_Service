@@ -4,8 +4,12 @@ import org.geotools.api.referencing.operation.MathTransform;
 import org.locationtech.jts.geom.*;
 import org.locationtech.jts.geom.util.AffineTransformation;
 import org.locationtech.jts.operation.polygonize.Polygonizer;
+import org.ocean.admin.gis.progress.ProgressStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
 
 import java.util.*;
+import java.util.function.Consumer;
+import java.util.function.LongConsumer;
 
 /** 按行保存有效像元的边界，避免为每个像元创建多边形。像元坐标指向像元外沿。 */
 public final class RasterFootprintBuilder {
@@ -82,18 +86,29 @@ public final class RasterFootprintBuilder {
     /** 加密在像元空间完成，保留全球覆盖的方向及投影转换后弯曲的边界。 */
     public static Geometry toGeographic(Geometry pixels, MathTransform gridToSource,
             MathTransform toGeographic, double left, double top, int width, int height,
-            int maximumCoordinates, Runnable heartbeat) throws Exception {
+            int maximumCoordinates, Runnable heartbeat, Consumer<ProgressStage> progress) throws Exception {
         List<Polygon> polygons = new ArrayList<>();
+        long totalSegments = 0;
+        for (int i = 0; i < pixels.getNumGeometries(); i++) {
+            Polygon polygon = (Polygon) pixels.getGeometryN(i);
+            totalSegments += polygon.getExteriorRing().getNumPoints() - 1;
+            for (int h = 0; h < polygon.getNumInteriorRing(); h++) totalSegments += polygon.getInteriorRingN(h).getNumPoints() - 1;
+        }
+        long total = totalSegments;
+        long[] transformed = {0};
+        LongConsumer segmentDone = count -> progress.accept(ProgressStage.determinate("FOOTPRINT_TRANSFORMING",
+                "转换轮廓源边界段", transformed[0] += count, total, ProgressUnit.SEGMENT));
+        progress.accept(ProgressStage.determinate("FOOTPRINT_TRANSFORMING", "转换轮廓源边界段", 0, total, ProgressUnit.SEGMENT));
         CoordinateBudget budget = new CoordinateBudget(maximumCoordinates, heartbeat);
         double maximumStep = Math.max(width, height) / 128d;
         for (int i = 0; i < pixels.getNumGeometries(); i++) {
             Polygon pixelPolygon = (Polygon) pixels.getGeometryN(i);
             LinearRing shell = transformRing(pixelPolygon.getExteriorRing(), gridToSource, toGeographic,
-                    left, top, maximumStep, null, budget);
+                    left, top, maximumStep, null, budget, segmentDone);
             LinearRing[] holes = new LinearRing[pixelPolygon.getNumInteriorRing()];
             for (int h = 0; h < holes.length; h++) {
                 holes[h] = transformRing(pixelPolygon.getInteriorRingN(h), gridToSource, toGeographic,
-                        left, top, maximumStep, shell.getEnvelopeInternal().centre().x, budget);
+                        left, top, maximumStep, shell.getEnvelopeInternal().centre().x, budget, segmentDone);
             }
             Polygon unwrapped = GEOGRAPHIC.createPolygon(shell, holes);
             if (!unwrapped.isValid()) throw failure("INVALID_EXTENT", "坐标转换后的轮廓无效");
@@ -127,7 +142,7 @@ public final class RasterFootprintBuilder {
 
     private static LinearRing transformRing(LineString ring, MathTransform gridToSource,
             MathTransform toGeographic, double left, double top, double maximumStep,
-            Double anchor, CoordinateBudget budget) throws Exception {
+            Double anchor, CoordinateBudget budget, LongConsumer segmentDone) throws Exception {
         List<Coordinate> coordinates = new ArrayList<>();
         Coordinate[] original = ring.getCoordinates();
         Coordinate first = transform(original[0], gridToSource, toGeographic, left, top);
@@ -136,6 +151,7 @@ public final class RasterFootprintBuilder {
             Coordinate end = transform(original[i], gridToSource, toGeographic, left, top);
             densify(original[i - 1], original[i], coordinates.getLast(), end, gridToSource, toGeographic,
                     left, top, maximumStep, 0, coordinates, budget);
+            segmentDone.accept(1);
         }
         for (int i = 1; i < coordinates.size(); i++) {
             double previousX = coordinates.get(i - 1).x;

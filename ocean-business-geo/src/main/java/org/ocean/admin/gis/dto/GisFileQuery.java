@@ -52,7 +52,7 @@ public class GisFileQuery {
         if (fileStatus != null && !Set.of("PENDING", "READY", "FAILED").contains(fileStatus)) {
             throw new IllegalArgumentException("文件状态只能为 PENDING、READY 或 FAILED");
         }
-        if (metadataStatus != null && !Set.of("QUEUED", "RUNNING", "COMPLETED", "FAILED", "NOT_APPLICABLE").contains(metadataStatus)) {
+        if (metadataStatus != null && !Set.of("WAITING", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "NOT_APPLICABLE").contains(metadataStatus)) {
             throw new IllegalArgumentException("元数据状态无效");
         }
         boolean any = west != null || south != null || east != null || north != null;

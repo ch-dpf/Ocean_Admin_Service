@@ -56,6 +56,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import jakarta.annotation.Resource;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -129,6 +130,7 @@ public class FileMetaService {
             synchronized (run) {
                 run.error = "工作区接入任务未能启动";
                 run.scanComplete = true;
+                run.metadataReleased = true;
                 finishWorkspaceImport(run);
             }
             workspaceRuns.remove(progressId, run);
@@ -154,15 +156,20 @@ public class FileMetaService {
             synchronized (run) {
                 run.error = ex instanceof IllegalArgumentException || ex instanceof IllegalStateException
                         ? ex.getMessage() : "工作区扫描登记失败";
+                run.registrationFailed++;
+                run.lastError = run.error;
             }
             log.warn("工作区接入停止: progressId={}, dataSetId={}", run.id, run.dataSet.getId(), ex);
         } finally {
             synchronized (run) {
                 run.scanComplete = true;
-                if (run.registered == 0 && run.duplicates == 0 && run.registrationFailed == 0 && run.error == null)
+                if (run.registered == 0 && run.duplicates == 0 && run.unsupported == 0
+                        && run.registrationFailed == 0 && run.error == null) {
                     run.error = "未发现该数据集分类可接入的文件";
+                    run.registrationFailed++;
+                }
                 reportWorkspaceProgress(run, true);
-                finishWorkspaceImport(run);
+                releaseWorkspaceMetadata(run);
             }
         }
     }
@@ -195,18 +202,25 @@ public class FileMetaService {
             }
             reportWorkspaceProgress(run, false);
         }
-        if ("QUEUED".equals(item.status())) {
-            // 关闭“元数据已完成，但运行态文件关联尚未建立”的通知竞态窗口。
-            try {
-                GisFileMeta file = gisFileMetaMapper.selectById(item.fileMetaId());
-                if (file == null || "FAILED".equals(file.getMetadataStatus())) completeWorkspaceFile(item.fileMetaId(), false);
-                else if (Set.of("COMPLETED", "NOT_APPLICABLE").contains(file.getMetadataStatus()))
-                    completeWorkspaceFile(item.fileMetaId(), true);
-            } catch (RuntimeException ex) {
-                synchronized (run) { run.error = "登记后的文件状态检查失败，请查询文件元数据"; }
-                completeWorkspaceFile(item.fileMetaId(), false);
-            }
+    }
+
+    /** 调用方持有run锁，保证扫描阶段快照先完成切换，解析回调再进入。 */
+    private void releaseWorkspaceMetadata(WorkspaceRun run) {
+        if (run.metadataReleased) return;
+        List<Long> waiting = List.copyOf(run.pending.keySet());
+        Set<Long> released;
+        try {
+            released = Set.copyOf(spatialMetadataService.releaseWorkspaceFiles(waiting));
+        } catch (RuntimeException ex) {
+            run.lastError = "解析任务放行失败，将自动重试";
+            log.warn("工作区解析任务放行失败: progressId={}", run.id, ex);
+            return;
         }
+        run.metadataReleased = true;
+        for (Long fileId : waiting) {
+            if (!released.contains(fileId)) completeWorkspaceFile(fileId, false);
+        }
+        finishWorkspaceImport(run);
     }
 
     private void workspaceRegistrationFailed(WorkspaceRun run, String message) {
@@ -232,11 +246,27 @@ public class FileMetaService {
         }
     }
 
+    @EventListener
+    public void onWorkspaceMetadataWork(FileSpatialMetadataService.MetadataWork event) {
+        WorkspaceRun run = workspaceFileOwners.get(event.fileId());
+        if (run == null) return;
+        synchronized (run) {
+            if (!run.scanComplete || run.completedAt != null || !run.pending.containsKey(event.fileId())) return;
+            ProgressSnapshot.FileWork previous = run.activeFiles.get(event.fileId());
+            if (previous != null && event.version() < previous.runVersion()) return;
+            run.activeFiles.put(event.fileId(), new ProgressSnapshot.FileWork(event.fileId().toString(),
+                    run.pending.get(event.fileId()), event.stage(), TaskStatus.RUNNING, event.version()));
+            reportWorkspaceProgress(run, previous == null || !previous.stage().code().equals(event.stage().code())
+                    || (event.stage().total() != null && event.stage().total().equals(event.stage().completed())));
+        }
+    }
+
     private void completeWorkspaceFile(Long fileId, boolean succeeded) {
         WorkspaceRun run = workspaceFileOwners.remove(fileId);
         if (run == null) return;
         synchronized (run) {
             if (run.pending.remove(fileId) == null || run.completedAt != null) return;
+            run.activeFiles.remove(fileId);
             if (succeeded) run.succeeded++;
             else run.metadataFailed++;
             reportWorkspaceProgress(run, false);
@@ -255,12 +285,10 @@ public class FileMetaService {
                     + run.duplicates + "个，不支持" + run.unsupported + "个，登记失败" + run.registrationFailed + "个";
             if (run.currentPath != null) message += "；当前：" + run.currentPath;
             if (run.lastError != null) message += "；" + run.lastError;
-            var stage = !run.scanComplete
+            var stage = !run.scanComplete || run.registered == 0
                     ? ProgressStage.counting("SCANNING", message, run.scanned,
                             ProgressUnit.ENTRY)
-                    : run.registered == 0
-                        ? ProgressStage.indeterminate("EXTRACTING_METADATA", message)
-                        : ProgressStage.determinate("EXTRACTING_METADATA", message,
+                    : ProgressStage.determinate("EXTRACTING_METADATA", message,
                                 run.succeeded + run.metadataFailed, run.registered,
                                 ProgressUnit.FILE);
             List<ProgressUpdate> updates = new ArrayList<>();
@@ -278,6 +306,7 @@ public class FileMetaService {
             updates.add(ProgressUpdate.metric("METADATA_FAILED", "元数据失败", run.metadataFailed,
                     run.scanComplete ? run.registered : null, ProgressUnit.FILE));
             updates.add(ProgressUpdate.stageChanged(stage));
+            updates.add(ProgressUpdate.activeFilesChanged(List.copyOf(run.activeFiles.values())));
             if (run.scanComplete) {
                 long total = run.registered + run.registrationFailed;
                 int percent = total == 0 ? 100 : (int)((run.succeeded + run.metadataFailed + run.registrationFailed) * 100 / total);
@@ -290,14 +319,13 @@ public class FileMetaService {
 
     /** 扫描结束且所有新登记文件进入元数据终态，才结束本次接入进度。调用方持有run锁。 */
     private void finishWorkspaceImport(WorkspaceRun run) {
-        if (!run.scanComplete || !run.pending.isEmpty() || run.completedAt != null) return;
+        if (!run.scanComplete || !run.metadataReleased || !run.pending.isEmpty() || run.completedAt != null) return;
         reportWorkspaceProgress(run, true);
         String message = "接入结束：登记" + run.registered + "个，解析成功" + run.succeeded
                 + "个，解析失败" + run.metadataFailed + "个，登记失败" + run.registrationFailed
                 + "个，重复跳过" + run.duplicates + "个，不支持跳过" + run.unsupported + "个";
         long failed = run.registrationFailed + run.metadataFailed;
-        TaskStatus status = run.error != null ? TaskStatus.FAILED
-                : failed == 0 ? TaskStatus.COMPLETED
+        TaskStatus status = failed == 0 && run.error == null ? TaskStatus.COMPLETED
                 : run.succeeded == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED;
         if (run.progressHandle != null)
             progressService.finish(run.progressHandle, status, run.error == null ? message : run.error + "；" + message);
@@ -316,7 +344,20 @@ public class FileMetaService {
     @Scheduled(fixedDelay = 500)
     public void flushWorkspaceProgress() {
         for (WorkspaceRun run : workspaceRuns.values()) {
-            if (run.progressDirty && run.completedAt == null) reportWorkspaceProgress(run, false);
+            synchronized (run) {
+                if (run.completedAt != null) continue;
+                long now = System.nanoTime();
+                if (now - run.waitRenewedAt >= TimeUnit.SECONDS.toNanos(30)) {
+                    run.waitRenewedAt = now;
+                    try {
+                        if (!run.scanComplete) spatialMetadataService.renewWorkspaceWaiting(List.copyOf(run.pending.keySet()));
+                        else if (!run.metadataReleased) releaseWorkspaceMetadata(run);
+                    } catch (RuntimeException ex) {
+                        log.warn("工作区扫描等待续租失败: progressId={}", run.id, ex);
+                    }
+                }
+                if (run.progressDirty) reportWorkspaceProgress(run, false);
+            }
         }
     }
 
@@ -328,8 +369,11 @@ public class FileMetaService {
         final String entryType;
         final Long operatorId;
         final Map<Long, String> pending = new HashMap<>();
+        final Map<Long, ProgressSnapshot.FileWork> activeFiles = new java.util.TreeMap<>();
         long scanned, registered, duplicates, unsupported, registrationFailed, succeeded, metadataFailed, lastPush;
         boolean scanComplete;
+        boolean metadataReleased;
+        long waitRenewedAt = System.nanoTime();
         volatile boolean progressDirty;
         String currentPath, lastError, error;
         volatile LocalDateTime completedAt;
@@ -413,6 +457,21 @@ public class FileMetaService {
             boolean changed = !Objects.equals(existing.getSizeBytes(), attributes.size())
                     || !Objects.equals(existing.getSourceModifiedAt(), attributes.lastModifiedTime().toMillis());
             if (changed) spatialMetadataService.markSourceUnavailable(existing.getId(), "SOURCE_CHANGED", "工作区源文件已变化，请重新提取空间元信息");
+            if (!changed && "FAILED".equals(existing.getMetadataStatus())
+                    && "SCAN_INTERRUPTED".equals(existing.getMetadataErrorCode())) {
+                int updated = gisFileMetaMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()
+                        .eq(GisFileMeta::getId, existing.getId())
+                        .eq(GisFileMeta::getMetadataStatus, "FAILED")
+                        .eq(GisFileMeta::getMetadataVersion, existing.getMetadataVersion())
+                        .set(GisFileMeta::getMetadataStatus, "WAITING")
+                        .setSql("metadata_version = metadata_version + 1")
+                        .set(GisFileMeta::getMetadataLeaseExpiresAt, LocalDateTime.now().plusMinutes(15))
+                        .set(GisFileMeta::getMetadataErrorCode, null)
+                        .set(GisFileMeta::getMetadataErrorMessage, null)
+                        .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
+                if (updated != 1) throw new IllegalStateException("工作区文件已变化，请重新接入");
+                return new GisFileMetaVO.WorkspaceItem(existing.getId(), normalized, "WAITING", null);
+            }
             return new GisFileMetaVO.WorkspaceItem(existing.getId(), normalized, "DUPLICATE",
                     changed ? "源文件已变化，原空间元信息已失效，请重试提取" : null);
         }
@@ -432,7 +491,8 @@ public class FileMetaService {
         meta.setCreatedBy(operatorId);
         meta.setFileStatus("READY");
         meta.setCleanupStatus("NOT_REQUIRED");
-        meta.setMetadataStatus("QUEUED");
+        meta.setMetadataStatus("WAITING");
+        meta.setMetadataLeaseExpiresAt(LocalDateTime.now().plusMinutes(15));
         meta.setMetadataVersion(0L);
         meta.setDeleted(0);
         meta.setCreateTime(LocalDateTime.now());
@@ -443,7 +503,7 @@ public class FileMetaService {
         }
         if (gisFileMetaMapper.insert(meta) != 1) throw new IllegalStateException("工作区文件登记失败");
         dataSetService.updateFileStatistics(null, meta);
-        return new GisFileMetaVO.WorkspaceItem(meta.getId(), normalized, "QUEUED", null);
+        return new GisFileMetaVO.WorkspaceItem(meta.getId(), normalized, "WAITING", null);
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -694,7 +754,7 @@ public class FileMetaService {
     }
 
     private void ensureMutable(GisFileMeta meta) {
-        if ("RUNNING".equals(meta.getMetadataStatus()) || gisFileTransferRecordItemMapper.selectCount(
+        if (Set.of("WAITING", "RUNNING").contains(meta.getMetadataStatus()) || gisFileTransferRecordItemMapper.selectCount(
                 new LambdaQueryWrapper<GisFileTransferRecordItem>()
                         .eq(GisFileTransferRecordItem::getFileMetaId, meta.getId())
                         .eq(GisFileTransferRecordItem::getOperationStatus, "RUNNING")) > 0) {

@@ -11,6 +11,8 @@ import org.geotools.referencing.CRS;
 import org.locationtech.jts.geom.*;
 import org.locationtech.jts.io.WKTWriter;
 import org.ocean.admin.gis.entity.GisFileSpatialMetadata;
+import org.ocean.admin.gis.progress.ProgressStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
 import org.ocean.admin.gis.processing.config.GisProcessingProperties;
 import org.ocean.admin.gis.terrain.engine.TerrainOptions;
@@ -26,6 +28,7 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBuffer;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.function.Consumer;
 
 /** 仅使用现有 Java TIFF 解码器提取源参考、米制分辨率及有效像元覆盖区。 */
 @Component
@@ -39,7 +42,8 @@ public class RasterSpatialMetadataExtractor {
     private final ObjectMapper objectMapper;
     private final GisProcessingProperties properties;
 
-    public void extract(Path path, GisFileSpatialMetadata metadata, boolean terrain, Runnable heartbeat) throws Exception {
+    public void extract(Path path, GisFileSpatialMetadata metadata, boolean terrain, Runnable heartbeat,
+            Consumer<ProgressStage> progress) throws Exception {
         GeoTiffReader reader = new GeoTiffReader(path.toFile());
         try {
             if (reader.getMetadata() == null || !reader.getMetadata().hasGeoKey()) throw failure("MISSING_CRS", "GeoTIFF 缺少源坐标系定义");
@@ -56,9 +60,11 @@ public class RasterSpatialMetadataExtractor {
             Map<String, Object> extra = new LinkedHashMap<>();
             Double noData = reader.getMetadata().hasNoData() ? reader.getMetadata().getNoData() : null;
             if (noData != null) extra.put("noData", Double.isFinite(noData) ? noData : noData.toString());
-            Geometry pixels = readFootprint(path, reader, width, height, noData, heartbeat, extra);
+            progress.accept(ProgressStage.determinate("METADATA_READING", "空间参考信息读取完成", 1, 1, ProgressUnit.OPERATION));
+            Geometry pixels = readFootprint(path, reader, width, height, noData, heartbeat, extra, progress);
             Geometry footprint = RasterFootprintBuilder.toGeographic(pixels, gridToSource, toGeographic,
-                    left, top, width, height, properties.getMetadataMaxCoordinates(), heartbeat);
+                    left, top, width, height, properties.getMetadataMaxCoordinates(), heartbeat, progress);
+            progress.accept(ProgressStage.determinate("SPATIAL_CALCULATING", "计算分辨率与推荐层级", 0, 1, ProgressUnit.OPERATION));
             metadata.setDataKind("RASTER");
             metadata.setExtentKind("RASTER_FOOTPRINT");
             metadata.setGeographicExtent(new WKTWriter().write(footprint));
@@ -98,13 +104,15 @@ public class RasterSpatialMetadataExtractor {
             if (terrain) calculateTerrainZoom(metadata, reader, source, width);
             else calculateImageryZoom(metadata, resolution, nominal);
             metadata.setExtraMetadata(objectMapper.writeValueAsString(extra));
+            progress.accept(ProgressStage.determinate("SPATIAL_CALCULATING", "分辨率与推荐层级计算完成", 1, 1, ProgressUnit.OPERATION));
         } finally {
             reader.dispose();
         }
     }
 
     private Geometry readFootprint(Path path, GeoTiffReader geoReader, int width, int height,
-            Double noData, Runnable heartbeat, Map<String, Object> extra) throws Exception {
+            Double noData, Runnable heartbeat, Map<String, Object> extra,
+            Consumer<ProgressStage> progress) throws Exception {
         try (var input = new FileImageInputStream(path.toFile())) {
             ImageReader reader = new TIFFImageReaderSpi().createReaderInstance();
             MaskReader mask = null;
@@ -126,7 +134,9 @@ public class RasterSpatialMetadataExtractor {
                 extra.put("validityRule", "MASK_AND_ALPHA_AND_ANY_VALID_DATA_BAND");
                 if (!alpha && mask == null && !testSamples) {
                     extra.put("validPixelCount", (long) width * height);
-                    return new GeometryFactory().toGeometry(new Envelope(0, width, 0, height));
+                    Geometry footprint = new GeometryFactory().toGeometry(new Envelope(0, width, 0, height));
+                    progress.accept(ProgressStage.determinate("FOOTPRINT_BUILDING", "全部像素有效，直接构建矩形轮廓", 1, 1, ProgressUnit.OPERATION));
+                    return footprint;
                 }
                 long bytesPerPixel = Arrays.stream(type.getSampleModel().getSampleSize()).mapToLong(bits -> (bits + 7L) / 8).sum();
                 long tileWidth = reader.getTileWidth(0), tileHeight = reader.getTileHeight(0);
@@ -142,6 +152,9 @@ public class RasterSpatialMetadataExtractor {
                 if (windowWidth >= tileWidth) windowWidth = (int) (windowWidth / tileWidth * tileWidth);
                 RasterFootprintBuilder builder = new RasterFootprintBuilder(width, properties.getMetadataMaxBoundarySegments());
                 long validPixels = 0;
+                long scannedPixels = 0;
+                long totalPixels = (long) width * height;
+                progress.accept(ProgressStage.determinate("RASTER_SCANNING", "扫描有效像素", 0, totalPixels, ProgressUnit.PIXEL));
                 for (int y = 0; y < height; y += stripeHeight) {
                     heartbeat.run();
                     int rows = Math.min(stripeHeight, height - y);
@@ -155,12 +168,18 @@ public class RasterSpatialMetadataExtractor {
                         BufferedImage image = reader.read(0, parameter);
                         BufferedImage maskImage = mask == null ? null : mask.read(region);
                         validPixels += collectValidPixels(image, maskImage, noData, testSamples, stripe, x);
+                        scannedPixels += (long) region.width * region.height;
+                        progress.accept(ProgressStage.determinate("RASTER_SCANNING", "扫描有效像素",
+                                scannedPixels, totalPixels, ProgressUnit.PIXEL));
                     }
                     for (BitSet row : stripe) builder.acceptRow(row);
                 }
                 extra.put("validPixelCount", validPixels);
                 heartbeat.run();
-                return builder.buildGeometry();
+                progress.accept(ProgressStage.determinate("FOOTPRINT_BUILDING", "构建并校验有效像素轮廓", 0, 1, ProgressUnit.OPERATION));
+                Geometry footprint = builder.buildGeometry();
+                progress.accept(ProgressStage.determinate("FOOTPRINT_BUILDING", "有效像素轮廓构建完成", 1, 1, ProgressUnit.OPERATION));
+                return footprint;
             } finally {
                 if (mask != null) mask.close();
                 reader.dispose();

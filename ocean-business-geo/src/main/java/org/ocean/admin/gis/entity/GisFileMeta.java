@@ -65,7 +65,7 @@ public class GisFileMeta {
     /** 文件处理错误信息 */
     private String errorMessage;
 
-    /** QUEUED、RUNNING、COMPLETED、FAILED、NOT_APPLICABLE。 */
+    /** WAITING（前置阶段未结束）、QUEUED、RUNNING、COMPLETED、FAILED、NOT_APPLICABLE。 */
     private String metadataStatus;
     private Long metadataVersion;
     private LocalDateTime metadataLeaseExpiresAt;

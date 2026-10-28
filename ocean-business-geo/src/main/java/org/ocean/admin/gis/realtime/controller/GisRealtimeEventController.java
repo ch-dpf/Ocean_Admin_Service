@@ -28,10 +28,10 @@ public class GisRealtimeEventController {
     @GetMapping(value = STREAM_PATH, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "订阅GIS实时事件", tags = "GIS实时事件",
             description = "建立SSE长连接，仅推送gis域事件。事件名为app.event，data为完整EventMessage JSON。"
-                    + "省略topics订阅全部GIS事件，跨域主题返回400。进度事件类型为gis.progress.updated。"
-                    + "不提供历史重放，每次重连后通过/api/gis/progress/{progressId}补查进度。"
+                    + "省略topics订阅全部GIS事件，跨域主题返回400。通用进度事件为gis.progress.updated，"
+                    + "本地批量上传为gis.upload.progress。无历史重放；重连后使用任务响应中的progress.queryUrl补查。"
                     + "请使用EventSource或支持SSE的客户端持续接收事件。")
-    @ApiResponse(responseCode = "200", description = "GIS事件流，data中的进度快照通过progressId关联任务",
+    @ApiResponse(responseCode = "200", description = "GIS事件流，上传批次通过recordNo关联，其余进度通过progressId关联",
             content = @Content(mediaType = MediaType.TEXT_EVENT_STREAM_VALUE, schema = @Schema(type = "string")))
     @ApiResponse(responseCode = "400", description = "主题格式无效或不属于gis事件域",
             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,

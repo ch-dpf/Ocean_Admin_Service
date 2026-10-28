@@ -83,7 +83,7 @@ public class GisFileMetaVO {
     @Size(max = 1000, message = "错误信息长度不能超过1000个字符")
     private String errorMessage;
 
-    @Schema(description = "元数据提取状态", accessMode = Schema.AccessMode.READ_ONLY)
+    @Schema(description = "元数据状态：WAITING等待整批上传或扫描结束，QUEUED等待解析，RUNNING解析中，COMPLETED、FAILED、NOT_APPLICABLE", accessMode = Schema.AccessMode.READ_ONLY)
     private String metadataStatus;
     @Schema(accessMode = Schema.AccessMode.READ_ONLY)
     private Long metadataVersion;

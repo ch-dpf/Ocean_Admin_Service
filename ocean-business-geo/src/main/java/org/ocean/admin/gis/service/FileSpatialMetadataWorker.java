@@ -5,6 +5,7 @@ import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -26,15 +27,26 @@ public class FileSpatialMetadataWorker {
 
     @Scheduled(fixedDelayString = "${gis.metadata.poll-interval:5000}", initialDelayString = "${gis.metadata.initial-delay:5000}")
     public void scan() {
+        service.expireWorkspaceWaiting();
         for (Long fileId : mapper.selectCandidates(2)) {
-            try {
-                executor.execute(() -> {
-                    try { service.extract(fileId); }
-                    catch (RuntimeException ex) { log.error("空间元数据任务执行异常: fileId={}", fileId, ex); }
-                });
-            } catch (RejectedExecutionException ex) {
-                break;
-            }
+            if (!submit(fileId)) break;
+        }
+    }
+
+    @TransactionalEventListener(fallbackExecution = true)
+    public void onMetadataReady(FileSpatialMetadataService.MetadataReady event) {
+        for (Long fileId : event.fileIds()) if (!submit(fileId)) break;
+    }
+
+    private boolean submit(Long fileId) {
+        try {
+            executor.execute(() -> {
+                try { service.extract(fileId); }
+                catch (RuntimeException ex) { log.error("空间元数据任务执行异常: fileId={}", fileId, ex); }
+            });
+            return true;
+        } catch (RejectedExecutionException ex) {
+            return false;
         }
     }
 }

@@ -1,6 +1,7 @@
 package org.ocean.admin.gis.progress;
 
 import java.util.Objects;
+import java.util.List;
 
 /** 对实时任务状态的一次明确修改。 */
 public sealed interface ProgressUpdate permits
@@ -8,7 +9,14 @@ public sealed interface ProgressUpdate permits
         ProgressUpdate.OverallProgressChanged, // 总体进度变更
         ProgressUpdate.ResultChanged, // 结果变更
         ProgressUpdate.MetricChanged,
-        ProgressUpdate.SummaryChanged { // 含跳过项的完整结果快照
+        ProgressUpdate.SummaryChanged,
+        ProgressUpdate.ActiveFilesChanged { // 当前并行解析的文件
+
+    static ProgressUpdate activeFilesChanged(List<ProgressSnapshot.FileWork> files) { return new ActiveFilesChanged(files); }
+
+    record ActiveFilesChanged(List<ProgressSnapshot.FileWork> files) implements ProgressUpdate {
+        public ActiveFilesChanged { files = List.copyOf(files); }
+    }
 
     static ProgressUpdate metric(String code, String name, long value, Long total, ProgressUnit unit) {
         return new MetricChanged(new ProgressSnapshot.Metric(code, name, value, total, unit));

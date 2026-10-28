@@ -9,7 +9,7 @@ import java.util.Objects;
 /** 查询、缓存及进度事件共用的完整不可变快照。 */
 public record ProgressSnapshot(String progressId, String correlationId, String type, String category,
         String title, TaskStatus status, Overall overall, ProgressStage stage,
-        List<Metric> metrics, ProgressSummary summary, Resource resource, ErrorInfo error,
+        List<Metric> metrics, List<FileWork> activeFiles, ProgressSummary summary, Resource resource, ErrorInfo error,
         LocalDateTime startedAt, LocalDateTime finishedAt, Revision revision) {
     public ProgressSnapshot {
         if (progressId == null || progressId.isBlank() || type == null || type.isBlank()
@@ -21,6 +21,7 @@ public record ProgressSnapshot(String progressId, String correlationId, String t
         Objects.requireNonNull(resource);
         Objects.requireNonNull(revision);
         metrics = List.copyOf(metrics);
+        activeFiles = List.copyOf(activeFiles);
         if (status.isTerminal() != (finishedAt != null))
             throw new IllegalArgumentException("进度终态与结束时间不一致");
     }
@@ -71,6 +72,8 @@ public record ProgressSnapshot(String progressId, String correlationId, String t
     }
 
     public record Resource(String type, String id, String detailUrl) { }
+    /** 当前并行解析的文件；已结束文件由汇总计数和文件查询接口提供。 */
+    public record FileWork(String fileId, String fileName, ProgressStage stage, TaskStatus status, long runVersion) { }
     public record ErrorInfo(String code, String message) { }
 
     public static ProgressStage normalizeStage(ProgressStage stage) {

@@ -69,6 +69,12 @@ public class FileTransferRecordController {
         return ResponseResult.success(fileTransferRecordService.getRecordDetail(recordNo));
     }
 
+    @GetMapping("/{recordNo}/progress")
+    @Operation(summary = "查询本地批量上传流程进度")
+    public ResponseResult<FileTransferRecordService.UploadBatchProgress> uploadProgress(@PathVariable String recordNo) {
+        return ResponseResult.success(fileTransferRecordService.uploadProgress(recordNo));
+    }
+
     @PostMapping("/{recordNo}/retry")
     @Operation(summary = "重试导入批次中已完整上传的失败文件", description = "按失败阶段重试元数据提取或矢量入库，复用原任务和图层")
     @OperationLog(module = "GIS_FILE_UPLOAD", type = OperationType.SUBMIT, description = "重试GIS数据导入")

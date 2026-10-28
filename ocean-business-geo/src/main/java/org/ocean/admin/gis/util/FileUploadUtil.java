@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.config.FileUploadConfig;
 import org.ocean.admin.gis.dto.TempFile;
 import org.ocean.admin.gis.dto.GisStoredFile;
+import org.ocean.admin.gis.progress.ProgressStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -33,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.function.LongConsumer;
+import java.util.function.Consumer;
 
 /** GIS 文件上传的批量校验与文件暂存、转存。 */
 @Slf4j
@@ -188,7 +191,7 @@ public class FileUploadUtil {
             long fileSize,
             long chunkSize,
             InputStream input,
-            LongConsumer progressListener) {
+            Consumer<ProgressStage> progressListener) {
         if (input == null) {
             throw new IllegalArgumentException("上传数据流不能为空");
         }
@@ -210,6 +213,7 @@ public class FileUploadUtil {
             }
 
             boolean duplicate = expectedOffset + chunkSize <= originalSize;
+            reportUploadProgress(progressListener, "UPLOADING", originalSize, fileSize);
             byte[] incoming = new byte[streamBufferSize];
             byte[] existing = new byte[streamBufferSize];
             long requestRead = 0L;
@@ -248,15 +252,8 @@ public class FileUploadUtil {
                                 absolutePosition + overlap);
                     }
                     requestRead += read;
-                    if (progressListener != null) {
-                        try {
-                            progressListener.accept(
-                                    Math.max(originalSize, expectedOffset + requestRead));
-                        } catch (RuntimeException progressEx) {
-                            log.debug("上传分块实时进度回报失败: taskNo={}, fileIndex={}, error={}",
-                                    taskNo, fileIndex, progressEx.getMessage());
-                        }
-                    }
+                    reportUploadProgress(progressListener, "UPLOADING",
+                            Math.max(originalSize, expectedOffset + requestRead), fileSize);
                 }
                 if (input.read() != -1) {
                     throw new IllegalArgumentException("上传分块内容长于声明大小: " + chunkSize);
@@ -264,6 +261,7 @@ public class FileUploadUtil {
                 channel.force(false);
             } catch (IOException | RuntimeException ex) {
                 truncateQuietly(partial, originalSize);
+                reportUploadProgress(progressListener, "UPLOAD_ROLLBACK", Files.size(partial), fileSize);
                 throw ex;
             }
 
@@ -272,7 +270,8 @@ public class FileUploadUtil {
                 truncateQuietly(partial, originalSize);
                 throw new IllegalStateException("上传分块导致暂存文件越界");
             }
-            String sha256 = nextOffset == fileSize ? sha256(partial) : null;
+            reportUploadProgress(progressListener, "CHUNK_CONFIRMED", nextOffset, fileSize);
+            String sha256 = nextOffset == fileSize ? sha256(partial, progressListener) : null;
             return new ChunkWriteResult(nextOffset, duplicate, sha256);
         } catch (IOException | NoSuchAlgorithmException ex) {
             throw new IllegalStateException("上传分块写盘失败", ex);
@@ -286,14 +285,15 @@ public class FileUploadUtil {
             int fileIndex,
             String originalName,
             long fileSize,
-            String sha256) {
+            String sha256,
+            Consumer<ProgressStage> progressListener) {
         Path source = uploadPartialPath(taskNo, fileIndex);
         String storageName = uploadStorageName(taskNo, fileIndex, originalName);
         String storageKey = dataSetStorageKey(dataSetId, storageName);
         Path target = resolveKey(storageKey);
         try {
             if (Files.isRegularFile(target) && Files.size(target) == fileSize) {
-                return storedFile(storageName, storageKey, fileSize, sha256(target));
+                return storedFile(storageName, storageKey, fileSize, sha256(target, progressListener));
             }
             if (!Files.isRegularFile(source) || Files.size(source) != fileSize) {
                 throw new IllegalStateException("上传暂存文件尚未完整落盘");
@@ -312,7 +312,8 @@ public class FileUploadUtil {
             String taskNo,
             int fileIndex,
             String originalName,
-            long fileSize) {
+            long fileSize,
+            Consumer<ProgressStage> progressListener) {
         String storageName = uploadStorageName(taskNo, fileIndex, originalName);
         String storageKey = dataSetStorageKey(dataSetId, storageName);
         Path target = resolveKey(storageKey);
@@ -320,7 +321,7 @@ public class FileUploadUtil {
             if (!Files.isRegularFile(target) || Files.size(target) != fileSize) {
                 return null;
             }
-            return storedFile(storageName, storageKey, fileSize, sha256(target));
+            return storedFile(storageName, storageKey, fileSize, sha256(target, progressListener));
         } catch (IOException | NoSuchAlgorithmException ex) {
             throw new IllegalStateException("检查已转存上传文件失败: " + originalName, ex);
         }
@@ -597,16 +598,30 @@ public class FileUploadUtil {
         }
     }
 
-    private String sha256(Path path) throws IOException, NoSuchAlgorithmException {
+    private String sha256(Path path, Consumer<ProgressStage> progressListener) throws IOException, NoSuchAlgorithmException {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        long total = Files.size(path);
+        long completed = 0;
+        reportUploadProgress(progressListener, "VERIFYING", 0, total);
         try (InputStream input = Files.newInputStream(path);
              DigestInputStream digestInput = new DigestInputStream(input, digest)) {
             byte[] buffer = new byte[streamBufferSize];
-            while (digestInput.read(buffer) != -1) {
-                // DigestInputStream 在读取时完成摘要更新。
+            int read;
+            while ((read = digestInput.read(buffer)) != -1) {
+                completed += read;
+                reportUploadProgress(progressListener, "VERIFYING", completed, total);
             }
         }
         return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private void reportUploadProgress(Consumer<ProgressStage> listener, String step, long completed, long total) {
+        if (listener == null) return;
+        try {
+            listener.accept(ProgressStage.determinate(step, step, completed, total, ProgressUnit.BYTE));
+        } catch (RuntimeException ex) {
+            log.debug("上传工作量回报失败: step={}, reason={}", step, ex.getMessage());
+        }
     }
 
     private void truncateQuietly(Path path, long size) {

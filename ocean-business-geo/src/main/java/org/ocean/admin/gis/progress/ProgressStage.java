@@ -1,5 +1,7 @@
 package org.ocean.admin.gis.progress;
 
+import java.util.function.Consumer;
+
 /** 当前任务阶段及其局部工作量。 */
 public record ProgressStage(
         String code, // 阶段编码
@@ -52,5 +54,24 @@ public record ProgressStage(
             return null;
         }
         return (int) Math.min(100, Math.floor((double) completed * 100 / total));
+    }
+
+    /** 在采集端节流，避免每个像素窗口或坐标都触发缓存写入。步骤边界始终立即回报。 */
+    public static Consumer<ProgressStage> throttled(Consumer<ProgressStage> sink) {
+        return new Consumer<>() {
+            private ProgressStage previous;
+            private long reportedAt;
+
+            @Override public void accept(ProgressStage value) {
+                if (value.equals(previous)) return;
+                long now = System.nanoTime();
+                boolean boundary = previous == null || !previous.code().equals(value.code())
+                        || (value.total() != null && value.total().equals(value.completed()));
+                if (!boundary && now - reportedAt < 500_000_000L) return;
+                sink.accept(value);
+                previous = value;
+                reportedAt = now;
+            }
+        };
     }
 }
