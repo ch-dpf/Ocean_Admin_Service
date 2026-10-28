@@ -1,10 +1,10 @@
 package org.ocean.admin.gis.progress;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.kernel.realtime.EventMessage;
 import org.ocean.admin.kernel.realtime.RealtimeEventPublisher;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -26,7 +26,6 @@ import static org.ocean.admin.gis.progress.ProgressSnapshot.*;
 /** 长耗时业务的状态投影；业务结果由调用方决定，快照不作为调度队列。 */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class RealtimeProgressService {
     private static final String CACHE_PREFIX = "ocean-admin:progress:v1:";
     private static final Duration RETENTION = Duration.ofMinutes(30);
@@ -38,6 +37,15 @@ public class RealtimeProgressService {
     private final RealtimeEventPublisher publisher;
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
+
+    public RealtimeProgressService(ProgressSnapshotProvider provider,
+                                   @Qualifier("gisRealtimeSsePublisher") RealtimeEventPublisher publisher,
+                                   StringRedisTemplate redis, ObjectMapper objectMapper) {
+        this.provider = provider;
+        this.publisher = publisher;
+        this.redis = redis;
+        this.objectMapper = objectMapper;
+    }
 
     /** 首次创建及明确重试时调用；持久化流程从数据库分配新代次。 */
     public Handle create(String id, String correlationId, String title, long total,

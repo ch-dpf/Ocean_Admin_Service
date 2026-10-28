@@ -4,7 +4,9 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/** 与业务类型和传输通道无关的事件信封。type 决定 data 的契约。 */
+/**
+ * 事件消息
+ */
 public record EventMessage<T>(int schemaVersion, String messageId, String type, String source,
                               String subject, Instant occurredAt, String correlationId, T data) {
     public EventMessage {
@@ -15,6 +17,15 @@ public record EventMessage<T>(int schemaVersion, String messageId, String type, 
         Objects.requireNonNull(data, "消息体不能为空");
     }
 
+    /**
+     * 创建事件消息
+     * @param type 事件类型
+     * @param source 事件源
+     * @param subject 事件主题
+     * @param correlationId 联系ID
+     * @param data 事件数据
+     * @return 事件消息
+     */
     public static <T> EventMessage<T> create(String type, String source, String subject,
                                             String correlationId, T data) {
         return new EventMessage<>(1, UUID.randomUUID().toString(), type, source, subject,

@@ -95,7 +95,7 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 ## 统一实时事件与进度协议
 
-平台与GIS的SSE接口分别为 `GET /api/platform/events/stream`、`GET /api/gis/events/stream`（`text/event-stream`），分别投递 `platform.*`、`gis.*` 事件。事件名固定为 `app.event`，data字段承载下面的完整JSON。事件信封与发布契约位于 `ocean-kernel`，该模块不依赖Web；SSE控制器与连接管理位于 `ocean-bootstrap` 的 `web.realtime` 包。消息体由各事件类型定义；新增通知或资源变更事件不需要修改进度模型。
+平台与GIS的SSE接口分别为 `GET /api/platform/events/stream`、`GET /api/gis/events/stream`（`text/event-stream`），分别投递 `platform.*`、`gis.*` 事件。事件名固定为 `app.event`，data字段承载下面的完整JSON。事件信封与发布契约位于 `ocean-kernel`，该模块不依赖Web；平台SSE控制器与发布器位于 `ocean-platform-core` 的 `org.ocean.admin.platform.realtime` 包，GIS对应实现位于 `ocean-business-geo` 的 `org.ocean.admin.gis.realtime` 包；两侧分别实现发布契约，bootstrap只负责SSE相关的MVC注册和文档装配。消息体由各事件类型定义；新增通知或资源变更事件不需要修改进度模型。
 
 ```json
 {
@@ -143,7 +143,7 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 平台与GIS分别维护连接，按需建立，每侧不按任务创建连接。省略topics只订阅当前接口所属事件域；也可传入最多16个逗号分隔的域内主题（总长不超过512字符），跨域或混合域订阅返回400。主题按完整名称或点分隔前缀匹配，例如 `gis.progress` 匹配 `gis.progress.updated`，但不匹配 `gis.progressive.updated`。
 
-GIS提交响应中的 `progress.eventsUrl` 为 `/api/gis/events/stream?topics=gis.progress`。系统指标单独连接 `/api/platform/events/stream?topics=platform.metrics`，事件为 `platform.metrics.updated`，source为 `ocean.platform`，subject为 `system/metrics`，data为SystemMetricsDTO；每2秒采集一次，仅有匹配的平台订阅者时采集。两个接口复用传输实现与全局资源上限，但互不投递对方事件；原 `/events/stream` 入口已移除。
+GIS提交响应中的 `progress.eventsUrl` 为 `/api/gis/events/stream?topics=gis.progress`。系统指标单独连接 `/api/platform/events/stream?topics=platform.metrics`，事件为 `platform.metrics.updated`，source为 `ocean.platform`，subject为 `system/metrics`，data为SystemMetricsDTO；每2秒采集一次，仅有匹配的平台订阅者时采集。两个接口分别维护连接池、发送线程池、心跳与资源上限，互不投递对方事件；原 `/events/stream` 入口已移除。
 
 ```javascript
 function subscribeEvents(url, onOpen) {
@@ -176,9 +176,9 @@ const platformStream = subscribeEvents(
 
 连接建立后立即刷新注释帧及 `retry:3000`，空闲时约每15秒发送注释心跳。EventSource对网络断开的自动重连不等于对所有HTTP错误都会重试；连接被503拒绝等情况可能进入CLOSED，前端应限次退避重新建立连接，避免无条件在onerror中创建重复连接。连接默认最长30分钟，浏览器在正常断开后重新建立连接；不会恢复或取消后台执行。本期不发送SSE id、不提供事件历史重放，也不依赖Last-Event-ID；重连只恢复后续实时事件，丢失进度通过HTTP补查恢复。其他未来需要逐条不遗漏的业务事件须自行提供持久化查询。
 
-发送使用专用有界线程池；单连接串行，默认最多256条连接、每连接64条待发消息和512KiB待发UTF-8字节（含正在发送项）。数据在MVC异步响应初始化前留在应用有界队列中。发送超过10秒、队列超限或执行器饱和时回收连接并让客户端重连；不会把网络写入回退给业务线程。连接回收也由独立执行器完成，防止完成操作等待发送锁而阻塞业务。达到全局连接上限时返回503。
+平台与GIS分别使用专用有界线程池；单连接串行，每侧默认最多256条连接、每连接64条待发消息和512KiB待发UTF-8字节（含正在发送项）。数据在MVC异步响应初始化前留在应用有界队列中。发送超过10秒、队列超限或执行器饱和时回收连接并让客户端重连；不会把网络写入回退给业务线程。连接回收也由独立执行器完成，防止完成操作等待发送锁而阻塞业务。达到所属域的连接上限时返回503，不占用另一侧的连接额度。
 
-参数位于 `ocean.realtime.sse`：max-connections、max-pending-messages、max-pending-bytes、send-threads、send-queue-capacity、heartbeat-interval-ms、send-timeout-ms、connection-timeout-ms。实际超时回收由每秒维护任务检查，网络写入最终退出还取决于Servlet容器。
+平台参数位于 `ocean.platform.realtime.sse`，GIS参数位于 `ocean.gis.realtime.sse`，各自包含max-connections、max-pending-messages、max-pending-bytes、send-threads、send-queue-capacity、heartbeat-interval-ms、send-timeout-ms、connection-timeout-ms。环境变量分别使用 `PLATFORM_SSE_*` 与 `GIS_SSE_*` 前缀，例如 `PLATFORM_SSE_MAX_CONNECTIONS`、`GIS_SSE_MAX_CONNECTIONS`。原 `ocean.realtime.sse` 与 `SSE_*` 配置已移除。实际超时回收由每秒维护任务检查，网络写入最终退出还取决于Servlet容器。
 
 部署代理必须保留 `/api/platform/events/stream` 和 `/api/gis/events/stream` 路由并即时转发，关闭响应缓存、缓冲和SSE压缩。响应包含 `Cache-Control: no-store, no-transform` 与 `X-Accel-Buffering: no`；网关空闲超时应大于心跳间隔，浏览器入口推荐HTTP/2。Nginx可参考：
 

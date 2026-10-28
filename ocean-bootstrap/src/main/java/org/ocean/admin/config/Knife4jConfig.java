@@ -4,7 +4,7 @@ import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
-import org.ocean.admin.web.realtime.RealtimeEventController;
+import org.ocean.admin.platform.realtime.controller.PlatformRealtimeEventController;
 import org.springdoc.core.models.GroupedOpenApi;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -34,18 +34,17 @@ public class Knife4jConfig {
 
     /**
      * 平台接口文档分组
-     * 按平台路径收录平台控制器与bootstrap中的平台SSE入口。
      */
     @Bean
     public GroupedOpenApi systemApiGroup() {
         return GroupedOpenApi.builder()
                 .group("平台接口")
-                .packagesToScan("org.ocean.admin.platform", "org.ocean.admin.web.realtime")
+                .packagesToScan("org.ocean.admin.platform")
                 .pathsToMatch(
                         "/api/auth/**",
                         "/api/member/**",
                         "/api/log/**",
-                        RealtimeEventController.PLATFORM_STREAM_PATH
+                        PlatformRealtimeEventController.STREAM_PATH
                 )
                 .build();
     }
@@ -53,13 +52,12 @@ public class Knife4jConfig {
 
     /**
      * Gis地理信息接口文档分组
-     * 按GIS路径收录GIS控制器与bootstrap中的GIS SSE入口。
      */
     @Bean
     public GroupedOpenApi gisApiGroup() {
         return GroupedOpenApi.builder()
                 .group("Geo地理信息接口")
-                .packagesToScan("org.ocean.admin.gis", "org.ocean.admin.web.realtime")
+                .packagesToScan("org.ocean.admin.gis")
                 .pathsToMatch("/api/gis/**")
                 .build();
     }

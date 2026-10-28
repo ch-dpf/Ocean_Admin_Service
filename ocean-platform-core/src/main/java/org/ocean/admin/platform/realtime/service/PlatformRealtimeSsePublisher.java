@@ -1,4 +1,4 @@
-package org.ocean.admin.web.realtime;
+package org.ocean.admin.platform.realtime.service;
 
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -30,11 +30,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
-/** 有界、按连接串行的实时事件通道。发布线程仅序列化和入队，不执行网络写入。 */
+/** 平台域SSE通道，独立维护连接与资源上限；发布线程仅序列化和入队。 */
 @Slf4j
-@Component
-public class RealtimeSsePublisher implements RealtimeEventPublisher {
-    public static final String REQUEST_EMITTER_ATTRIBUTE = RealtimeSsePublisher.class.getName() + ".emitter";
+@Component("platformRealtimeSsePublisher")
+public class PlatformRealtimeSsePublisher implements RealtimeEventPublisher {
+    public static final String REQUEST_EMITTER_ATTRIBUTE = PlatformRealtimeSsePublisher.class.getName() + ".emitter";
+    private static final String EVENT_DOMAIN = "platform";
     private static final int SEND_BATCH_SIZE = 16;
     private final ObjectMapper objectMapper;
     private final int maxConnections;
@@ -49,15 +50,15 @@ public class RealtimeSsePublisher implements RealtimeEventPublisher {
     private final ThreadPoolExecutor completionExecutor;
     private final ScheduledExecutorService maintenance;
 
-    public RealtimeSsePublisher(ObjectMapper objectMapper,
-            @Value("${ocean.realtime.sse.max-connections:256}") int maxConnections,
-            @Value("${ocean.realtime.sse.max-pending-messages:64}") int maxPendingMessages,
-            @Value("${ocean.realtime.sse.max-pending-bytes:524288}") long maxPendingBytes,
-            @Value("${ocean.realtime.sse.send-threads:8}") int sendThreads,
-            @Value("${ocean.realtime.sse.send-queue-capacity:256}") int sendQueueCapacity,
-            @Value("${ocean.realtime.sse.heartbeat-interval-ms:15000}") long heartbeatMillis,
-            @Value("${ocean.realtime.sse.send-timeout-ms:10000}") long sendTimeoutMillis,
-            @Value("${ocean.realtime.sse.connection-timeout-ms:1800000}") long connectionTimeoutMillis) {
+    public PlatformRealtimeSsePublisher(ObjectMapper objectMapper,
+            @Value("${ocean.platform.realtime.sse.max-connections:256}") int maxConnections,
+            @Value("${ocean.platform.realtime.sse.max-pending-messages:64}") int maxPendingMessages,
+            @Value("${ocean.platform.realtime.sse.max-pending-bytes:524288}") long maxPendingBytes,
+            @Value("${ocean.platform.realtime.sse.send-threads:8}") int sendThreads,
+            @Value("${ocean.platform.realtime.sse.send-queue-capacity:256}") int sendQueueCapacity,
+            @Value("${ocean.platform.realtime.sse.heartbeat-interval-ms:15000}") long heartbeatMillis,
+            @Value("${ocean.platform.realtime.sse.send-timeout-ms:10000}") long sendTimeoutMillis,
+            @Value("${ocean.platform.realtime.sse.connection-timeout-ms:1800000}") long connectionTimeoutMillis) {
         if (maxConnections < 1 || maxPendingMessages < 1 || maxPendingBytes < 128 || sendThreads < 1
                 || sendQueueCapacity < 1 || heartbeatMillis < 1 || sendTimeoutMillis < 1 || connectionTimeoutMillis < 1)
             throw new IllegalArgumentException("SSE连接、队列与超时配置必须为正数，字节上限至少128");
@@ -68,9 +69,9 @@ public class RealtimeSsePublisher implements RealtimeEventPublisher {
         this.heartbeatNanos = TimeUnit.MILLISECONDS.toNanos(heartbeatMillis);
         this.sendTimeoutNanos = TimeUnit.MILLISECONDS.toNanos(sendTimeoutMillis);
         this.connectionTimeoutMillis = connectionTimeoutMillis;
-        sendExecutor = pool(sendThreads, sendQueueCapacity, "realtime-sse-send");
-        completionExecutor = pool(2, maxConnections, "realtime-sse-close");
-        maintenance = Executors.newSingleThreadScheduledExecutor(threads("realtime-sse-maintenance"));
+        sendExecutor = pool(sendThreads, sendQueueCapacity, "platform-realtime-sse-send");
+        completionExecutor = pool(2, maxConnections, "platform-realtime-sse-close");
+        maintenance = Executors.newSingleThreadScheduledExecutor(threads("platform-realtime-sse-maintenance"));
         maintenance.scheduleWithFixedDelay(this::maintainSafely, 1, 1, TimeUnit.SECONDS);
     }
 
@@ -88,8 +89,8 @@ public class RealtimeSsePublisher implements RealtimeEventPublisher {
     }
 
     /** 创建时尚不发送；MVC异步响应初始化后由配置层调用activate。 */
-    public SseEmitter connect(String eventDomain, String requestedTopics) {
-        Set<String> topics = parseTopics(eventDomain, requestedTopics);
+    public SseEmitter connect(String requestedTopics) {
+        Set<String> topics = parseTopics(requestedTopics);
         Connection connection;
         synchronized (connections) {
             if (stopped.get() || connections.size() >= maxConnections)
@@ -105,8 +106,8 @@ public class RealtimeSsePublisher implements RealtimeEventPublisher {
         if (emitter instanceof ManagedEmitter managed) managed.connection.activate();
     }
 
-    private Set<String> parseTopics(String eventDomain, String requested) {
-        if (requested == null) return Set.of(eventDomain);
+    private Set<String> parseTopics(String requested) {
+        if (requested == null) return Set.of(EVENT_DOMAIN);
         if (requested.isBlank() || requested.length() > 512)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "事件主题不能为空且不能超过512字符");
         List<String> topics = Arrays.stream(requested.split(",", -1)).map(String::trim).toList();
@@ -114,8 +115,8 @@ public class RealtimeSsePublisher implements RealtimeEventPublisher {
                 !topic.matches("[A-Za-z][A-Za-z0-9_-]*(\\.[A-Za-z][A-Za-z0-9_-]*)*")))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "事件主题格式无效或超过16项");
         if (topics.stream().anyMatch(topic ->
-                !topic.equals(eventDomain) && !topic.startsWith(eventDomain + ".")))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "事件主题必须属于当前接口的事件域: " + eventDomain);
+                !topic.equals(EVENT_DOMAIN) && !topic.startsWith(EVENT_DOMAIN + ".")))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "事件主题必须属于当前接口的事件域: " + EVENT_DOMAIN);
         return topics.stream().collect(Collectors.toUnmodifiableSet());
     }
 
