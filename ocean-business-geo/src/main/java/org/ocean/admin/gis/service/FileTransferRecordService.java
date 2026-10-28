@@ -1,5 +1,7 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.progress.RealtimeProgressService;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -9,9 +11,9 @@ import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileTransferRecord;
 import org.ocean.admin.gis.entity.GisFileTransferRecordItem;
 import org.ocean.admin.gis.dto.TaskStatus;
-import org.ocean.admin.gis.dto.TaskStage;
-import org.ocean.admin.gis.dto.TaskProgressUnit;
-import org.ocean.admin.gis.dto.TaskProgressUpdate;
+import org.ocean.admin.gis.progress.ProgressStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
+import org.ocean.admin.gis.progress.ProgressUpdate;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordMapper;
 import org.ocean.admin.gis.mapper.GisFileTransferRecordItemMapper;
@@ -80,6 +82,9 @@ public class FileTransferRecordService {
                 normalizedFileStatus,
                 createTimeStart,
                 createTimeEnd);
+        page.getRecords().stream().filter(r -> "IMPORT".equals(r.getOperationType())).forEach(r ->
+                r.setProgress(org.ocean.admin.gis.progress.ProgressSnapshot.reference(
+                        r.getRecordNo(), "GIS_UPLOAD", r.getRecordStatus())));
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
     }
 
@@ -93,6 +98,9 @@ public class FileTransferRecordService {
             throw new IllegalArgumentException("文件传输记录不存在: " + normalizedRecordNo);
         }
         List<GisFileTransferRecordItem> recordItems = recordItemMapper.selectByRecordId(record.getId());
+        if ("IMPORT".equals(record.getOperationType()))
+            record.setProgress(org.ocean.admin.gis.progress.ProgressSnapshot.reference(
+                    record.getRecordNo(), "GIS_UPLOAD", record.getRecordStatus()));
         record.setFiles(recordItems.stream()
                 .map(this::toFileItemVO)
                 .toList());
@@ -104,7 +112,7 @@ public class FileTransferRecordService {
     private final GisFileTransferRecordItemMapper recordItemMapper;
     private final DataSetService dataSetService;
     private final GisVectorMapper vectorMapper;
-    private final AsyncTaskService progress;
+    private final RealtimeProgressService progress;
     private final FileUploadUtil files;
 
     public GisFileTransferRecord requireImportRecord(String recordNo) {
@@ -154,22 +162,26 @@ public class FileTransferRecordService {
             try {
                 GisFileTransferRecord record = findImportRecordByRequestId(snapshot.getRequestId());
                 if (record == null) return;
-                if (progress.getTaskInfo(record.getRecordNo()) == null) {
+                var cached = progress.get(record.getRecordNo());
+                if (cached == null || (cached.status().isTerminal() && !record.getRecordStatus().isTerminal())) {
                     if (record.getRecordStatus() != TaskStatus.RUNNING) return;
-                    progress.registerTask(record.getRecordNo(), record.getRequestId(), "GIS数据导入",
-                            record.getTotalCount(), "GIS_UPLOAD", TaskProgressUnit.FILE);
+                    progress.create(record.getRecordNo(), record.getRequestId(), "GIS数据导入",
+                            record.getTotalCount(), "GIS_UPLOAD", ProgressUnit.FILE);
                 }
                 String message = switch (record.getCurrentStage()) {
                     case "EXTRACTING_METADATA" -> "正在提取文件空间元数据与内容";
                     case "UPLOADING" -> "正在上传文件";
                     default -> "GIS数据导入结束";
                 };
-                progress.updateProgress(record.getRecordNo(),
-                        TaskProgressUpdate.resultChanged(record.getCompletedCount(), record.getFailedCount()),
-                        TaskProgressUpdate.stageChanged(TaskStage.indeterminate(record.getCurrentStage(), message)));
+                progress.update(progress.handle(record.getRecordNo()),
+                        ProgressUpdate.resultChanged(record.getCompletedCount(), record.getFailedCount()),
+                        ProgressUpdate.stageChanged(ProgressStage.indeterminate(
+                                record.getRecordStatus().isTerminal() ? "FINALIZING" : record.getCurrentStage(), message)),
+                        ProgressUpdate.metric("CONFIRMED_BYTES", "确认落盘字节", record.getUploadedBytes(),
+                                record.getTotalBytes(), ProgressUnit.BYTE));
                 if (record.getRecordStatus() != TaskStatus.RUNNING) {
                     files.deleteEmptyBatchDirectory(record.getRecordNo());
-                    progress.finalizeTaskResult(record.getRecordNo(), "导入结束，成功" + record.getCompletedCount()
+                    progress.finish(progress.handle(record.getRecordNo()), record.getRecordStatus(), "导入结束，成功" + record.getCompletedCount()
                             + "个，失败" + record.getFailedCount() + "个");
                 }
             } catch (RuntimeException ex) {

@@ -19,6 +19,9 @@ public class GisProcessingTask {
 
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
+
+    /** 实时进度流代次，与业务状态版本分开维护。 */
+    private Long progressEpoch = 0L;
     private String taskNo;
     private String taskName;
     private GisProcessingType processingType;

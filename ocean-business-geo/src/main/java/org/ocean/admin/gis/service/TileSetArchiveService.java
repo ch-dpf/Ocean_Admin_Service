@@ -1,5 +1,11 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.progress.ProgressSnapshot;
+import org.ocean.admin.gis.progress.ProgressUnit;
+import org.ocean.admin.gis.progress.RealtimeProgressService;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -37,6 +43,8 @@ import java.util.Locale;
 @Slf4j
 @RequiredArgsConstructor
 public class TileSetArchiveService {
+    private final RealtimeProgressService progressService;
+
     private static final String ARCHIVE_FORMAT = "ZIP";
 
     private final GisTileSetArchiveMapper archiveMapper;
@@ -86,6 +94,7 @@ public class TileSetArchiveService {
         if (archiveMapper.insert(archive) != 1) {
             throw new IllegalStateException("静态瓦片集归档记录创建失败");
         }
+        createProgressAfterCommit(archive.getArchiveNo(), archive.getArchiveName());
         eventPublisher.publishEvent(new TileSetArchiveRequestedEvent(archive.getId()));
         log.info("静态瓦片集归档已入队: archiveId={}, archiveNo={}, processingTaskId={}, "
                         + "taskNo={}, tileSetId={}, operatorId={}",
@@ -108,6 +117,8 @@ public class TileSetArchiveService {
                 new Page<>(currentPage, pageSize), trimToNull(archiveNo), trimToNull(taskNo),
                 trimToNull(taskName), normalizeProcessingType(processingType),
                 normalizeArchiveStatus(archiveStatus), createTimeStart, createTimeEnd);
+        page.getRecords().forEach(r -> r.setProgress(ProgressSnapshot.reference(
+                r.getArchiveNo(), "GIS_TILE_SET_ARCHIVE", r.getArchiveStatus())));
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(),
                 page.getRecords());
     }
@@ -118,6 +129,7 @@ public class TileSetArchiveService {
         if (archive == null) {
             throw new IllegalArgumentException("静态瓦片集归档不存在: " + normalizedArchiveNo);
         }
+        archive.setProgress(ProgressSnapshot.reference(archiveNo, "GIS_TILE_SET_ARCHIVE", archive.getArchiveStatus()));
         return archive;
     }
 
@@ -156,6 +168,7 @@ public class TileSetArchiveService {
         if (updated != 1) {
             throw new IllegalStateException("静态瓦片集归档重试状态更新失败");
         }
+        createProgressAfterCommit(archive.getArchiveNo(), archive.getArchiveName());
         eventPublisher.publishEvent(new TileSetArchiveRequestedEvent(archive.getId()));
         log.info("静态瓦片集归档重试已入队: archiveId={}, archiveNo={}, processingTaskId={}, "
                         + "tileSetId={}",
@@ -417,6 +430,18 @@ public class TileSetArchiveService {
         }
         Object value = attributes.getRequest().getAttribute(CurrentOperator.REQUEST_ATTRIBUTE);
         return value instanceof CurrentOperator operator ? operator.userId() : null;
+    }
+
+    private void createProgressAfterCommit(String archiveNo, String title) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() {
+                try {
+                    progressService.create(archiveNo, null, title, 1, "GIS_TILE_SET_ARCHIVE", ProgressUnit.FILE);
+                } catch (RuntimeException ex) {
+                    log.warn("归档初始进度通知失败，可通过查询重建: archiveNo={}", archiveNo, ex);
+                }
+            }
+        });
     }
 
     /** 事务提交后触发静态瓦片集归档。 */

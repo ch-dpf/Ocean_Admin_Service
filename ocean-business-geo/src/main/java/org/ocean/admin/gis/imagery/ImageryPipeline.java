@@ -1,7 +1,7 @@
 package org.ocean.admin.gis.imagery;
 
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.dto.TaskStage;
+import org.ocean.admin.gis.progress.ProgressStage;
 import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 
 import java.nio.file.Path;
@@ -24,20 +24,20 @@ public class ImageryPipeline {
 
     public void execute(List<Path> sources, GisProcessingWorkspace workspace,
             ImageryTileOptions options,
-            Consumer<TaskStage> progressListener) {
+            Consumer<ProgressStage> progressListener) {
         long pipelineStartedAt = System.nanoTime();
         PipelinePhase phase = PipelinePhase.PREPROCESSING;
         boolean successful = false;
         log.info("[Imagery][Pipeline] 开始执行影像处理，源文件: {}, 输出目录: {}",
                 sources, workspace.outputPath());
         try {
-            progressListener.accept(TaskStage.indeterminate("analyzing", "正在规划影像集合范围和瓦片预算"));
+            progressListener.accept(ProgressStage.indeterminate("analyzing", "正在规划影像集合范围和瓦片预算"));
             GeoTiffTileGenerator.MosaicPlan plan = tileGenerator.plan(sources, options);
             List<GeoTiffPreprocessor.PreparedRaster> prepared = new ArrayList<>();
             for (GeoTiffTileGenerator.SourceRaster source : plan.sources()) {
                 source.validateUnchanged();
                 prepared.add(preprocessRaster(source.path(), source.nativeZoom(), options,
-                        stage -> progressListener.accept(new TaskStage(stage.code(),
+                        stage -> progressListener.accept(new ProgressStage(stage.code(),
                                 "源文件" + (source.sequence() + 1) + "/" + sources.size()
                                         + "：" + stage.message(),
                                 stage.completed(), stage.total(), stage.unit()))));
@@ -60,7 +60,7 @@ public class ImageryPipeline {
 
     private GeoTiffPreprocessor.PreparedRaster preprocessRaster(
             Path source, int nativeZoom, ImageryTileOptions options,
-            Consumer<TaskStage> progressListener) {
+            Consumer<ProgressStage> progressListener) {
         long startedAt = System.nanoTime();
         log.info("[Imagery][Pipeline] 开始预处理阶段，源文件: {}", source);
         GeoTiffPreprocessor.PreparedRaster prepared = preprocessor.prepare(

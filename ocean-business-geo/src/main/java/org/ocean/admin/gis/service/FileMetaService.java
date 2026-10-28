@@ -1,5 +1,7 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.progress.RealtimeProgressService;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -59,10 +61,10 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.event.TransactionPhase;
-import org.ocean.admin.gis.dto.TaskInfo;
-import org.ocean.admin.gis.dto.TaskStage;
-import org.ocean.admin.gis.dto.TaskProgressUpdate;
-import org.ocean.admin.gis.dto.TaskProgressUnit;
+import org.ocean.admin.gis.progress.ProgressSnapshot;
+import org.ocean.admin.gis.progress.ProgressStage;
+import org.ocean.admin.gis.progress.ProgressUpdate;
+import org.ocean.admin.gis.progress.ProgressUnit;
 import org.ocean.admin.gis.dto.TaskStatus;
 
 /** GIS 文件元数据服务。 */
@@ -94,7 +96,7 @@ public class FileMetaService {
     private final Map<String, WorkspaceRun> workspaceRuns = new ConcurrentHashMap<>();
     private final Map<Long, WorkspaceRun> workspaceFileOwners = new ConcurrentHashMap<>();
     private final Semaphore workspaceSlots = new Semaphore(100);
-    private final AsyncTaskService progressService;
+    private final RealtimeProgressService progressService;
     private final ApplicationEventPublisher events;
 
     @Resource(name = "taskExecutor")
@@ -115,12 +117,13 @@ public class FileMetaService {
             throw new IllegalArgumentException("文件格式不受该数据集分类的空间解析器支持");
         if (!workspaceSlots.tryAcquire()) throw new ResponseStatusException(
                 HttpStatus.SERVICE_UNAVAILABLE, "工作区接入任务繁忙，请稍后重试");
-        String progressTaskId = TaskNoGenerator.generateWorkspaceImportTaskNo();
-        WorkspaceRun run = new WorkspaceRun(progressTaskId, dataSet, request, kind, currentOperatorId());
-        workspaceRuns.put(progressTaskId, run);
+        String progressId = TaskNoGenerator.generateWorkspaceImportTaskNo();
+        WorkspaceRun run = new WorkspaceRun(progressId, dataSet, request, kind, currentOperatorId());
+        workspaceRuns.put(progressId, run);
         try {
-            progressService.registerTask(progressTaskId, null, "工作区接入：" + dataSet.getDataSetName(),
-                    0, WORKSPACE_TASK_TYPE, TaskProgressUnit.FILE);
+            run.progressHandle = progressService.create(progressId, null, "工作区接入：" + dataSet.getDataSetName(),
+                    0, WORKSPACE_TASK_TYPE, ProgressUnit.FILE,
+                    new ProgressSnapshot.Resource("DATA_SET", dataSetId.toString(), "/api/gis/dataSet/" + dataSetId));
             workspaceExecutor.execute(() -> executeWorkspaceImport(run));
         } catch (RuntimeException ex) {
             synchronized (run) {
@@ -128,30 +131,12 @@ public class FileMetaService {
                 run.scanComplete = true;
                 finishWorkspaceImport(run);
             }
-            workspaceRuns.remove(progressTaskId, run);
+            workspaceRuns.remove(progressId, run);
             throw new ResponseStatusException(
                     HttpStatus.SERVICE_UNAVAILABLE, "工作区接入队列已满，请稍后重试");
         }
-        return new GisFileMetaVO.WorkspaceSubmission(progressTaskId, dataSetId,
-                WORKSPACE_TASK_TYPE, TaskStatus.QUEUED);
-    }
-
-    public GisFileMetaVO.WorkspaceProgress workspaceProgress(Long dataSetId, String progressTaskId) {
-        WorkspaceRun run = workspaceRuns.get(progressTaskId);
-        if (run == null || !Objects.equals(run.dataSet.getId(), dataSetId)
-                || (run.completedAt != null && run.completedAt.isBefore(LocalDateTime.now().minusMinutes(30))))
-            throw new ResponseStatusException(
-                    HttpStatus.NOT_FOUND, "工作区进度已过期或服务已重启，请查询文件列表或重新提交");
-        if (!Objects.equals(run.operatorId, currentOperatorId()))
-            throw new ResponseStatusException(
-                    HttpStatus.FORBIDDEN, "无权查询其他用户的工作区接入进度");
-        synchronized (run) {
-            var task = run.terminal != null ? run.terminal : progressService.getTaskInfo(progressTaskId);
-            if (task == null) throw new ResponseStatusException(
-                    HttpStatus.NOT_FOUND, "工作区进度已失效，请重新提交");
-            return new GisFileMetaVO.WorkspaceProgress(task, dataSetId, run.entryType, run.scanned,
-                    run.registered, run.duplicates, run.unsupported, run.registrationFailed, run.scanComplete);
-        }
+        return new GisFileMetaVO.WorkspaceSubmission(dataSetId,
+                ProgressSnapshot.reference(progressId, WORKSPACE_TASK_TYPE, TaskStatus.QUEUED));
     }
 
     private void executeWorkspaceImport(WorkspaceRun run) {
@@ -170,7 +155,7 @@ public class FileMetaService {
                 run.error = ex instanceof IllegalArgumentException || ex instanceof IllegalStateException
                         ? ex.getMessage() : "工作区扫描登记失败";
             }
-            log.warn("工作区接入停止: progressTaskId={}, dataSetId={}", run.id, run.dataSet.getId(), ex);
+            log.warn("工作区接入停止: progressId={}, dataSetId={}", run.id, run.dataSet.getId(), ex);
         } finally {
             synchronized (run) {
                 run.scanComplete = true;
@@ -198,7 +183,7 @@ public class FileMetaService {
             item = transactions.execute(status -> registerWorkspaceFile(run.dataSet, run.request, relative, run.operatorId));
         } catch (RuntimeException ex) {
             workspaceRegistrationFailed(run, "文件登记失败：" + relative);
-            log.warn("工作区文件登记失败: progressTaskId={}, relativePath={}", run.id, relative, ex);
+            log.warn("工作区文件登记失败: progressId={}, relativePath={}", run.id, relative, ex);
             return;
         }
         synchronized (run) {
@@ -261,7 +246,7 @@ public class FileMetaService {
 
     private void reportWorkspaceProgress(WorkspaceRun run, boolean force) {
         synchronized (run) {
-            if (run.completedAt != null) return;
+            if (run.completedAt != null || run.progressHandle == null) return;
             run.progressDirty = true;
             long now = System.nanoTime();
             if (!force && now - run.lastPush < WORKSPACE_PUSH_INTERVAL_NANOS) return;
@@ -271,23 +256,34 @@ public class FileMetaService {
             if (run.currentPath != null) message += "；当前：" + run.currentPath;
             if (run.lastError != null) message += "；" + run.lastError;
             var stage = !run.scanComplete
-                    ? TaskStage.counting("SCANNING", message, run.scanned,
-                            TaskProgressUnit.ENTRY)
+                    ? ProgressStage.counting("SCANNING", message, run.scanned,
+                            ProgressUnit.ENTRY)
                     : run.registered == 0
-                        ? TaskStage.indeterminate("EXTRACTING_METADATA", message)
-                        : TaskStage.determinate("EXTRACTING_METADATA", message,
+                        ? ProgressStage.indeterminate("EXTRACTING_METADATA", message)
+                        : ProgressStage.determinate("EXTRACTING_METADATA", message,
                                 run.succeeded + run.metadataFailed, run.registered,
-                                TaskProgressUnit.FILE);
-            List<TaskProgressUpdate> updates = new ArrayList<>();
-            updates.add(TaskProgressUpdate.resultSnapshot(
-                    run.registered + run.registrationFailed, run.succeeded, run.registrationFailed + run.metadataFailed));
-            updates.add(TaskProgressUpdate.stageChanged(stage));
+                                ProgressUnit.FILE);
+            List<ProgressUpdate> updates = new ArrayList<>();
+            updates.add(ProgressUpdate.summaryChanged(new org.ocean.admin.gis.progress.ProgressSummary(
+                    run.registered + run.registrationFailed + run.duplicates + run.unsupported,
+                    run.succeeded, run.registrationFailed + run.metadataFailed,
+                    run.duplicates + run.unsupported, ProgressUnit.FILE)));
+            updates.add(ProgressUpdate.metric("SCANNED_ENTRIES", "已扫描条目", run.scanned, null, ProgressUnit.ENTRY));
+            updates.add(ProgressUpdate.metric("REGISTERED_FILES", "已登记文件", run.registered, null, ProgressUnit.FILE));
+            updates.add(ProgressUpdate.metric("DUPLICATE_FILES", "重复跳过", run.duplicates, null, ProgressUnit.FILE));
+            updates.add(ProgressUpdate.metric("UNSUPPORTED_FILES", "格式不支持", run.unsupported, null, ProgressUnit.FILE));
+            updates.add(ProgressUpdate.metric("REGISTRATION_FAILED", "登记失败", run.registrationFailed, null, ProgressUnit.FILE));
+            updates.add(ProgressUpdate.metric("METADATA_SUCCEEDED", "元数据成功", run.succeeded,
+                    run.scanComplete ? run.registered : null, ProgressUnit.FILE));
+            updates.add(ProgressUpdate.metric("METADATA_FAILED", "元数据失败", run.metadataFailed,
+                    run.scanComplete ? run.registered : null, ProgressUnit.FILE));
+            updates.add(ProgressUpdate.stageChanged(stage));
             if (run.scanComplete) {
                 long total = run.registered + run.registrationFailed;
                 int percent = total == 0 ? 100 : (int)((run.succeeded + run.metadataFailed + run.registrationFailed) * 100 / total);
-                updates.add(TaskProgressUpdate.overallProgressChanged(percent));
+                updates.add(ProgressUpdate.overallProgressChanged(percent));
             }
-            progressService.updateProgress(run.id, updates.toArray(TaskProgressUpdate[]::new));
+            progressService.update(run.progressHandle, updates.toArray(ProgressUpdate[]::new));
             run.progressDirty = false;
         }
     }
@@ -299,8 +295,12 @@ public class FileMetaService {
         String message = "接入结束：登记" + run.registered + "个，解析成功" + run.succeeded
                 + "个，解析失败" + run.metadataFailed + "个，登记失败" + run.registrationFailed
                 + "个，重复跳过" + run.duplicates + "个，不支持跳过" + run.unsupported + "个";
-        run.terminal = run.error == null ? progressService.finalizeTaskResult(run.id, message)
-                : progressService.finalizeTaskFailure(run.id, run.error + "；" + message);
+        long failed = run.registrationFailed + run.metadataFailed;
+        TaskStatus status = run.error != null ? TaskStatus.FAILED
+                : failed == 0 ? TaskStatus.COMPLETED
+                : run.succeeded == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED;
+        if (run.progressHandle != null)
+            progressService.finish(run.progressHandle, status, run.error == null ? message : run.error + "；" + message);
         run.completedAt = LocalDateTime.now();
         workspaceSlots.release();
     }
@@ -333,7 +333,7 @@ public class FileMetaService {
         volatile boolean progressDirty;
         String currentPath, lastError, error;
         volatile LocalDateTime completedAt;
-        TaskInfo terminal;
+        ProgressSnapshot.Handle progressHandle;
 
         WorkspaceRun(String id, GisDataSet dataSet, GisFileMetaVO.WorkspaceRequest request, String entryType, Long operatorId) {
             this.id = id; this.dataSet = dataSet; this.request = request; this.entryType = entryType; this.operatorId = operatorId;

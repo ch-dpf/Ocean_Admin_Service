@@ -13,6 +13,14 @@ import java.time.LocalDateTime;
 @Mapper
 public interface GisFileTransferRecordMapper extends BaseMapper<GisFileTransferRecord> {
 
+    @org.apache.ibatis.annotations.Select(value = "UPDATE ocean_gis.gis_file_transfer_record "
+            + "SET progress_epoch = progress_epoch + 1 "
+            + "WHERE record_no = #{progressId} AND deleted = 0 AND operation_type = 'IMPORT' RETURNING progress_epoch", affectData = true)
+    @org.apache.ibatis.annotations.Options(useCache = false,
+            flushCache = org.apache.ibatis.annotations.Options.FlushCachePolicy.TRUE)
+    Long nextProgressEpoch(@Param("progressId") String progressId);
+
+
     GisFileTransferRecord lockById(@Param("id") Long id);
 
     Page<GisFileTransferRecordVO> selectRecordPage(

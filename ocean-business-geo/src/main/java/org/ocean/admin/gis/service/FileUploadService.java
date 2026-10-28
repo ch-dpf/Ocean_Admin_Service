@@ -1,5 +1,7 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.progress.RealtimeProgressService;
+
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -7,11 +9,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.config.FileUploadConfig;
 import org.ocean.admin.gis.dto.GisStoredFile;
 import org.ocean.admin.gis.dto.GisUploadChunkCommand;
-import org.ocean.admin.gis.dto.TaskInfo;
+import org.ocean.admin.gis.progress.ProgressSnapshot;
 import org.ocean.admin.gis.dto.TaskStatus;
-import org.ocean.admin.gis.dto.TaskProgressUnit;
-import org.ocean.admin.gis.dto.TaskProgressUpdate;
-import org.ocean.admin.gis.dto.TaskStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
+import org.ocean.admin.gis.progress.ProgressUpdate;
+import org.ocean.admin.gis.progress.ProgressStage;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileTransferRecord;
@@ -43,7 +45,7 @@ import java.util.Set;
  *     <li>以 requestId 保证批次幂等，并在首块创建 upload_ 前缀任务；</li>
  *     <li>约束批次内文件顺序，处理重复块、断点续传和故障恢复；</li>
  *     <li>协调流式落盘、文件转正、元数据入库和数据集文件计数；</li>
- *     <li>维护 Redis 实时任务快照并推送 WebSocket 上传进度。</li>
+ *     <li>维护 Redis 实时任务快照并推送 SSE 上传进度。</li>
  *     <li>在批次终态清理空目录，并回收长时间无活动的暂存资源。</li>
  * </ul>
  *
@@ -68,7 +70,7 @@ public class FileUploadService {
 
     private final GisDataSetMapper gisDataSetMapper;
     private final FileUploadUtil fileUploadUtil;
-    private final AsyncTaskService asyncTaskService;
+    private final RealtimeProgressService progressService;
     private final FileTransferRecordService fileTransferRecordService;
     private final FileMetaService fileMetaService;
     private final VectorDataSetStyleService vectorDataSetStyles;
@@ -209,7 +211,7 @@ public class FileUploadService {
                         true, false);
             }
 
-            // 8. FileUploadUtil 校验重叠字节并追加新内容；块内进度只推送 Redis/WebSocket。
+            // 8. FileUploadUtil 校验重叠字节并追加新内容；块内进度只推送 Redis/SSE。
             long[] lastPushNanos = {0L};
             int[] lastProgress = {-1};
             GisFileTransferRecord currentRecord = record;
@@ -319,8 +321,8 @@ public class FileUploadService {
         GisFileMeta meta = createFileMeta(record, command, storedFile);
         GisFileTransferRecord updated = fileTransferRecordService.stageImportFile(
                 record.getId(), command.sequenceNo(), meta);
-        asyncTaskService.updateProgress(updated.getRecordNo(), TaskProgressUpdate.stageChanged(
-                TaskStage.indeterminate(updated.getCurrentStage(), "文件传输完成，等待空间元数据提取：" + command.fileName())));
+        progressService.update(progressService.handle(updated.getRecordNo()), ProgressUpdate.stageChanged(
+                ProgressStage.indeterminate(updated.getCurrentStage(), "文件传输完成，等待空间元数据提取：" + command.fileName())));
         finishTaskIfDone(updated);
         return updated;
     }
@@ -400,30 +402,30 @@ public class FileUploadService {
     /** Redis 快照丢失或服务重启时，根据数据库记录重建实时进度任务。 */
     private void ensureProgressTask(GisFileTransferRecord record) {
         String taskId = record.getRecordNo();
-        TaskInfo taskInfo = asyncTaskService.getTaskInfo(taskId);
-        if (taskInfo == null) {
-            asyncTaskService.registerTask(
+        ProgressSnapshot taskInfo = progressService.get(taskId);
+        if (taskInfo == null || (taskInfo.status().isTerminal() && !record.getRecordStatus().isTerminal())) {
+            progressService.create(
                     taskId,
                     record.getRequestId(),
                     "GIS文件分块上传",
                     record.getTotalCount(),
                     "GIS_UPLOAD",
-                    TaskProgressUnit.FILE);
-            asyncTaskService.updateProgress(
-                    taskId,
-                    TaskProgressUpdate.resultChanged(
+                    ProgressUnit.FILE);
+            progressService.update(progressService.handle(taskId),
+                    ProgressUpdate.resultChanged(
                             record.getCompletedCount(), record.getFailedCount()),
-                    TaskProgressUpdate.stageChanged("UPLOADING".equals(record.getCurrentStage())
+                    ProgressUpdate.stageChanged("UPLOADING".equals(record.getCurrentStage())
                             ? createByteStage("UPLOADING", "等待上传数据", record.getUploadedBytes(), record.getTotalBytes())
-                            : TaskStage.indeterminate(record.getCurrentStage(),
+                            : ProgressStage.indeterminate(record.getCurrentStage(),
                                     "正在提取文件空间元数据与内容")),
-                    TaskProgressUpdate.overallProgressChanged(progressPercent(
-                            record.getUploadedBytes(), record.getTotalBytes())));
+                    ProgressUpdate.overallProgressChanged(null),
+                    ProgressUpdate.metric("CONFIRMED_BYTES", "确认落盘字节", record.getUploadedBytes(),
+                            record.getTotalBytes(), ProgressUnit.BYTE));
             return;
         }
         if (!record.getRequestId().equals(taskInfo.correlationId())
-                || !"GIS_UPLOAD".equals(taskInfo.taskType())
-                || taskInfo.result().total() != record.getTotalCount()) {
+                || !"GIS_UPLOAD".equals(taskInfo.type())
+                || taskInfo.summary().total() != record.getTotalCount()) {
             throw new IllegalStateException("实时进度任务与上传记录不一致: " + taskId);
         }
     }
@@ -448,33 +450,35 @@ public class FileUploadService {
 
     private void publishProgress(
             GisFileTransferRecord record, String fileName, long uploadedBytes) {
-        asyncTaskService.updateProgress(
-                record.getRecordNo(),
-                TaskProgressUpdate.stageChanged(createByteStage(
+        progressService.update(progressService.handle(record.getRecordNo()),
+                ProgressUpdate.stageChanged(createByteStage(
                         "UPLOADING",
                         "正在上传：" + fileName + "（"
                                 + formatByteSize(uploadedBytes) + "/"
                                 + formatByteSize(record.getTotalBytes()) + "）",
                         uploadedBytes,
                         record.getTotalBytes())),
-                TaskProgressUpdate.overallProgressChanged(
-                        progressPercent(uploadedBytes, record.getTotalBytes())));
+                ProgressUpdate.overallProgressChanged(null),
+                ProgressUpdate.metric("RECEIVED_BYTES", "已接收字节", uploadedBytes, record.getTotalBytes(), ProgressUnit.BYTE),
+                ProgressUpdate.metric("CONFIRMED_BYTES", "确认落盘字节", record.getUploadedBytes(),
+                        record.getTotalBytes(), ProgressUnit.BYTE));
     }
 
     private void publishFileResult(GisFileTransferRecord record, String fileName) {
-        asyncTaskService.updateProgress(
-                record.getRecordNo(),
-                TaskProgressUpdate.resultChanged(
+        progressService.update(progressService.handle(record.getRecordNo()),
+                ProgressUpdate.resultChanged(
                         record.getCompletedCount(), record.getFailedCount()),
-                TaskProgressUpdate.stageChanged(TaskStage.indeterminate(
-                        record.getCurrentStage(), "文件处理完成：" + fileName)));
+                ProgressUpdate.stageChanged(ProgressStage.indeterminate(
+                        record.getRecordStatus().isTerminal() ? "FINALIZING" : record.getCurrentStage(), "文件处理完成：" + fileName)),
+                ProgressUpdate.metric("CONFIRMED_BYTES", "确认落盘字节", record.getUploadedBytes(),
+                        record.getTotalBytes(), ProgressUnit.BYTE));
     }
 
     private void finishTaskIfDone(GisFileTransferRecord record) {
         if (record.getRecordStatus() != TaskStatus.RUNNING) {
             fileUploadUtil.deleteEmptyBatchDirectory(record.getRecordNo());
-            asyncTaskService.finalizeTaskResult(
-                    record.getRecordNo(),
+            progressService.finish(
+                    progressService.handle(record.getRecordNo()), record.getRecordStatus(),
                     record.getFailedCount() == 0
                             ? "全部文件导入完成"
                             : "导入结束，成功" + record.getCompletedCount()
@@ -551,12 +555,11 @@ public class FileUploadService {
 
     private boolean finalizeExpiredProgressTask(GisFileTransferRecord record) {
         try {
-            asyncTaskService.updateProgress(
-                    record.getRecordNo(),
-                    TaskProgressUpdate.resultChanged(
+            progressService.update(progressService.handle(record.getRecordNo()),
+                    ProgressUpdate.resultChanged(
                             record.getCompletedCount(), record.getFailedCount()));
-            asyncTaskService.finalizeTaskResult(
-                    record.getRecordNo(), "上传长时间无活动，系统已自动终止");
+            progressService.finish(
+                    progressService.handle(record.getRecordNo()), record.getRecordStatus(), "上传长时间无活动，系统已自动终止");
             return true;
         } catch (RuntimeException ex) {
             log.warn("结束过期上传实时任务失败，将在下轮重试: taskNo={}",
@@ -565,14 +568,14 @@ public class FileUploadService {
         }
     }
 
-    private TaskStage createByteStage(
+    private ProgressStage createByteStage(
             String code, String message, long completedBytes, long totalBytes) {
-        return TaskStage.determinate(
+        return ProgressStage.determinate(
                 code,
                 message,
                 Math.min(Math.max(0L, completedBytes), totalBytes),
                 totalBytes,
-                TaskProgressUnit.BYTE);
+                ProgressUnit.BYTE);
     }
 
     private int progressPercent(long uploadedBytes, long totalBytes) {
@@ -647,7 +650,7 @@ public class FileUploadService {
             boolean fileFailed) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("requestId", record.getRequestId());
-        result.put("taskId", record.getRecordNo());
+        result.put("progress", ProgressSnapshot.reference(record.getRecordNo(), "GIS_UPLOAD", record.getRecordStatus()));
         result.put("dataSetId", record.getDataSetId());
         result.put("fileIndex", command.fileIndex());
         result.put("nextOffset", nextOffset(record, command, item));

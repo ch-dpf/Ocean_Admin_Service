@@ -44,6 +44,7 @@ public class ProcessingWorker {
         GisProcessingTask task = taskService.getRequired(taskId);
         GisTileSet tileSet = tileSetMapper.selectByTaskId(taskId);
         String taskNo = task.getTaskNo();
+        var progressHandle = taskLifecycle.handle(taskNo);
         if (tileSet == null) {
             throw new IllegalStateException("处理任务对应的瓦片集不存在: " + taskId);
         }
@@ -57,14 +58,14 @@ public class ProcessingWorker {
                     tileSet.getOutputKey());
             GisFileProcessingEngine engine = engineRegistry.require(processingType);
 
-            taskLifecycle.start(taskId, taskNo, "开始执行切片引擎");
+            taskLifecycle.start(taskId, progressHandle, "开始执行切片引擎");
             inputMapper.updateTaskStatus(taskId, "RUNNING", null);
             if (inputs.size() == 1 && "DIRECTORY".equals(inputs.get(0).getInputKind())) {
                 engine.processFolder(paths.get(0), workspace, parameters,
-                        progress -> taskLifecycle.reportProgress(taskNo, progress));
+                        progress -> taskLifecycle.reportProgress(progressHandle, progress));
             } else {
                 engine.process(paths, workspace, parameters,
-                        progress -> taskLifecycle.reportProgress(taskNo, progress));
+                        progress -> taskLifecycle.reportProgress(progressHandle, progress));
             }
             refreshTileMetadata(tileSet, workspace);
             tileSet.setTileSetStatus("READY");
@@ -72,9 +73,9 @@ public class ProcessingWorker {
             tileSetMapper.updateById(tileSet);
             inputMapper.updateTaskStatus(taskId, "CONSUMED", null);
             for (int i = 0; i < inputs.size(); i++) {
-                taskLifecycle.recordResult(taskId, taskNo, true);
+                taskLifecycle.recordResult(taskId, progressHandle, true);
             }
-            taskLifecycle.finish(taskId, taskNo,
+            taskLifecycle.finish(taskId, progressHandle,
                     finished -> "处理结束，已生成一个静态瓦片集");
         } catch (Exception ex) {
             String error = abbreviate(ex.getMessage());
@@ -83,7 +84,7 @@ public class ProcessingWorker {
             tileSet.setErrorMessage(error);
             tileSet.setUpdateTime(LocalDateTime.now());
             tileSetMapper.updateById(tileSet);
-            taskLifecycle.fail(taskId, taskNo, "切片处理失败: ", ex);
+            taskLifecycle.fail(taskId, progressHandle, "切片处理失败: ", ex);
             log.error("GIS切片任务失败: taskId={}", taskId, ex);
         }
     }

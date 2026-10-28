@@ -2,62 +2,65 @@ package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisProcessingTask;
-import org.ocean.admin.gis.dto.TaskProgressUnit;
-import org.ocean.admin.gis.dto.TaskProgressUpdate;
-import org.ocean.admin.gis.dto.TaskStage;
+import org.ocean.admin.gis.progress.ProgressSnapshot.Handle;
+import org.ocean.admin.gis.progress.ProgressStage;
+import org.ocean.admin.gis.progress.ProgressSummary;
+import org.ocean.admin.gis.progress.ProgressUnit;
+import org.ocean.admin.gis.progress.ProgressUpdate;
+import org.ocean.admin.gis.progress.RealtimeProgressService;
 import org.springframework.stereotype.Service;
-
 import java.util.function.Function;
 
-/** 协调持久化处理任务与实时进度的状态流转。 */
+/** 数据库负责业务结果，进度中心投影已提交的状态。 */
 @Service
 @RequiredArgsConstructor
 public class ProcessingTaskLifecycleService {
     private final ProcessingTaskRecordService taskService;
-    private final AsyncTaskService progressService;
+    private final RealtimeProgressService progressService;
 
     public void dispatch(Long taskId, String taskNo, String taskName, int totalCount,
             String progressType, Runnable workerDispatch, String failureMessage) {
+        Handle handle = null;
         try {
-            progressService.registerTask(
-                    taskNo, null, taskName, totalCount, progressType, TaskProgressUnit.INPUT);
+            handle = progressService.create(taskNo, null, taskName, totalCount, progressType, ProgressUnit.INPUT);
             workerDispatch.run();
         } catch (Exception ex) {
-            fail(taskId, taskNo, failureMessage, ex);
+            fail(taskId, handle, failureMessage, ex);
             throw ex;
         }
     }
 
-    public void start(Long taskId, String taskNo, String message) {
+    public Handle handle(String taskNo) { return progressService.handle(taskNo); }
+
+    public void start(Long taskId, Handle handle, String message) {
         taskService.markRunning(taskId);
-        progressService.updateProgress(
-                taskNo,
-                TaskProgressUpdate.stageChanged(
-                        TaskStage.indeterminate("processing", message)));
+        progressService.update(handle, ProgressUpdate.stageChanged(ProgressStage.indeterminate("PROCESSING", message)));
     }
 
-    public void reportProgress(String taskNo, TaskStage stage) {
-        progressService.updateProgress(taskNo, TaskProgressUpdate.stageChanged(stage));
+    public void reportProgress(Handle handle, ProgressStage stage) {
+        progressService.update(handle, ProgressUpdate.stageChanged(stage));
     }
 
-    public void recordResult(Long taskId, String taskNo, boolean success) {
-        if (success) {
-            taskService.incrementCompleted(taskId);
-        } else {
-            taskService.incrementFailed(taskId);
-        }
-        progressService.updateProgress(taskNo, TaskProgressUpdate.itemFinished(success));
+    public void recordResult(Long taskId, Handle handle, boolean success) {
+        if (success) taskService.incrementCompleted(taskId);
+        else taskService.incrementFailed(taskId);
+        GisProcessingTask task = taskService.getRequired(taskId);
+        progressService.update(handle, ProgressUpdate.resultChanged(task.getCompletedCount(), task.getFailedCount()));
     }
 
-    public GisProcessingTask finish(Long taskId, String taskNo,
+    public GisProcessingTask finish(Long taskId, Handle handle,
             Function<GisProcessingTask, String> resultMessage) {
         GisProcessingTask finished = taskService.finish(taskId);
-        progressService.finalizeTaskResult(taskNo, resultMessage.apply(finished));
+        progressService.finish(handle, finished.getTaskStatus(), resultMessage.apply(finished));
         return finished;
     }
 
-    public void fail(Long taskId, String taskNo, String message, Exception ex) {
+    public void fail(Long taskId, Handle handle, String message, Exception ex) {
         taskService.markFailed(taskId, ex.getMessage());
-        progressService.finalizeTaskFailure(taskNo, message + ex.getMessage());
+        if (handle == null) return;
+        GisProcessingTask task = taskService.getRequired(taskId);
+        progressService.update(handle, ProgressUpdate.summaryChanged(new ProgressSummary(task.getTotalCount(),
+                task.getCompletedCount(), task.getFailedCount(), ProgressUnit.INPUT)));
+        progressService.finish(handle, task.getTaskStatus(), message + ex.getMessage());
     }
 }

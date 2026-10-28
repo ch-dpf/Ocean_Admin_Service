@@ -143,6 +143,8 @@ public class ProcessingService {
                     .processingType(command.processingType())
                     .outputKey(workspace.outputKey())
                     .totalCount((long) prepared.inputs().size())
+                    .progress(org.ocean.admin.gis.progress.ProgressSnapshot.reference(
+                            taskNo, "GIS_PROCESSING", TaskStatus.QUEUED))
                     .taskStatus(TaskStatus.QUEUED)
                     .build();
         } catch (RuntimeException ex) {

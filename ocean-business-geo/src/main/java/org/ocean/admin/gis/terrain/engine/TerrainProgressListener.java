@@ -1,6 +1,6 @@
 package org.ocean.admin.gis.terrain.engine;
 
-import org.ocean.admin.gis.dto.TaskStage;
+import org.ocean.admin.gis.progress.ProgressStage;
 
 /** 接收地形引擎的结构化工作量进度。 */
 @FunctionalInterface
@@ -8,5 +8,5 @@ public interface TerrainProgressListener {
 
     TerrainProgressListener NO_OP = progress -> { };
 
-    void onProgress(TaskStage stage);
+    void onProgress(ProgressStage stage);
 }

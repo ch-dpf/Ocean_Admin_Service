@@ -17,6 +17,9 @@ public class GisFileTransferRecord {
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
+    /** 实时进度流代次，与业务状态版本分开维护。 */
+    private Long progressEpoch = 0L;
+
     /** 对外暴露的稳定记录编号。 */
     private String recordNo;
 

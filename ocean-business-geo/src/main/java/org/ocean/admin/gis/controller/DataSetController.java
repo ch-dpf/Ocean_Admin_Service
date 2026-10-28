@@ -40,15 +40,8 @@ public class DataSetController {
     @OperationLog(module = "GIS_DATASET", type = OperationType.SUBMIT, description = "工作区数据接入")
     public ResponseResult<GisFileMetaVO.WorkspaceSubmission> addWorkspaceFiles(
             @PathVariable Long id, @Valid @RequestBody GisFileMetaVO.WorkspaceRequest request) {
-        return ResponseResult.success("工作区接入已受理，请按progressTaskId跟踪进度",
+        return ResponseResult.success("工作区接入已受理，请按progress.progressId跟踪进度",
                 fileMetaService.addWorkspaceFiles(id, request));
-    }
-
-    @GetMapping("/{id}/workspace-files/tasks/{progressTaskId}")
-    @Operation(summary = "查询工作区接入实时进度", description = "仅创建者可查询；终态保留30分钟，服务重启后失效；不是切片处理任务详情接口")
-    public ResponseResult<GisFileMetaVO.WorkspaceProgress> workspaceProgress(
-            @PathVariable Long id, @PathVariable String progressTaskId) {
-        return ResponseResult.success(fileMetaService.workspaceProgress(id, progressTaskId));
     }
 
     @GetMapping("/page")

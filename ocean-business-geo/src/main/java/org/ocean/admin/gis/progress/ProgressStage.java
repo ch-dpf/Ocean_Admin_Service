@@ -1,14 +1,14 @@
-package org.ocean.admin.gis.dto;
+package org.ocean.admin.gis.progress;
 
 /** 当前任务阶段及其局部工作量。 */
-public record TaskStage(
+public record ProgressStage(
         String code, // 阶段编码
         String message, // 阶段消息
         Long completed, // 已完成量
         Long total, // 总量
-        TaskProgressUnit unit) { // 工作量单位
+        ProgressUnit unit) { // 工作量单位
 
-    public TaskStage {
+    public ProgressStage {
         if (code == null || code.isBlank()) {
             throw new IllegalArgumentException("任务阶段不能为空");
         }
@@ -25,17 +25,17 @@ public record TaskStage(
         }
     }
 
-    public static TaskStage indeterminate(String code, String message) {
-        return new TaskStage(code, message, null, null, null);
+    public static ProgressStage indeterminate(String code, String message) {
+        return new ProgressStage(code, message, null, null, null);
     }
 
-    public static TaskStage determinate(
+    public static ProgressStage determinate(
             String code,
             String message,
             long completed,
             long total,
-            TaskProgressUnit unit) {
-        return new TaskStage(code, message, completed, total, unit);
+            ProgressUnit unit) {
+        return new ProgressStage(code, message, completed, total, unit);
     }
 
     public boolean determinate() {
@@ -43,8 +43,8 @@ public record TaskStage(
     }
 
     /** 扫描总量未知时只报告已扫描条目数，不计算百分比。 */
-    public static TaskStage counting(String code, String message, long completed, TaskProgressUnit unit) {
-        return new TaskStage(code, message, completed, null, unit);
+    public static ProgressStage counting(String code, String message, long completed, ProgressUnit unit) {
+        return new ProgressStage(code, message, completed, null, unit);
     }
 
     public Integer percent() {

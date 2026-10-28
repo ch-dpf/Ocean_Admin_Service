@@ -35,7 +35,7 @@
                 THEN CAST((a.processed_file_count::NUMERIC * 100)
                     / a.total_file_count AS INTEGER)
             ELSE 0
-        END AS progress,
+        END AS packing_percent,
         CASE
             WHEN a.archive_status = 'COMPLETED' AND a.storage_key IS NOT NULL THEN TRUE
             ELSE FALSE

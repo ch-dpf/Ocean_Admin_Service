@@ -19,8 +19,8 @@ import org.geotools.renderer.lite.RendererUtilities;
 import org.geotools.renderer.lite.gridcoverage2d.GridCoverageRenderer;
 import org.geotools.styling.StyleBuilder;
 import org.locationtech.jts.index.strtree.STRtree;
-import org.ocean.admin.gis.dto.TaskProgressUnit;
-import org.ocean.admin.gis.dto.TaskStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
+import org.ocean.admin.gis.progress.ProgressStage;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -166,7 +166,7 @@ public class GeoTiffTileGenerator {
     }
 
     public void generate(MosaicPlan plan, List<GeoTiffPreprocessor.PreparedRaster> rasters,
-            String name, Path output, ImageryTileOptions options, Consumer<TaskStage> progressListener) {
+            String name, Path output, ImageryTileOptions options, Consumer<ProgressStage> progressListener) {
         if (rasters.size() != plan.sources().size()) {
             throw new IllegalArgumentException("预处理结果与集合输入数量不一致");
         }
@@ -193,8 +193,8 @@ public class GeoTiffTileGenerator {
                     PartImageCache images = new PartImageCache(2)) {
                 RasterSymbolizer symbolizer = new StyleBuilder().createRasterSymbolizer();
                 Interpolation interpolation = interpolation(options.resampling());
-                progressListener.accept(TaskStage.determinate("generating", "开始生成集合影像瓦片",
-                        0, plan.tileCount(), TaskProgressUnit.TILE));
+                progressListener.accept(ProgressStage.determinate("generating", "开始生成集合影像瓦片",
+                        0, plan.tileCount(), ProgressUnit.TILE));
                 for (PlannedTile tile : plan.tiles()) {
                     BufferedImage rendered = renderMetaTile(index, readers, images,
                             symbolizer, interpolation, tile.range(), options);
@@ -206,9 +206,9 @@ public class GeoTiffTileGenerator {
                     long now = System.nanoTime();
                     if (completed == plan.tileCount() || now - lastReport >= PROGRESS_REPORT_INTERVAL_NANOS) {
                         lastReport = now;
-                        progressListener.accept(TaskStage.determinate("generating",
+                        progressListener.accept(ProgressStage.determinate("generating",
                                 "正在生成集合影像瓦片：" + completed + "/" + plan.tileCount(),
-                                completed, plan.tileCount(), TaskProgressUnit.TILE));
+                                completed, plan.tileCount(), ProgressUnit.TILE));
                     }
                 }
             }
@@ -218,8 +218,8 @@ public class GeoTiffTileGenerator {
             if (completed != plan.tileCount()) {
                 throw new IllegalStateException("实际瓦片数量与集合计划不一致");
             }
-            progressListener.accept(TaskStage.determinate("finalizing", "正在写入集合影像元数据",
-                    completed, completed, TaskProgressUnit.TILE));
+            progressListener.accept(ProgressStage.determinate("finalizing", "正在写入集合影像元数据",
+                    completed, completed, ProgressUnit.TILE));
             writeMetadata(target, name, plan, options);
         } catch (Exception ex) {
             throw new IllegalStateException("影像集合切片失败: " + ex.getMessage(), ex);

@@ -33,7 +33,7 @@
                 THEN LEAST(99, CAST((r.uploaded_bytes * 100) / r.total_bytes AS INTEGER))
             WHEN r.total_count = 0 THEN 0
             ELSE CAST(((r.completed_count + r.failed_count) * 100) / r.total_count AS INTEGER)
-        END AS progress,
+        END AS transfer_percent,
         r.start_time,
         r.finish_time,
         r.create_time,

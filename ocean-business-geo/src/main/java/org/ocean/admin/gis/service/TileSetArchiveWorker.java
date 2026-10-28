@@ -1,10 +1,15 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.dto.TaskStatus;
+import org.ocean.admin.gis.progress.ProgressSnapshot.Handle;
+
+import org.ocean.admin.gis.progress.RealtimeProgressService;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ocean.admin.gis.dto.TaskProgressUnit;
-import org.ocean.admin.gis.dto.TaskProgressUpdate;
-import org.ocean.admin.gis.dto.TaskStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
+import org.ocean.admin.gis.progress.ProgressUpdate;
+import org.ocean.admin.gis.progress.ProgressStage;
 import org.ocean.admin.gis.entity.GisProcessingInput;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisTileSet;
@@ -56,7 +61,7 @@ public class TileSetArchiveWorker {
     private final GisTileSetMapper tileSetMapper;
     private final GisProcessingInputMapper inputMapper;
     private final GisProcessingStorageService storageService;
-    private final AsyncTaskService asyncTaskService;
+    private final RealtimeProgressService progressService;
     private final GisProcessingProperties properties;
     private final ObjectMapper objectMapper;
 
@@ -75,8 +80,11 @@ public class TileSetArchiveWorker {
                 storageService.archiveStorageKey(archive.getArchiveNo()));
         Path temporary = storageService.resolveArchiveTemporary(archive.getArchiveNo());
         boolean archiveCommitted = false;
-        boolean progressRegistered = false;
+        Handle progressHandle = null;
         try {
+            progressHandle = progressService.handle(archive.getArchiveNo());
+            progressService.update(progressHandle, ProgressUpdate.stageChanged(
+                    ProgressStage.indeterminate("SCANNING", "正在扫描归档源文件")));
             GisProcessingTask task = taskService.getRequired(archive.getProcessingTaskId());
             GisTileSet tileSet = tileSetMapper.selectById(archive.getTileSetId());
             validateSource(task, tileSet, archive);
@@ -84,24 +92,17 @@ public class TileSetArchiveWorker {
             log.info("开始扫描静态瓦片集归档源文件: archiveNo={}, processingTaskId={}, "
                             + "taskNo={}, tileSetId={}",
                     archive.getArchiveNo(), task.getId(), task.getTaskNo(), tileSet.getId());
-            List<Path> files = scanFiles(tilesRoot);
+            List<Path> files = scanFiles(tilesRoot, progressHandle);
             long totalBytes = totalBytes(files);
             log.info("静态瓦片集归档源文件扫描完成: archiveNo={}, totalFiles={}, totalBytes={}",
                     archive.getArchiveNo(), files.size(), totalBytes);
             archiveService.initializeProgress(archive.getId(), files.size(), totalBytes);
 
-            asyncTaskService.registerTask(
-                    archive.getArchiveNo(), task.getTaskNo(), archive.getArchiveName(),
-                    files.size(), "GIS_TILE_SET_ARCHIVE", TaskProgressUnit.FILE);
-            progressRegistered = true;
-            asyncTaskService.updateProgress(archive.getArchiveNo(),
-                    TaskProgressUpdate.stageChanged(TaskStage.determinate(
-                            "packing", "正在打包静态瓦片集", 0, files.size(),
-                            TaskProgressUnit.FILE)),
-                    TaskProgressUpdate.overallProgressChanged(0));
-            log.info("静态瓦片集归档实时进度任务已注册: archiveNo={}, "
-                            + "correlationTaskNo={}, totalFiles={}",
-                    archive.getArchiveNo(), task.getTaskNo(), files.size());
+            progressService.update(progressHandle,
+                    ProgressUpdate.stageChanged(ProgressStage.determinate("PACKING", "正在打包静态瓦片集",
+                            0, files.size(), ProgressUnit.FILE)),
+                    ProgressUpdate.metric("PACKED_FILES", "已打包文件", 0, (long) files.size(), ProgressUnit.FILE),
+                    ProgressUpdate.metric("PACKED_BYTES", "已打包源字节", 0, totalBytes, ProgressUnit.BYTE));
 
             Files.createDirectories(target.getParent());
             if (Files.isSymbolicLink(target.getParent())) {
@@ -111,11 +112,13 @@ public class TileSetArchiveWorker {
             Files.deleteIfExists(target);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             ArchiveProgress progress = writeArchive(
-                    temporary, tilesRoot, files, totalBytes, archive, task, tileSet, digest);
+                    temporary, tilesRoot, files, totalBytes, archive, task, tileSet, digest, progressHandle);
             if (progress.processedFiles() != files.size()
                     || progress.processedBytes() != totalBytes) {
                 throw new IllegalStateException("归档期间静态瓦片集内容发生变化");
             }
+            progressService.update(progressHandle, ProgressUpdate.stageChanged(
+                    ProgressStage.indeterminate("FINALIZING", "正在校验并发布归档成果")));
             moveAtomically(temporary, target);
             long archiveSize = Files.size(target);
             String sha256 = HexFormat.of().formatHex(digest.digest());
@@ -124,14 +127,9 @@ public class TileSetArchiveWorker {
             archiveService.markCompleted(archive.getId(), storageKey, archiveSize, sha256,
                     files.size(), totalBytes);
             archiveCommitted = true;
-            asyncTaskService.updateProgress(archive.getArchiveNo(),
-                    TaskProgressUpdate.stageChanged(TaskStage.determinate(
-                            "completed", "静态瓦片集归档完成", files.size(), files.size(),
-                            TaskProgressUnit.FILE)),
-                    TaskProgressUpdate.overallProgressChanged(100),
-                    TaskProgressUpdate.resultChanged(files.size(), 0));
-            asyncTaskService.finalizeTaskResult(
-                    archive.getArchiveNo(), "静态瓦片集归档完成");
+            progressService.update(progressHandle, ProgressUpdate.resultChanged(1, 0),
+                    ProgressUpdate.metric("ARCHIVE_BYTES", "归档文件字节", archiveSize, archiveSize, ProgressUnit.BYTE));
+            progressService.finish(progressHandle, TaskStatus.COMPLETED, "静态瓦片集归档完成");
             log.info("静态瓦片集归档完成: archiveNo={}, tileSetId={}, files={}, sizeBytes={}",
                     archive.getArchiveNo(), archive.getTileSetId(), files.size(), archiveSize);
         } catch (Exception ex) {
@@ -143,9 +141,9 @@ public class TileSetArchiveWorker {
             deleteQuietly(temporary);
             deleteQuietly(target);
             archiveService.markFailed(archive.getId(), ex.getMessage());
-            if (progressRegistered) {
-                asyncTaskService.finalizeTaskFailure(
-                        archive.getArchiveNo(), "静态瓦片集归档失败: " + ex.getMessage());
+            if (progressHandle != null) {
+                progressService.update(progressHandle, ProgressUpdate.resultChanged(0, 1));
+                progressService.finish(progressHandle, TaskStatus.FAILED, "静态瓦片集归档失败: " + ex.getMessage());
             }
             log.error("静态瓦片集归档失败: archiveNo={}, tileSetId={}",
                     archive.getArchiveNo(), archive.getTileSetId(), ex);
@@ -155,7 +153,7 @@ public class TileSetArchiveWorker {
     private ArchiveProgress writeArchive(
             Path temporary, Path tilesRoot, List<Path> files, long totalBytes,
             GisTileSetArchive archive, GisProcessingTask task, GisTileSet tileSet,
-            MessageDigest digest) throws Exception {
+            MessageDigest digest, Handle progressHandle) throws Exception {
         long processedBytes = 0L;
         long processedFiles = 0L;
         long lastProgressTime = System.nanoTime();
@@ -182,6 +180,12 @@ public class TileSetArchiveWorker {
                         }
                         zipOutput.write(buffer, 0, read);
                         processedBytes = Math.addExact(processedBytes, read);
+                        long now = System.nanoTime();
+                        if (now - lastProgressTime >= PROGRESS_INTERVAL_NANOS) {
+                            progressService.update(progressHandle, ProgressUpdate.metric(
+                                    "PACKED_BYTES", "已打包源字节", processedBytes, totalBytes, ProgressUnit.BYTE));
+                            lastProgressTime = now;
+                        }
                     }
                 }
                 zipOutput.closeEntry();
@@ -190,7 +194,7 @@ public class TileSetArchiveWorker {
                 if (processedFiles == files.size()
                         || now - lastProgressTime >= PROGRESS_INTERVAL_NANOS) {
                     reportProgress(archive, processedFiles, processedBytes,
-                            files.size(), totalBytes);
+                            files.size(), totalBytes, progressHandle);
                     lastProgressTime = now;
                 }
             }
@@ -249,32 +253,42 @@ public class TileSetArchiveWorker {
 
     private void reportProgress(
             GisTileSetArchive archive, long processedFiles, long processedBytes,
-            long totalFiles, long totalBytes) {
+            long totalFiles, long totalBytes, Handle progressHandle) {
         archiveService.updateProgress(archive.getId(), processedFiles, processedBytes);
         int percent = totalBytes > 0
                 ? (int) Math.min(100, (double) processedBytes * 100 / totalBytes)
                 : (int) Math.min(100, (double) processedFiles * 100 / totalFiles);
-        asyncTaskService.updateProgress(archive.getArchiveNo(),
-                TaskProgressUpdate.stageChanged(TaskStage.determinate(
+        progressService.update(progressHandle,
+                ProgressUpdate.stageChanged(ProgressStage.determinate(
                         "packing", "正在打包静态瓦片集", processedFiles, totalFiles,
-                        TaskProgressUnit.FILE)),
-                TaskProgressUpdate.overallProgressChanged(percent),
-                TaskProgressUpdate.resultChanged(processedFiles, 0));
+                        ProgressUnit.FILE)),
+                ProgressUpdate.overallProgressChanged(null),
+                ProgressUpdate.metric("PACKED_FILES", "已打包文件", processedFiles, totalFiles, ProgressUnit.FILE),
+                ProgressUpdate.metric("PACKED_BYTES", "已打包源字节", processedBytes, totalBytes, ProgressUnit.BYTE));
         log.debug("静态瓦片集归档进度已上报: archiveNo={}, processedFiles={}, "
                         + "totalFiles={}, processedBytes={}, totalBytes={}, percent={}",
                 archive.getArchiveNo(), processedFiles, totalFiles, processedBytes,
                 totalBytes, percent);
     }
 
-    private List<Path> scanFiles(Path tilesRoot) throws IOException {
+    private List<Path> scanFiles(Path tilesRoot, Handle progressHandle) throws IOException {
         if (Files.isSymbolicLink(tilesRoot)) {
             throw new IllegalStateException("静态瓦片集根目录不能是符号链接");
         }
         List<Path> files = new ArrayList<>();
+        long scanned = 0;
+        long lastScanPush = System.nanoTime();
         try (Stream<Path> paths = Files.walk(tilesRoot)) {
             Iterator<Path> iterator = paths.iterator();
             while (iterator.hasNext()) {
                 Path path = iterator.next();
+                scanned++;
+                long now = System.nanoTime();
+                if (now - lastScanPush >= PROGRESS_INTERVAL_NANOS) {
+                    progressService.update(progressHandle, ProgressUpdate.metric(
+                            "SCANNED_ENTRIES", "已扫描条目", scanned, null, ProgressUnit.ENTRY));
+                    lastScanPush = now;
+                }
                 if (Files.isSymbolicLink(path)) {
                     throw new IllegalStateException("静态瓦片集包含符号链接: " + path);
                 }
@@ -283,6 +297,8 @@ public class TileSetArchiveWorker {
                 }
             }
         }
+        progressService.update(progressHandle, ProgressUpdate.metric(
+                "SCANNED_ENTRIES", "已扫描条目", scanned, scanned, ProgressUnit.ENTRY));
         if (files.isEmpty()) {
             throw new IllegalStateException("静态瓦片集目录中没有可归档文件");
         }

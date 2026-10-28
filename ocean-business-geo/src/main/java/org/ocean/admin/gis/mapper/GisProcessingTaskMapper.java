@@ -10,6 +10,14 @@ import org.ocean.admin.gis.entity.GisProcessingTask;
 @Mapper
 public interface GisProcessingTaskMapper extends BaseMapper<GisProcessingTask> {
 
+    @org.apache.ibatis.annotations.Select(value = "UPDATE ocean_gis.gis_processing_task "
+            + "SET progress_epoch = progress_epoch + 1 "
+            + "WHERE task_no = #{progressId} AND deleted = 0 RETURNING progress_epoch", affectData = true)
+    @org.apache.ibatis.annotations.Options(useCache = false,
+            flushCache = org.apache.ibatis.annotations.Options.FlushCachePolicy.TRUE)
+    Long nextProgressEpoch(@Param("progressId") String progressId);
+
+
     @Insert("INSERT INTO ocean_gis.gis_processing_task "
             + "(id, task_no, task_name, processing_type, source_type, parameters, "
             + "parameter_schema_version, request_fingerprint, priority, total_count, "
@@ -28,7 +36,7 @@ public interface GisProcessingTaskMapper extends BaseMapper<GisProcessingTask> {
             + "parameters::text AS parameters_json, parameter_schema_version, "
             + "request_fingerprint, priority, total_count, completed_count, failed_count, "
             + "task_status, current_stage, error_message, start_time, finish_time, "
-            + "create_time, update_time, deleted FROM ocean_gis.gis_processing_task "
+            + "progress_epoch, create_time, update_time, deleted FROM ocean_gis.gis_processing_task "
             + "WHERE id = #{taskId} AND deleted = 0")
     GisProcessingTask selectTaskById(@Param("taskId") Long taskId);
 }

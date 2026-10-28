@@ -129,6 +129,16 @@ gis:
       process-timeout: ${GIS_TERRAIN_MAGO_PROCESS_TIMEOUT:72h}
 
 ocean:
+  realtime:
+    sse:
+      max-connections: ${SSE_MAX_CONNECTIONS:256}
+      max-pending-messages: ${SSE_MAX_PENDING_MESSAGES:64}
+      max-pending-bytes: ${SSE_MAX_PENDING_BYTES:524288}
+      send-threads: ${SSE_SEND_THREADS:8}
+      send-queue-capacity: ${SSE_SEND_QUEUE_CAPACITY:256}
+      heartbeat-interval-ms: ${SSE_HEARTBEAT_INTERVAL_MS:15000}
+      send-timeout-ms: ${SSE_SEND_TIMEOUT_MS:10000}
+      connection-timeout-ms: ${SSE_CONNECTION_TIMEOUT_MS:1800000}
   audit:
     ip-location:
       # ip2region 离线库由部署环境独立维护；未配置时公网地址降级为“未知”。

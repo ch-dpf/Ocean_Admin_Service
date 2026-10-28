@@ -9,7 +9,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import org.ocean.admin.gis.dto.TaskInfo;
+import org.ocean.admin.gis.progress.ProgressSnapshot;
 import org.ocean.admin.gis.dto.TaskStatus;
 import tools.jackson.databind.JsonNode;
 
@@ -120,12 +120,5 @@ public class GisFileMetaVO {
 
     public record WorkspaceItem(Long fileMetaId, String relativePath, String status, String errorMessage) { }
 
-    public record WorkspaceSubmission(
-            @Schema(description = "工作区实时进度标识，对应WebSocket TaskInfo.taskId，不是处理任务数据库主键") String progressTaskId,
-            Long dataSetId, String taskType, TaskStatus status) { }
-
-    /** 实时进度短期查询；文件明细仍使用现有文件分页接口。 */
-    public record WorkspaceProgress(TaskInfo task, Long dataSetId, String entryType,
-            long scannedCount, long registeredCount, long duplicateCount, long unsupportedCount,
-            long registrationFailedCount, boolean scanComplete) { }
+    public record WorkspaceSubmission(Long dataSetId, ProgressSnapshot.Reference progress) { }
 }

@@ -1,11 +1,13 @@
 package org.ocean.admin.web;
 
 import jakarta.validation.ConstraintViolationException;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -17,11 +19,30 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 
 /** 将控制层异常统一转换为标准响应，避免落入 Spring Boot 默认错误模型。 */
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** 流式响应已不可写时只结束处理，不能再向断开的连接写JSON错误体。 */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleAsyncDisconnect(AsyncRequestNotUsableException exception) {
+        log.debug("异步响应连接已关闭: {}", exception.getMessage());
+    }
+
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public ResponseEntity<ResponseResult<Void>> handleAsyncTimeout(
+            AsyncRequestTimeoutException exception, HttpServletResponse response) {
+        if (response.isCommitted()) {
+            log.debug("已提交的异步响应超时: {}", exception.getMessage());
+            return null;
+        }
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "异步请求超时，请重试");
+    }
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ResponseResult<Void>> handleResponseStatus(ResponseStatusException exception) {
@@ -96,8 +117,8 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.METHOD_NOT_ALLOWED, "请求方法不支持: " + exception.getMethod());
     }
 
-    @ExceptionHandler(NoResourceFoundException.class)
-    public ResponseEntity<ResponseResult<Void>> handleNoResourceFound(NoResourceFoundException exception) {
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ResponseEntity<ResponseResult<Void>> handleNoResourceFound(Exception exception) {
         return error(HttpStatus.NOT_FOUND, "请求资源不存在");
     }
 
@@ -110,6 +131,7 @@ public class GlobalExceptionHandler {
     private ResponseEntity<ResponseResult<Void>> error(HttpStatusCode status, String message) {
         return ResponseEntity.status(status)
                 .header("Cache-Control", "no-store")
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ResponseResult.error(status.value(), message));
     }
 

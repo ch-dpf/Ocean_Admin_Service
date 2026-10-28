@@ -1,5 +1,7 @@
 package org.ocean.admin.gis.vo;
 
+import org.ocean.admin.gis.progress.ProgressSnapshot;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import org.ocean.admin.gis.dto.TaskStatus;
@@ -10,6 +12,7 @@ import java.util.List;
 /** GIS 原始文件上传、下载传输记录响应对象。 */
 @Data
 public class GisFileTransferRecordVO {
+    private ProgressSnapshot.Reference progress;
 
     private Long id;
     private String recordNo;
@@ -34,7 +37,7 @@ public class GisFileTransferRecordVO {
     private String errorMessage;
     private Long operatorId;
     private Long version;
-    private Integer progress;
+    private Integer transferPercent;
     private LocalDateTime startTime;
     private LocalDateTime finishTime;
     private LocalDateTime createTime;

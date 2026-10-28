@@ -4,7 +4,7 @@
 
 - Java 21
 - Spring Boot 4
-- Spring WebSocket
+- Spring MVC SSE
 - MyBatis-Plus
 - JWT（登录鉴权）
 - PostgreSQL （数据库服务）
@@ -36,9 +36,11 @@ ocean-business-cloud
 
 ## 数据所有权
 
-GIS实时进度与持久化业务任务是两层模型。`TaskInfo.taskId` 为字符串进度键：上传使用传输记录的 `recordNo`，切片处理使用处理任务的 `taskNo`，工作区原位接入使用独立的 `progressTaskId=workspace_...`。`gis_processing_task.id` 是切片任务数据库主键，现有处理接口响应仍以 `taskId` 返回该主键；不得用工作区进度键或上传记录编号查询处理任务详情。`fileMetaId` 始终表示文件身份，不表示任何任务。
+统一实时事件信封 `EventMessage<T>` 与发布契约 `RealtimeEventPublisher` 位于 `ocean-kernel` 的 `org.ocean.admin.kernel.realtime` 包，不依赖Web、Servlet或SSE实现。SSE传输位于 `ocean-bootstrap` 的 `org.ocean.admin.web.realtime` 包，作为Web接入与技术装配实现发布契约；平台和GIS模块只依赖kernel中的契约，不反向依赖bootstrap。进度快照、业务投影与数据库重建位于GIS模块的 `progress` 包。RealtimeEventController分别提供 `/api/platform/events/stream` 与 `/api/gis/events/stream`，由服务端固定事件域为platform与gis，省略topics仅订阅所属域，跨域主题返回400，不保留全域入口。RealtimeSsePublisher复用有界串行发送、心跳、异步回收与全局资源上限，连接的投递范围互相隔离；bootstrap中的WebConfig在两个入口的MVC异步响应初始化后激活发送，避免框架内部早期缓冲绕过应用队列上限。工作台SystemMetricsEventService仅生产platform.metrics.updated事件，有匹配的平台订阅者时每2秒采集，GIS连接不会触发系统指标采集。两侧SSE均可承载进度之外的域内事件，各类型自定义消息体。所有事件以app.event帧发送，不提供SSE历史重放；前端每次GIS连接成功后通过既有HTTP接口补查状态，按epoch/sequence合并。鉴权暂不调整，两个SSE入口继续公开访问，域隔离与主题筛选仅控制投递范围。
 
-工作区接入复用 `taskExecutor`、`AsyncTaskService` 和 `/ws/task`，不新增任务或传输表。请求只校验入口并返回202，后台流式遍历、逐文件短事务登记，运行态将新文件关联到本次进度。空间提取成功、失败、源失效或删除事件在事务提交后汇总进度，避免数据库回滚却推送成功；登记后读取一次文件状态，关闭通知早于运行态关联建立的竞态。扫描总量未知时只报告已扫描数，扫描结束才计算解析百分比，所有新文件进入元数据终态后才结束接入。运行态及终态短期查询属于本实例能力，服务重启不恢复目录扫描；持久化的文件提取待办继续按既有租约机制恢复。
+`ProgressSnapshot.progressId` 是字符串进度键：上传使用recordNo，处理使用taskNo，工作区使用workspace编号，归档使用archiveNo。业务对象身份独立通过resource表达。进度版本使用持久化epoch和代次内sequence；重试或重建递增epoch，普通快照查询不增代次。业务Service决定终态，进度中心验证并发布完整快照，不能根据工作量计数推断业务成果是否成功。
+
+工作区接入复用 `taskExecutor`、`RealtimeProgressService` 和 `/api/gis/events/stream`，不新增任务或传输表。请求只校验入口并返回202，后台流式遍历、逐文件短事务登记，运行态将新文件关联到本次进度。空间提取成功、失败、源失效或删除事件在事务提交后汇总进度，避免数据库回滚却推送成功；登记后读取一次文件状态，关闭通知早于运行态关联建立的竞态。扫描总量未知时只报告已扫描数，扫描结束才计算解析百分比，所有新文件进入元数据终态后才结束接入。统一补查入口为 `/api/gis/progress/{progressId}`。工作区运行态及终态短期查询属于本实例能力，服务重启不恢复目录扫描；持久化的文件提取待办继续按既有租约机制恢复。
 
 平台业务使用 `ocean_platform` Schema，平台核心表采用 `sys_` 前缀；GIS 业务使用 `ocean_gis` Schema，表采用 `gis_` 前缀。两个 Schema 分别维护唯一的初始化 SQL，业务对象不跨 Schema 混写。
 

@@ -100,6 +100,7 @@ COMMENT ON COLUMN ocean_gis.gis_vector_group.default_style_key IS '数据集不�
 -- =========================================================
 
 CREATE TABLE ocean_gis.gis_file_transfer_record (
+    progress_epoch BIGINT NOT NULL DEFAULT 0 CHECK (progress_epoch >= 0),
     id                  BIGINT        PRIMARY KEY,
     record_no           VARCHAR(64)   NOT NULL,
     request_id          VARCHAR(64),
@@ -162,6 +163,7 @@ CREATE TABLE ocean_gis.gis_file_transfer_record (
         CHECK (deleted IN (0, 1))
 );
 
+COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.progress_epoch IS '实时进度流代次，重试或快照重建时原子递增';
 COMMENT ON TABLE ocean_gis.gis_file_transfer_record IS 'GIS 原始文件上传、下载传输记录';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.record_no IS '对外暴露的稳定文件传输记录编号';
 COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.request_id IS '客户端上传批次幂等标识，仅导入任务使用';
@@ -590,6 +592,7 @@ CREATE UNIQUE INDEX uk_gis_file_transfer_record_item_file
 -- =========================================================
 
 CREATE TABLE ocean_gis.gis_processing_task (
+    progress_epoch BIGINT NOT NULL DEFAULT 0 CHECK (progress_epoch >= 0),
     id                        BIGINT       PRIMARY KEY,
     task_no                   VARCHAR(64)  NOT NULL,
     task_name                 VARCHAR(200) NOT NULL,
@@ -627,6 +630,7 @@ CREATE TABLE ocean_gis.gis_processing_task (
         CHECK (task_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'PARTIAL_FAILED', 'FAILED'))
 );
 
+COMMENT ON COLUMN ocean_gis.gis_processing_task.progress_epoch IS '实时进度流代次，重试或快照重建时原子递增';
 COMMENT ON TABLE ocean_gis.gis_processing_task IS '静态瓦片生成任务及不可变处理参数快照';
 COMMENT ON COLUMN ocean_gis.gis_processing_task.parameters IS '按处理类型保存的完整参数 JSON 快照';
 
@@ -774,6 +778,7 @@ CREATE INDEX idx_gis_tile_set_type_status
 -- =========================================================
 
 CREATE TABLE ocean_gis.gis_tile_set_archive (
+    progress_epoch BIGINT NOT NULL DEFAULT 0 CHECK (progress_epoch >= 0),
     id                      BIGINT        PRIMARY KEY,
     archive_no              VARCHAR(64)   NOT NULL,
     processing_task_id      BIGINT        NOT NULL,
@@ -849,6 +854,7 @@ CREATE TABLE ocean_gis.gis_tile_set_archive (
         CHECK (deleted IN (0, 1))
 );
 
+COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.progress_epoch IS '实时进度流代次，重试或快照重建时原子递增';
 COMMENT ON TABLE ocean_gis.gis_tile_set_archive IS 'GIS 静态瓦片集成果归档及其生成状态';
 COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.archive_no IS '对外暴露的稳定归档编号';
 COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.processing_task_id IS '产生静态瓦片集的处理任务';

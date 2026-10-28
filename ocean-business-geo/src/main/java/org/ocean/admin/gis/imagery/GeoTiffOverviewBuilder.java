@@ -8,8 +8,8 @@ import org.geotools.coverage.grid.GridGeometry2D;
 import org.geotools.coverage.grid.io.AbstractGridFormat;
 import org.geotools.coverage.grid.io.OverviewPolicy;
 import org.geotools.gce.geotiff.GeoTiffReader;
-import org.ocean.admin.gis.dto.TaskProgressUnit;
-import org.ocean.admin.gis.dto.TaskStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
+import org.ocean.admin.gis.progress.ProgressStage;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
@@ -42,7 +42,7 @@ public class GeoTiffOverviewBuilder {
     private static final long BIG_TIFF_THRESHOLD = 3_500_000_000L;
 
     public int build(Path baseTiff, int minimumSize,
-            Consumer<TaskStage> progressListener) throws IOException {
+            Consumer<ProgressStage> progressListener) throws IOException {
         Path source = baseTiff.toAbsolutePath().normalize();
         Path overview = overviewPath(source);
         Path temporary = overview.resolveSibling(overview.getFileName() + ".tmp");
@@ -85,12 +85,12 @@ public class GeoTiffOverviewBuilder {
                             coverage.dispose(true);
                         }
                     }
-                    progressListener.accept(TaskStage.determinate(
+                    progressListener.accept(ProgressStage.determinate(
                             "building-overviews",
                             "正在构建影像概览图：" + (index + 1) + "/" + levels.size(),
                             index + 1L,
                             levels.size(),
-                            TaskProgressUnit.OVERVIEW_LEVEL));
+                            ProgressUnit.OVERVIEW_LEVEL));
                 }
                 writer.endWriteSequence();
                 output.flush();

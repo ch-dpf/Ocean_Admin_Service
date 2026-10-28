@@ -6,7 +6,7 @@
 
 - Java 21
 - Spring Boot 4
-- Spring WebSocket
+- Spring MVC SSE
 - MyBatis-Plus
 - JWT（登录鉴权）
 - PostgreSQL （数据库服务）
@@ -69,7 +69,7 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 ## 从受控服务器工作区接入数据
 
-`POST /api/gis/dataSet/{id}/workspace-files` 原位接入服务器文件，不复制、不移动源文件，也不创建文件传输记录或切片处理任务。工作区沿用 `gis.processing.workspaces` 配置。接口只校验入口，立即以HTTP 202返回 `progressTaskId`、`dataSetId`、`taskType=GIS_WORKSPACE_IMPORT` 和初始 `status=QUEUED`，目录遍历、登记及空间提取进度均在后台推进。
+`POST /api/gis/dataSet/{id}/workspace-files` 原位接入服务器文件，不复制、不移动源文件，也不创建文件传输记录或切片处理任务。工作区沿用 `gis.processing.workspaces` 配置。接口只校验入口，立即以HTTP 202返回 `dataSetId` 和统一 `progress` 引用（`progressId`、`type=GIS_WORKSPACE_IMPORT`、`status=QUEUED`、`queryUrl`、`eventsUrl`），目录遍历、登记及空间提取进度均在后台推进。
 
 ```json
 {"workspaceCode":"DEFAULT","relativePath":"survey/2026","includeSubdirectories":true,"vectorPlacement":"AUTO"}
@@ -79,9 +79,9 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 目录只登记匹配格式的普通文件；`includeSubdirectories` 默认false，仅扫描当前层，true递归扫描所有层级。不支持的文件跳过，同一数据集内已登记的工作区相对路径按重复跳过；无符合条件文件时任务失败。扫描不跟随链接或Windows目录联接，禁止绝对路径、上级目录和盘符路径。`gis.processing.workspace-max-scan-entries` 默认10000，计入目录和文件条目；后台边扫描边登记，超限明确停止，保留已登记文件，等待这些文件解析结束后报告失败。执行复用现有有界 `taskExecutor`，最多保留100个活动接入任务，繁忙时返回503。
 
-前端用 `progressTaskId` 匹配现有 `/ws/task` 消息中的 `task.taskId`。`SCANNING` 阶段 `overallPercent=null`，`currentStage.completed` 为已扫描条目数，`total=null`、`unit=ENTRY`，消息包含登记、重复、不支持和失败计数；此时 `result.total` 是动态增长的待处理文件数，不是已知目录总数。扫描结束进入 `EXTRACTING_METADATA`，再按最终处理数量计算整体百分比。推送通常每500毫秒最多一次，阶段变化与终态立即推送。只有新登记文件均完成空间提取后，任务才进入 `COMPLETED/PARTIAL_FAILED/FAILED`；矢量文件沿用现有图层READY条件。重复和不支持文件属于跳过，不计入解析结果分母。
+前端用提交响应的 `progress.progressId` 匹配 `/api/gis/events/stream` 消息的 `data.progressId`。`SCANNING` 阶段 `overall.percent=null`，通过 `metrics` 读取扫描条目、登记、重复、不支持及失败计数。扫描结束进入 `EXTRACTING_METADATA`，按确定的解析对象计算整体百分比。只有新登记文件全部进入空间提取终态后才结束；重复和不支持文件记录为 `summary.skipped`，不计入解析百分比分母。
 
-`GET /api/gis/dataSet/{id}/workspace-files/tasks/{progressTaskId}` 返回 `{task,dataSetId,entryType,scannedCount,registeredCount,duplicateCount,unsupportedCount,registrationFailedCount,scanComplete}`，用于提交响应与WebSocket推送之间的竞态补读、刷新或断线重连；只允许原创建者查询，终态在本实例保留30分钟。接口不返回整个目录的文件列表，明细使用现有文件分页，支持 `sourceType=UPLOAD/WORKSPACE` 筛选。任务运行上下文不持久化，重启后进度查询失效，重新提交原路径会跳过已登记文件；已入库文件的元数据待办仍按既有数据库队列恢复。
+`GET /api/gis/progress/{progressId}` 返回统一完整快照，用于提交竞态、刷新及断线补查。工作区终态保留30分钟，服务重启或过期后返回404（PROGRESS_EXPIRED）。逐文件明细使用文件分页及 `sourceType=UPLOAD/WORKSPACE` 筛选。已入库元数据待办仍按数据库队列恢复；快照恢复不等于恢复目录扫描。
 
 文件模型和查询统一使用 `fileStatus`、`createdBy`，替代原 `uploadStatus`、`uploadedBy`；传输明细的文件快照同步使用新名称。工作区文件返回 `sourceType=WORKSPACE`、`workspaceCode`、`relativePath` 和Unix毫秒单位的 `sourceModifiedAt`，托管存储字段为空。读取时校验源大小和修改时间；发现变化或不可用时空间元数据标记失败。重试会刷新源文件快照，已生成的矢量图层仍按现有规则保护，避免覆盖编辑内容。源文件变化不会主动推送，须在读取或重新接入时验证。
 
@@ -89,9 +89,110 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 ### 任务标识的关系
 
-`TaskInfo.taskId` 是WebSocket/Redis实时进度的字符串键，不等于处理任务数据库主键。上传进度使用传输记录 `recordNo=upload_...`；切片处理进度使用 `gis_processing_task.task_no`（例如 `imagery_...`）；工作区接入使用提交返回的 `progressTaskId=workspace_...`，没有对应的业务任务表记录。`taskType` 用于前端区分进度类别，统一使用 `version` 忽略乱序旧快照。
+`ProgressSnapshot.progressId` 是字符串进度键：上传使用 `recordNo=upload_...`，数据处理使用 `taskNo`，工作区接入使用 `workspace_...`，归档使用 `archiveNo`。工作区进度通过 `resource` 指向对应数据集，归档的 `summary` 统计一个最终归档文件，打包源文件数放在 `metrics`。数据处理统一 `type=GIS_PROCESSING`，`category=TERRAIN/IMAGERY/VECTOR`。
 
-现有切片处理提交响应中的 `taskId` 是 `gis_processing_task.id`，用于 `GET /api/gis/task/{taskId}`；同一响应中的 `taskNo` 才对应WebSocket `task.taskId`。文件的 `fileMetaId` 是独立的数据身份，一个接入进度可以产生多个文件，这些文件以后可被多个独立的切片处理任务引用。工作区进度编号不能传给处理任务详情接口。
+现有切片处理提交响应中的 `taskId` 是 `gis_processing_task.id`，用于 `GET /api/gis/task/{taskId}`；同一响应中的 `taskNo` 才对应事件消息 `data.progressId`。文件的 `fileMetaId` 是独立的数据身份，一个接入进度可以产生多个文件，这些文件以后可被多个独立的切片处理任务引用。工作区进度编号不能传给处理任务详情接口。
+
+## 统一实时事件与进度协议
+
+平台与GIS的SSE接口分别为 `GET /api/platform/events/stream`、`GET /api/gis/events/stream`（`text/event-stream`），分别投递 `platform.*`、`gis.*` 事件。事件名固定为 `app.event`，data字段承载下面的完整JSON。事件信封与发布契约位于 `ocean-kernel`，该模块不依赖Web；SSE控制器与连接管理位于 `ocean-bootstrap` 的 `web.realtime` 包。消息体由各事件类型定义；新增通知或资源变更事件不需要修改进度模型。
+
+```json
+{
+  "schemaVersion": 1,
+  "messageId": "f42e0af3-56c9-4d32-87ea-789ea5f66284",
+  "type": "gis.progress.updated",
+  "source": "ocean.gis",
+  "subject": "progress/upload_20261027153000_abcdef123456",
+  "occurredAt": "2026-10-27T07:30:00Z",
+  "correlationId": "client-request-001",
+  "data": {
+    "progressId": "upload_20261027153000_abcdef123456",
+    "correlationId": "client-request-001",
+    "type": "GIS_UPLOAD",
+    "category": null,
+    "title": "GIS文件接入",
+    "status": "RUNNING",
+    "overall": {"mode": "INDETERMINATE", "percent": null},
+    "stage": {"code": "UPLOADING", "message": "正在上传", "completed": 1024, "total": 4096, "unit": "BYTE"},
+    "metrics": [
+      {"code": "RECEIVED_BYTES", "name": "已接收字节", "value": 1024, "total": 4096, "unit": "BYTE"},
+      {"code": "CONFIRMED_BYTES", "name": "确认落盘字节", "value": 0, "total": 4096, "unit": "BYTE"}
+    ],
+    "summary": {"total": 2, "succeeded": 0, "failed": 0, "skipped": 0, "unit": "FILE"},
+    "resource": {"type": "FILE_TRANSFER_RECORD", "id": "upload_20261027153000_abcdef123456", "detailUrl": "/api/gis/file-transfer-records/upload_20261027153000_abcdef123456"},
+    "error": null,
+    "startedAt": "2026-10-27T15:30:00",
+    "finishedAt": null,
+    "revision": {"epoch": 1, "sequence": 3}
+  }
+}
+```
+
+进度事件为 `gis.progress.created/updated/finished`，始终携带完整快照。finished 表示已结束，成功与失败由 `data.status` 判断；其他事件可使用各自的强类型消息体。未知事件类型可忽略。messageId 用于消息去重，时间不作为排序依据。
+
+前端按 `progressId` 保存最新快照，再按 `(revision.epoch, revision.sequence)` 比较新旧；HTTP补查也走相同合并规则。持久化流程重试或快照重新建立时原子递增业务表的 `progress_epoch`，新代次可以从 sequence=0 开始，旧执行句柄不能覆盖新代次。普通查询命中内存快照时不修改版本。持久化进度缺失时先核对有效的Redis终态缓存；运行态或缓存缺失时从业务表恢复，只返回能够确认的工作量。补查发现数据库已结束而内存仍在运行时，会修复并补发终态。
+
+上传、工作区接入、数据处理、归档的提交及重试响应提供统一 `progress` 引用；分块响应保留 nextOffset 等传输确认字段。上传记录的字节比例字段为 `transferPercent`，归档记录的字节比例字段为 `packingPercent`，两者均不等于完整业务流程的整体百分比。
+
+数值更新每500毫秒最多推送一次，并补发窗口末尾的最新快照；创建、阶段切换和终态立即推送。Redis使用 `ocean-admin:progress:v1:` 前缀，终态缓存30分钟，运行态6小时无活动后清理。业务状态仍以数据库为准；服务重启后的精细计量可能丢失，重建快照不会恢复执行器。当前工作区运行态和连接路由仍为单实例能力。
+
+本轮按需求暂不调整鉴权，事件按主题广播，主题筛选不代表权限校验。原WebSocket端点与依赖已移除。
+
+### SSE连接、主题与重连
+
+平台与GIS分别维护连接，按需建立，每侧不按任务创建连接。省略topics只订阅当前接口所属事件域；也可传入最多16个逗号分隔的域内主题（总长不超过512字符），跨域或混合域订阅返回400。主题按完整名称或点分隔前缀匹配，例如 `gis.progress` 匹配 `gis.progress.updated`，但不匹配 `gis.progressive.updated`。
+
+GIS提交响应中的 `progress.eventsUrl` 为 `/api/gis/events/stream?topics=gis.progress`。系统指标单独连接 `/api/platform/events/stream?topics=platform.metrics`，事件为 `platform.metrics.updated`，source为 `ocean.platform`，subject为 `system/metrics`，data为SystemMetricsDTO；每2秒采集一次，仅有匹配的平台订阅者时采集。两个接口复用传输实现与全局资源上限，但互不投递对方事件；原 `/events/stream` 入口已移除。
+
+```javascript
+function subscribeEvents(url, onOpen) {
+  const stream = new EventSource(url);
+  stream.addEventListener("app.event", event => {
+    // 进度事件和HTTP补查共用同一版本合并函数。
+    dispatchEventMessage(JSON.parse(event.data));
+  });
+  stream.onopen = onOpen;
+  stream.onerror = () => {
+    if (stream.readyState === EventSource.CLOSED) {
+      // 连接管理器按URL限次退避重建，并更新所维护的连接引用。
+      scheduleReconnectWithBackoff(url, onOpen);
+    }
+    // CONNECTING时保留浏览器内建重连，避免额外创建重复连接。
+  };
+  return stream;
+}
+
+// GIS每次连接成功后补查关注的任务，按epoch和sequence合并快照。
+const gisStream = subscribeEvents(
+  "/api/gis/events/stream?topics=gis.progress", refreshWatchedProgress);
+const platformStream = subscribeEvents(
+  "/api/platform/events/stream?topics=platform.metrics", () => {});
+
+// 应用退出时关闭各侧连接，不影响后台任务继续执行。
+// gisStream.close();
+// platformStream.close();
+```
+
+连接建立后立即刷新注释帧及 `retry:3000`，空闲时约每15秒发送注释心跳。EventSource对网络断开的自动重连不等于对所有HTTP错误都会重试；连接被503拒绝等情况可能进入CLOSED，前端应限次退避重新建立连接，避免无条件在onerror中创建重复连接。连接默认最长30分钟，浏览器在正常断开后重新建立连接；不会恢复或取消后台执行。本期不发送SSE id、不提供事件历史重放，也不依赖Last-Event-ID；重连只恢复后续实时事件，丢失进度通过HTTP补查恢复。其他未来需要逐条不遗漏的业务事件须自行提供持久化查询。
+
+发送使用专用有界线程池；单连接串行，默认最多256条连接、每连接64条待发消息和512KiB待发UTF-8字节（含正在发送项）。数据在MVC异步响应初始化前留在应用有界队列中。发送超过10秒、队列超限或执行器饱和时回收连接并让客户端重连；不会把网络写入回退给业务线程。连接回收也由独立执行器完成，防止完成操作等待发送锁而阻塞业务。达到全局连接上限时返回503。
+
+参数位于 `ocean.realtime.sse`：max-connections、max-pending-messages、max-pending-bytes、send-threads、send-queue-capacity、heartbeat-interval-ms、send-timeout-ms、connection-timeout-ms。实际超时回收由每秒维护任务检查，网络写入最终退出还取决于Servlet容器。
+
+部署代理必须保留 `/api/platform/events/stream` 和 `/api/gis/events/stream` 路由并即时转发，关闭响应缓存、缓冲和SSE压缩。响应包含 `Cache-Control: no-store, no-transform` 与 `X-Accel-Buffering: no`；网关空闲超时应大于心跳间隔，浏览器入口推荐HTTP/2。Nginx可参考：
+
+```nginx
+location ~ ^/api/(platform|gis)/events/stream$ {
+    proxy_pass http://127.0.0.1:8090;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 60s;
+    gzip off;
+}
+```
 
 ## 可编辑矢量图层与要素
 
@@ -99,7 +200,7 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 原上传批次持续展示 `UPLOADING → EXTRACTING_METADATA → COMPLETED/FAILED/PARTIAL_FAILED`；多个文件可并行提取。矢量文件在 `EXTRACTING_METADATA` 阶段内流式写入图层和要素，仅图层 READY 后批次成功数量才增加。
 
-通过 `GET /api/gis/file-transfer-records/{taskId}` 查询原上传批次；`files[]` 中的 `vectorLayerIds` 返回由该原始文件提取的图层 ID。矢量提取共用原批次的 Redis/WebSocket 进度，不创建独立任务。
+通过 `GET /api/gis/file-transfer-records/{taskId}` 查询原上传批次；`files[]` 中的 `vectorLayerIds` 返回由该原始文件提取的图层 ID。矢量提取共用原批次的 Redis/SSE 进度，不创建独立任务。
 
 `POST /api/gis/file-transfer-records/{taskId}/retry` 重试该批次中已完整上传但提取失败的文件。未完成矢量图层及要素会先清理后重新提取；成功文件及其编辑成果不会重新提取。传输失败的文件需重新上传。
 
@@ -133,7 +234,7 @@ DELETE /api/gis/vector/layers/{layerId}/features/{featureId}
 
 范围查询使用真实要素 `ST_Intersects`，`bbox=west,south,east,north`，west>east 表示跨日期变更线。limit 为1至1000，默认200；每页另有约8MiB载荷预算。响应包含 hasMore、nextCursor、dataVersion；后续页保留相同bbox并传cursor。图层编辑后旧cursor返回409，客户端应重新加载第一页。省略bbox可用于有界的属性列表遍历。
 
-后台默认每5秒扫描，使用独立的两个矢量执行线程；可通过 `gis.vector.poll-interval` 配置扫描间隔。持久化任务为权威状态，Redis/WebSocket仅用于实时进度。
+后台默认每5秒扫描，使用独立的两个矢量执行线程；可通过 `gis.vector.poll-interval` 配置扫描间隔。持久化任务为权威状态，Redis/SSE仅用于实时进度。
 
 ## 矢量图层样式方案
 
