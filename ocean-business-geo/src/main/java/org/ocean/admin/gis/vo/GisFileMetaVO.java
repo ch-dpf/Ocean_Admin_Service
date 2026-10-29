@@ -1,26 +1,24 @@
 package org.ocean.admin.gis.vo;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.PositiveOrZero;
-import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import org.ocean.admin.gis.progress.ProgressSnapshot;
-import org.ocean.admin.gis.dto.TaskStatus;
 import tools.jackson.databind.JsonNode;
 
-/** GIS 文件元数据请求及响应对象。 */
+/** GIS 文件元数据查询响应对象；嵌套类型用于工作区接入请求及结果。 */
 @Data
 public class GisFileMetaVO {
 
     @Schema(description = "文件元数据 ID", accessMode = Schema.AccessMode.READ_ONLY)
     private Long id;
 
-    @Schema(description = "所属数据集 ID", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "所属数据集 ID", accessMode = Schema.AccessMode.READ_ONLY)
     private Long dataSetId;
     @Schema(description = "文件来源：UPLOAD 或 WORKSPACE", accessMode = Schema.AccessMode.READ_ONLY)
     private String sourceType;
@@ -30,7 +28,7 @@ public class GisFileMetaVO {
     private String relativePath;
     @Schema(description = "登记时的源文件修改时间，Unix 毫秒", accessMode = Schema.AccessMode.READ_ONLY)
     private Long sourceModifiedAt;
-    @Pattern(regexp = "AUTO|UNKNOWN", message = "矢量归组方式须为AUTO或UNKNOWN")
+    @Schema(description = "矢量归组方式", allowableValues = {"AUTO", "UNKNOWN"}, accessMode = Schema.AccessMode.READ_ONLY)
     private String vectorPlacement;
     @Schema(accessMode = Schema.AccessMode.READ_ONLY)
     private Long vectorDatasetStyleId;
@@ -39,39 +37,31 @@ public class GisFileMetaVO {
             allowableValues = {"0", "1", "2"}, accessMode = Schema.AccessMode.READ_ONLY)
     private Long categoryId;
 
-    @Schema(description = "用户上传时的文件名", requiredMode = Schema.RequiredMode.REQUIRED)
-    @Size(max = 255, message = "原始文件名长度不能超过255个字符")
+    @Schema(description = "原始文件名", accessMode = Schema.AccessMode.READ_ONLY)
     private String originalName;
 
-    @Schema(description = "系统存储文件名；失败且尚未形成存储对象时为空")
-    @Size(max = 255, message = "存储文件名长度不能超过255个字符")
+    @Schema(description = "系统存储文件名；失败且尚未形成存储对象时为空", accessMode = Schema.AccessMode.READ_ONLY)
     private String storageName;
 
-    @Schema(description = "相对存储路径或对象存储 Key；失败且尚未形成存储对象时为空")
-    @Size(max = 1000, message = "存储 Key 长度不能超过1000个字符")
+    @Schema(description = "相对存储路径或对象存储 Key；失败且尚未形成存储对象时为空", accessMode = Schema.AccessMode.READ_ONLY)
     private String storageKey;
 
-    @Schema(description = "存储类型", allowableValues = {"LOCAL", "MINIO", "S3"}, example = "LOCAL")
-    @Pattern(regexp = "(?i)LOCAL|MINIO|S3", message = "存储类型只能为 LOCAL、MINIO 或 S3")
+    @Schema(description = "存储类型", allowableValues = {"LOCAL", "MINIO", "S3"}, example = "LOCAL", accessMode = Schema.AccessMode.READ_ONLY)
     private String storageType;
 
-    @Schema(description = "文件扩展名", example = "tif")
-    @Size(max = 32, message = "文件扩展名长度不能超过32个字符")
+    @Schema(description = "文件扩展名", example = "tif", accessMode = Schema.AccessMode.READ_ONLY)
     private String extension;
 
-    @Schema(description = "文件大小（字节）", requiredMode = Schema.RequiredMode.REQUIRED)
-    @PositiveOrZero(message = "文件大小不能小于0")
+    @Schema(description = "文件大小（字节）", accessMode = Schema.AccessMode.READ_ONLY)
     private Long sizeBytes;
 
-    @Schema(description = "文件 SHA-256 摘要")
-    @Pattern(regexp = "(?i)[0-9a-f]{64}", message = "SHA-256 必须为64位十六进制字符串")
+    @Schema(description = "文件 SHA-256 摘要", accessMode = Schema.AccessMode.READ_ONLY)
     private String sha256;
 
     @Schema(description = "登记人 ID", accessMode = Schema.AccessMode.READ_ONLY)
     private Long createdBy;
 
-    @Schema(description = "源文件状态", allowableValues = {"PENDING", "READY", "FAILED"}, example = "READY")
-    @Pattern(regexp = "(?i)PENDING|READY|FAILED", message = "文件状态只能为 PENDING、READY 或 FAILED")
+    @Schema(description = "源文件状态", allowableValues = {"PENDING", "READY", "FAILED"}, example = "READY", accessMode = Schema.AccessMode.READ_ONLY)
     private String fileStatus;
 
     @Schema(description = "失败文件资源清理状态",
@@ -79,8 +69,7 @@ public class GisFileMetaVO {
             accessMode = Schema.AccessMode.READ_ONLY)
     private String cleanupStatus;
 
-    @Schema(description = "处理错误信息")
-    @Size(max = 1000, message = "错误信息长度不能超过1000个字符")
+    @Schema(description = "处理错误信息", accessMode = Schema.AccessMode.READ_ONLY)
     private String errorMessage;
 
     @Schema(description = "元数据状态：WAITING等待整批上传或扫描结束，QUEUED等待解析，RUNNING解析中，COMPLETED、FAILED、NOT_APPLICABLE", accessMode = Schema.AccessMode.READ_ONLY)

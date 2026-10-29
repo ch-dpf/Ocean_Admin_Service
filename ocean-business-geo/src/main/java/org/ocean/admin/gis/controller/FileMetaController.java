@@ -59,13 +59,6 @@ public class FileMetaController {
         return ResponseResult.success("已提交元数据提取任务");
     }
 
-    @PutMapping("/update")
-    @Operation(summary = "更新文件元数据")
-    @OperationLog(module = "GIS_FILE_META", type = OperationType.UPDATE, description = "更新GIS文件元数据")
-    public ResponseResult<GisFileMetaVO> updateFileMeta(@Valid @RequestBody GisFileMetaVO reqVO) {
-        return ResponseResult.success("更新成功", fileMetaService.updateFileMeta(reqVO));
-    }
-
     @DeleteMapping("/{id}")
     @Operation(summary = "删除管理文件",
             description = "删除文件元数据；上传来源同时删除托管文件，工作区来源保留源文件；活动处理任务引用时拒绝删除")

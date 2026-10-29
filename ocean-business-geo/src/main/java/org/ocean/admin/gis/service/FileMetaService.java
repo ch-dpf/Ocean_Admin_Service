@@ -74,9 +74,6 @@ import org.ocean.admin.gis.dto.TaskStatus;
 @RequiredArgsConstructor
 public class FileMetaService {
 
-    private static final Set<String> STORAGE_TYPES = Set.of("LOCAL", "MINIO", "S3");
-    private static final Set<String> FILE_STATUSES = Set.of("PENDING", "READY", "FAILED");
-
     private final GisFileMetaMapper gisFileMetaMapper;
     private final GisFileTransferRecordItemMapper gisFileTransferRecordItemMapper;
     private final GisProcessingInputMapper processingInputMapper;
@@ -544,76 +541,6 @@ public class FileMetaService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public GisFileMetaVO updateFileMeta(GisFileMetaVO reqVO) {
-        validateRequest(reqVO);
-        GisFileMeta existing = getRequiredForUpdate(reqVO.getId());
-        if ("WORKSPACE".equals(existing.getSourceType()))
-            throw new IllegalArgumentException("工作区来源信息由服务器维护，调整来源请删除记录后重新接入");
-        ensureMutable(existing);
-        if ("READY".equals(existing.getFileStatus())
-                && !existing.getDataSetId().equals(reqVO.getDataSetId())) {
-            throw new IllegalArgumentException("已上传成功的文件不允许变更所属数据集");
-        }
-        if (existing.getVectorDatasetStyleId() != null && !existing.getDataSetId().equals(reqVO.getDataSetId())) {
-            throw new IllegalArgumentException("已固定矢量样式的文件不允许变更所属数据集");
-        }
-        ensureDataSetExists(reqVO.getDataSetId());
-
-        String storageType = normalizeUpper(reqVO.getStorageType());
-        if (storageType == null) {
-            storageType = "LOCAL";
-        }
-        String storageKey = reqVO.getStorageKey().trim();
-        ensureStorageKeyAvailable(storageType, storageKey, reqVO.getId());
-
-        GisFileMeta updatedMeta = new GisFileMeta();
-        updatedMeta.setId(existing.getId());
-        updatedMeta.setVectorDatasetStyleId(existing.getVectorDatasetStyleId());
-        updatedMeta.setVectorPlacement(existing.getVectorPlacement());
-        if (reqVO.getVectorPlacement() != null && !Objects.equals(reqVO.getVectorPlacement(), existing.getVectorPlacement()))
-            throw new IllegalArgumentException("已建立文件的归组方式不可变更");
-        applyEditableFields(updatedMeta, reqVO, storageType, storageKey);
-        updatedMeta.setCreatedBy(existing.getCreatedBy());
-        updatedMeta.setCleanupStatus(existing.getCleanupStatus());
-        String requestedStatus = normalizeUpper(reqVO.getFileStatus());
-        updatedMeta.setFileStatus(requestedStatus == null ? existing.getFileStatus() : requestedStatus);
-        updatedMeta.setUpdateTime(LocalDateTime.now());
-        int updated = gisFileMetaMapper.update(null,
-                new LambdaUpdateWrapper<GisFileMeta>()
-                        .eq(GisFileMeta::getId, existing.getId())
-                        .set(GisFileMeta::getDataSetId, updatedMeta.getDataSetId())
-                        .set(GisFileMeta::getOriginalName, updatedMeta.getOriginalName())
-                        .set(GisFileMeta::getStorageName, updatedMeta.getStorageName())
-                        .set(GisFileMeta::getStorageKey, updatedMeta.getStorageKey())
-                        .set(GisFileMeta::getStorageType, updatedMeta.getStorageType())
-                        .set(GisFileMeta::getExtension, updatedMeta.getExtension())
-                        .set(GisFileMeta::getSizeBytes, updatedMeta.getSizeBytes())
-                        .set(GisFileMeta::getSha256, updatedMeta.getSha256())
-                        .set(GisFileMeta::getCreatedBy, updatedMeta.getCreatedBy())
-                        .set(GisFileMeta::getFileStatus, updatedMeta.getFileStatus())
-                        .set(GisFileMeta::getErrorMessage, updatedMeta.getErrorMessage())
-                        .set(GisFileMeta::getUpdateTime, updatedMeta.getUpdateTime()));
-        if (updated != 1) {
-            throw new IllegalStateException("文件元数据更新失败: " + reqVO.getId());
-        }
-        updatedMeta.setDeleted(existing.getDeleted());
-        dataSetService.updateFileStatistics(existing, updatedMeta);
-        boolean sourceChanged = !Objects.equals(existing.getStorageKey(), updatedMeta.getStorageKey())
-                || !Objects.equals(existing.getStorageType(), updatedMeta.getStorageType())
-                || !Objects.equals(existing.getSha256(), updatedMeta.getSha256())
-                || !Objects.equals(existing.getExtension(), updatedMeta.getExtension())
-                || !Objects.equals(existing.getSizeBytes(), updatedMeta.getSizeBytes())
-                || !Objects.equals(existing.getFileStatus(), updatedMeta.getFileStatus());
-        if (sourceChanged) {
-            ensureVectorSourceUnreferenced(existing.getId());
-            spatialMetadataService.invalidate(existing.getId());
-        }
-        updatedMeta.setCreateTime(existing.getCreateTime());
-        log.info("更新 GIS 文件元数据成功: id={}", reqVO.getId());
-        return toVOWithCategory(getRequired(existing.getId()));
-    }
-
-    @Transactional(rollbackFor = Exception.class)
     public void deleteFileMeta(Long id) {
         GisFileMeta existing = getRequiredForUpdate(id);
         ensureMutable(existing);
@@ -757,77 +684,6 @@ public class FileMetaService {
         return value instanceof CurrentOperator operator ? operator.userId() : null;
     }
 
-    private void validateRequest(GisFileMetaVO reqVO) {
-        if (reqVO == null) {
-            throw new IllegalArgumentException("文件元数据请求不能为空");
-        }
-        if (reqVO.getId() == null) {
-            throw new IllegalArgumentException("文件元数据ID不能为空");
-        }
-        if (reqVO.getDataSetId() == null) {
-            throw new IllegalArgumentException("数据集ID不能为空");
-        }
-        if (reqVO.getVectorPlacement() != null && !Set.of("AUTO", "UNKNOWN").contains(reqVO.getVectorPlacement())) {
-            throw new IllegalArgumentException("矢量归组方式须为AUTO或UNKNOWN");
-        }
-        requireText(reqVO.getOriginalName(), "原始文件名不能为空");
-        requireText(reqVO.getStorageName(), "存储文件名不能为空");
-        requireText(reqVO.getStorageKey(), "存储 Key 不能为空");
-        if (reqVO.getSizeBytes() == null || reqVO.getSizeBytes() < 0) {
-            throw new IllegalArgumentException("文件大小不能为空且不能小于0");
-        }
-
-        String storageType = normalizeUpper(reqVO.getStorageType());
-        if (storageType != null && !STORAGE_TYPES.contains(storageType)) {
-            throw new IllegalArgumentException("存储类型只能为 LOCAL、MINIO 或 S3");
-        }
-        String fileStatus = normalizeUpper(reqVO.getFileStatus());
-        if (fileStatus != null && !FILE_STATUSES.contains(fileStatus)) {
-            throw new IllegalArgumentException("文件状态只能为 PENDING、READY 或 FAILED");
-        }
-        String sha256 = trimToNull(reqVO.getSha256());
-        if (sha256 != null && !sha256.matches("(?i)[0-9a-f]{64}")) {
-            throw new IllegalArgumentException("SHA-256 必须为64位十六进制字符串");
-        }
-    }
-
-    private void requireText(String value, String message) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(message);
-        }
-    }
-
-    private void ensureDataSetExists(Long dataSetId) {
-        GisDataSet dataSet = gisDataSetMapper.selectById(dataSetId);
-        if (dataSet == null) {
-            throw new IllegalArgumentException("数据集不存在或已删除: " + dataSetId);
-        }
-    }
-
-    private void ensureStorageKeyAvailable(String storageType, String storageKey, Long excludedId) {
-        LambdaQueryWrapper<GisFileMeta> query = new LambdaQueryWrapper<GisFileMeta>()
-                .eq(GisFileMeta::getStorageType, storageType)
-                .eq(GisFileMeta::getStorageKey, storageKey)
-                .ne(excludedId != null, GisFileMeta::getId, excludedId);
-        if (gisFileMetaMapper.exists(query)) {
-            throw new IllegalArgumentException("存储位置已存在元数据: " + storageType + ":" + storageKey);
-        }
-    }
-
-    private void applyEditableFields(
-            GisFileMeta target, GisFileMetaVO source, String storageType, String storageKey) {
-        target.setDataSetId(source.getDataSetId());
-        target.setOriginalName(source.getOriginalName().trim());
-        target.setStorageName(source.getStorageName().trim());
-        target.setStorageKey(storageKey);
-        target.setStorageType(storageType);
-        target.setExtension(normalizeExtension(source.getExtension()));
-        target.setSizeBytes(source.getSizeBytes());
-        target.setSha256(normalizeLower(source.getSha256()));
-        target.setCreatedBy(currentOperatorId());
-        target.setErrorMessage(trimToNull(source.getErrorMessage()));
-    }
-
     private GisFileMetaVO toVO(GisFileMeta meta) {
         GisFileMetaVO result = new GisFileMetaVO();
         result.setId(meta.getId());
@@ -885,25 +741,9 @@ public class FileMetaService {
         });
     }
 
-    private String normalizeExtension(String value) {
-        String normalized = trimToNull(value);
-        if (normalized == null) {
-            return null;
-        }
-        while (normalized.startsWith(".")) {
-            normalized = normalized.substring(1);
-        }
-        return trimToNull(normalized) == null ? null : normalized.toLowerCase(Locale.ROOT);
-    }
-
     private String normalizeUpper(String value) {
         String normalized = trimToNull(value);
         return normalized == null ? null : normalized.toUpperCase(Locale.ROOT);
-    }
-
-    private String normalizeLower(String value) {
-        String normalized = trimToNull(value);
-        return normalized == null ? null : normalized.toLowerCase(Locale.ROOT);
     }
 
     private String trimToNull(String value) {
