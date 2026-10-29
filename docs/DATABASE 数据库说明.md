@@ -39,7 +39,7 @@ GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验
 
 `gis_file_meta.metadata_version` 与15分钟租约阻止过期执行提交。创建矢量数据集（category_id=2）时，在同一事务将 `vector/style.json` 复制为 `gis_vector_dataset_style.definition`，并生成数据集私有的 `gis_vector_group` 分类树。快照协议为 schemaVersion=2，后台文件后续变化不影响已有数据集。运行时分类 ID 是数据库 ID；group_key、default_style_key 分别对应快照中的 groups[].id、styles[].id，不能相互替代。
 
-导入批次及文件固定 `vector_placement`（AUTO 或 UNKNOWN）和 `vector_dataset_style_id`，通过复合外键限制快照属于同一数据集。逐要素匹配分类；GeometryCollection 按递归分量拆分，MultiPoint、MultiLineString、MultiPolygon 保持整体。一个源文件按“初始分类业务键:几何类别”生成多个图层，`(source_file_id,layer_key)` 唯一。`source_feature_index`、`source_geometry_path`、`source_feature_id`、`classification_rule_key` 保存来源引用；原始 properties 不被归一化结果覆盖。分批写入的数据仅在文件整体提取完成、所有图层切为 READY 后可查询和编辑；失败时清理未完成图层及其要素。成功图层不会被元数据重试覆盖。
+文件登记时固定 `vector_placement`（AUTO 或 UNKNOWN）和 `vector_dataset_style_id`，通过复合外键限制快照属于同一数据集。逐要素匹配分类；GeometryCollection 按递归分量拆分，MultiPoint、MultiLineString、MultiPolygon 保持整体。一个源文件按“初始分类业务键:几何类别”生成多个图层，`(source_file_id,layer_key)` 唯一。`source_feature_index`、`source_geometry_path`、`source_feature_id`、`classification_rule_key` 保存来源引用；原始 properties 不被归一化结果覆盖。分批写入的数据仅在文件整体提取完成、所有图层切为 READY 后可查询和编辑；失败时清理未完成图层及其要素。成功图层不重复导入。
 
 要素更新通过 version 校验，服务层在图层行锁内执行修改，同事务重算数量、范围和几何类型并递增 data_version。最后一个要素删除后范围为空。图层逻辑删除后所有要素退出查询并解除来源文件引用；未删除图层会阻止来源文件删除或变更。
 
@@ -49,19 +49,19 @@ GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验
 
 数据集 data_revision 用于要素新增、修改、删除以及导入完成；display_revision 用于分类开关、图层挂载、显示样式等变化。地图渲染在 Redis 保存带 bbox、连续 displayZoom、CSS 宽高、版本、规则和预算的视窗上下文，MVT 查询必须引用该上下文。整个视窗的所有启用图层共用 `CLAMP(FLOOR(width*height/800),32,600)` 的逻辑显示对象预算，按属性与级别过滤后进行像素过滤和显示用简化；点、线、面均不网格聚合，点与行政边界受保护，其余线面按命中规则开始级别和可见屏幕尺寸筛选，等值桶不截断。上下文记录候选数、保留数及冻结的筛选阈值。面填充、源真实边界和唯一锚点标注分别编码为显示部件，预算仅计一次源分量。原始几何不回写，不新增概化表或离线概化任务。过期上下文返回410，版本变化返回409；不存在全量原始几何回退。属性分页必须有 bbox 且不返回几何，完整几何仅通过单要素编辑详情读取。
 
-`gis_file_meta.metadata_status` 为 WAITING、QUEUED、RUNNING、COMPLETED、FAILED 或 NOT_APPLICABLE。WAITING 文件等待整批上传或工作区扫描登记收口，不具备解析领取资格；前置阶段结束后统一转为 QUEUED，仍由独立元数据线程池并行解析。metadata_version 和 metadata_lease_expires_at 用于领取与过期执行隔离；工作区 WAITING 文件也持有扫描等待租约，每30秒续租，15分钟失联后转为 FAILED（SCAN_INTERRUPTED），可重新接入或人工重试。上传 WAITING 文件由上传批次超时回收流程收口。空间元数据、矢量图层 READY 与文件 COMPLETED 状态在同一事务提交；原上传批次的成功计数也在此后更新。数据集文件数不随提取状态变化；图层可用性以 READY 状态为准。
+`gis_file_meta.metadata_status` 为 WAITING、QUEUED、RUNNING、COMPLETED、FAILED 或 NOT_APPLICABLE。WAITING 等待整批上传或扫描登记结束，持有等待租约；前置阶段结束后统一转为 QUEUED。等待租约过期标记 INGESTION_INTERRUPTED，保留文件，删除失败记录后重新录入。metadata_version 和解析租约隔离过期执行的提交。ingest_progress_id 与 ingest_file_index 仅关联当前执行和进度，结束后清空，不提供接入历史查询。真实文件状态与空间解析结果继续保存在文件表。
 
 `gis_data_set.file_count` 与 `total_size_bytes` 采用相同口径：分别统计当前 `file_status = 'READY'` 的管理文件数量与大小总和（字节），包含上传文件、工作区原位引用文件、配套文件及空间元数据提取失败的文件，排除分片、成果和缓存。两者由文件登记、新增、修改和永久删除事务原子维护。大小不代表磁盘实际占用量。
 
-`gis_file_meta.source_type` 区分 `UPLOAD/WORKSPACE`。上传来源使用 `storage_type/storage_key/storage_name`；工作区来源使用 `workspace_code/relative_path/source_modified_at`，两组字段互斥，工作区不保存服务器绝对路径。`source_modified_at` 为Unix毫秒，与 `size_bytes` 共同验证源快照。工作区定位按 `(data_set_id, workspace_code, relative_path)` 对未删除记录唯一；删除记录或数据集时保留工作区原文件。文件登记人和源状态统一命名为 `created_by/file_status`，传输明细的快照字段同步命名。
+`gis_file_meta.source_type` 区分 `UPLOAD/WORKSPACE`。上传来源使用 `storage_type/storage_key/storage_name`；工作区来源使用 `workspace_code/relative_path/source_modified_at`，两组字段互斥，工作区不保存服务器绝对路径。`source_modified_at` 为Unix毫秒，与 `size_bytes` 共同验证源快照。工作区定位按 `(data_set_id, workspace_code, relative_path)` 对未删除记录唯一；删除记录或数据集时保留工作区原文件。文件登记人和源状态统一命名为 `created_by/file_status`。
 
-工作区接入不写入 `gis_file_transfer_record` 或逐文件传输明细；支持格式登记后直接进入现有元数据待办。处理任务引用工作区管理文件时，`gis_processing_input` 保存 `source_locator_type=WORKSPACE`、工作区编码、相对路径及修改时间快照，并保留源文件ID和源数据集快照。
+两种接入方式均不建立上传下载历史表；操作留痕由平台操作日志保存。处理任务使用工作区管理文件时，gis_processing_input 继续保存工作区定位和源文件快照。
 
 数据集分页自动返回 `filePoints`，批量读取 `gis_file_meta.representative_longitude`、`representative_latitude`、`representative_layer_key`、`representative_extent_kind`，每个可定位文件一个点，不查询或计算覆盖几何。代表点与 COMPLETED 状态在同一元数据提交事务内保存；数据库约束要求 COMPLETED 文件具有完整、合法的点位和来源信息，其他状态的点位必须为空。失效、分类变化与任务重新领取会清空点位；文件永久删除后点位随元数据一并删除。
 
 `MANAGED_FILE` 处理输入同时保存可空的实时 `file_meta_id` 和不可变来源快照，包括源文件ID、数据集ID与名称、存储类型与Key、原始文件名、大小和SHA-256。QUEUED、RUNNING任务保留实时外键并阻止源文件或数据集删除；任务进入COMPLETED、PARTIAL_FAILED、FAILED后解除实时外键，任务查询继续使用快照。应用内删除不会主动破坏活动任务，外部文件丢失则由任务记录明确失败原因。
 
-文件与数据集管理接口执行永久删除。LOCAL文件先原子移动到上传根目录下的事务待删除区，数据库提交后清理，回滚时恢复原路径。数据集删除级联清理文件元数据、空间元数据、传输记录以及数据集自有矢量数据；存在活动传输、空间元数据提取或处理任务时拒绝删除。已发布影像/地形服务只依赖独立瓦片集，删除原始数据集时发布记录的 `data_set_id` 自动置空，服务继续可用。
+文件与数据集管理接口执行永久删除。LOCAL文件先原子移动到上传根目录下的事务待删除区，数据库提交后清理，回滚时恢复原路径。数据集删除级联清理文件元数据、空间元数据以及数据集自有矢量数据；存在未结束接入、空间元数据提取或处理任务时拒绝删除。已发布影像/地形服务只依赖独立瓦片集，删除原始数据集时发布记录的 `data_set_id` 自动置空，服务继续可用。
 
 代表点从文件所有图层的覆盖分块中选择：优先取最大面积面的内部点，否则取最长线的中点，否则使用点本身。面积、长度通过 geography 按平方米、米比较；同值按图层键（C排序）及分块序号选择。多区域、孔洞及跨日期变更线的面分块保持独立，不对经纬度直接平均。GeoJSON 当前只有包围范围，来源类型保留为 VECTOR_ENVELOPE，不能承诺点在真实要素内。
 

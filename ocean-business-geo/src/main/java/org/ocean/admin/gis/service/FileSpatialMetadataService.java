@@ -9,7 +9,6 @@ import org.locationtech.jts.geom.*;
 import org.locationtech.jts.io.WKTWriter;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileSpatialMetadata;
-import org.ocean.admin.gis.entity.GisFileTransferRecord;
 import org.ocean.admin.gis.entity.GisVectorFeature;
 import org.ocean.admin.gis.entity.GisVectorLayer;
 import org.ocean.admin.gis.entity.GisVectorGroup;
@@ -52,7 +51,6 @@ public class FileSpatialMetadataService {
     private final GeoJsonFeatureReader geoJsonReader;
     private final GisFileMetaMapper fileMapper;
     private final GisDataSetMapper dataSetMapper;
-    private final FileTransferRecordService transferService;
     private final ControlledWorkspaceResolver sources;
     private final GisVectorMapper vectorMapper;
     private final VectorDataSetStyleService vectorDataSetStyles;
@@ -73,23 +71,21 @@ public class FileSpatialMetadataService {
     public record MetadataWork(Long fileId, long version, ProgressStage stage) { }
 
     /** 扫描结束后一次放行；过期或已被删除的等待文件不再获得执行资格。 */
-    public List<Long> releaseWorkspaceFiles(List<Long> fileIds) {
-        if (fileIds.isEmpty()) return List.of();
-        return transactions.execute(status -> {
-            List<Long> released = spatialMapper.releaseWorkspaceFiles(fileIds);
+    public void releaseIngestion(String progressId) {
+        transactions.executeWithoutResult(status -> {
+            List<Long> released = spatialMapper.releaseIngestion(progressId);
             if (!released.isEmpty()) events.publishEvent(new MetadataReady(released));
-            return released;
         });
     }
 
-    public void renewWorkspaceWaiting(List<Long> fileIds) {
-        if (!fileIds.isEmpty()) spatialMapper.renewWorkspaceWaiting(fileIds, LocalDateTime.now().plusMinutes(15));
+    public void renewIngestionWaiting(String progressId) {
+        spatialMapper.renewIngestionWaiting(progressId, LocalDateTime.now().plusMinutes(15));
     }
 
-    /** 工作区扫描本身不跨进程恢复；失去扫描者的等待文件明确失败，允许重新接入或重试。 */
-    public void expireWorkspaceWaiting() {
+    /** 接入前置阶段失去活动后明确失败，保留文件供删除后重新录入。 */
+    public void expireIngestionWaiting() {
         transactions.executeWithoutResult(status -> {
-            List<Long> expired = spatialMapper.expireWorkspaceWaiting();
+            List<Long> expired = spatialMapper.expireIngestionWaiting();
             if (!expired.isEmpty()) events.publishEvent(new MetadataProgress(expired, false));
         });
     }
@@ -142,10 +138,10 @@ public class FileSpatialMetadataService {
         String code = errorCode;
         String message = errorMessage;
         if (code == null) progress.accept(ProgressStage.determinate("COMMITTING", "提交空间元数据与导入结果", 0, 1, ProgressUnit.OPERATION));
-        GisFileTransferRecord record = transactions.execute(status -> {
+        transactions.executeWithoutResult(status -> {
             // 超时重新领取、文件变更或删除都会使本次结果失效。
             GisFileMeta locked = spatialMapper.lockClaim(fileId, claim.getMetadataVersion());
-            if (locked == null) return null;
+            if (locked == null) return;
             if (code != null) vectorMapper.deleteExtractingLayersBySource(fileId);
             spatialMapper.deleteByFileId(fileId);
             if (extracted != null) spatialMapper.insert(extracted);
@@ -179,15 +175,11 @@ public class FileSpatialMetadataService {
             locked.setMetadataStatus(result);
             locked.setMetadataErrorMessage(abbreviate(message));
             events.publishEvent(new MetadataProgress(List.of(fileId), code == null));
-            return "UPLOAD".equals(locked.getSourceType())
-                    ? transferService.completeMetadataExtraction(locked, code == null) : null;
+
         });
-        if (record != null) {
-            progress.accept(code == null
-                    ? ProgressStage.determinate("COMMITTING", "空间元数据与导入结果已提交", 1, 1, ProgressUnit.OPERATION)
-                    : ProgressStage.indeterminate("FAILED", message));
-        }
-        transferService.publishImportProgress(record);
+        progress.accept(code == null
+                ? ProgressStage.determinate("COMMITTING", "空间元数据与导入结果已提交", 1, 1, ProgressUnit.OPERATION)
+                : ProgressStage.indeterminate("FAILED", message));
     }
 
     /** 按文件来源发现不可用时立即使空间查询失效，同时撤销旧提取任务的提交资格。 */
@@ -211,25 +203,7 @@ public class FileSpatialMetadataService {
         });
     }
 
-    /** 来源变更及人工重试共用同一失效操作；旧空间记录立即退出查询。 */
-    public void invalidate(Long fileId) {
-        fileMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()
-                .eq(GisFileMeta::getId, fileId)
-                .setSql("metadata_status = CASE WHEN metadata_status = 'WAITING' THEN 'WAITING' ELSE 'QUEUED' END")
-                .setSql("metadata_version = metadata_version + 1")
-                .setSql("metadata_lease_expires_at = CASE WHEN metadata_status = 'WAITING' THEN metadata_lease_expires_at ELSE NULL END")
-                .set(GisFileMeta::getMetadataErrorCode, null)
-                .set(GisFileMeta::getMetadataErrorMessage, null)
-                .set(GisFileMeta::getMetadataExtractedAt, null)
-                .set(GisFileMeta::getRepresentativeLongitude, null)
-                .set(GisFileMeta::getRepresentativeLatitude, null)
-                .set(GisFileMeta::getRepresentativeLayerKey, null)
-                .set(GisFileMeta::getRepresentativeExtentKind, null)
-                .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
-    }
-
     private Consumer<ProgressStage> metadataProgress(GisFileMeta claim) {
-        if ("UPLOAD".equals(claim.getSourceType())) return transferService.metadataProgress(claim);
         return ProgressStage.throttled(work -> {
             try {
                 GisFileMeta current = fileMapper.selectById(claim.getId());
@@ -239,7 +213,7 @@ public class FileSpatialMetadataService {
                         || !current.getMetadataLeaseExpiresAt().isAfter(LocalDateTime.now())) return;
                 events.publishEvent(new MetadataWork(claim.getId(), claim.getMetadataVersion(), work));
             } catch (RuntimeException ex) {
-                log.warn("工作区解析进度通知失败: fileId={}, reason={}", claim.getId(), ex.getMessage());
+                log.warn("文件解析进度通知失败: fileId={}, reason={}", claim.getId(), ex.getMessage());
             }
         });
     }

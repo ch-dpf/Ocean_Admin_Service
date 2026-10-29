@@ -38,9 +38,9 @@ ocean-business-cloud
 
 统一实时事件信封 `EventMessage<T>` 与发布契约 `RealtimeEventPublisher` 位于 `ocean-kernel` 的 `org.ocean.admin.kernel.realtime` 包，不依赖Web、Servlet或SSE实现。平台SSE入口与发布实现位于 `ocean-platform-core` 的 `org.ocean.admin.platform.workbench` 包，GIS对应实现位于 `ocean-business-geo` 的 `org.ocean.admin.gis.realtime` 包，两侧各自实现kernel中的发布契约，不反向依赖bootstrap。进度快照、业务投影与数据库重建位于GIS模块的 `progress` 包。MonitorController与GisRealtimeEventController分别提供 `/api/platform/monitor/metrics` 与 `/api/gis/events/stream`，由服务端固定事件域为platform与gis，省略topics仅订阅所属域，跨域主题返回400，不保留全域入口。SystemMetricsSsePublisher与GisRealtimeSsePublisher分别维护有界串行发送、心跳、异步回收、线程池和连接上限，配置分别使用 `ocean.platform.realtime.sse` 与 `ocean.gis.realtime.sse`；业务服务通过构造器上的 `@Qualifier` 选择所属域的发布器。bootstrap保留WebConfig和Knife4jConfig作为SSE的MVC注册与文档装配，不再提供SSE控制器或发布实现；WebConfig在两个入口的MVC异步响应初始化后分别激活对应发布器，避免框架内部早期缓冲绕过应用队列上限。工作台SystemMetricsEventService仅生产platform.metrics.updated事件，有匹配的平台订阅者时每2秒采集，GIS连接不会触发系统指标采集。两侧SSE均可承载进度之外的域内事件，各类型自定义消息体。所有事件以app.event帧发送，不提供SSE历史重放；前端每次GIS连接成功后通过既有HTTP接口补查状态，按epoch/sequence合并。鉴权暂不调整，两个SSE入口继续公开访问，域隔离与主题筛选仅控制投递范围。
 
-`ProgressSnapshot.progressId` 是字符串进度键：上传使用recordNo，处理使用taskNo，工作区使用workspace编号，归档使用archiveNo。业务对象身份独立通过resource表达。进度版本使用持久化epoch和代次内sequence；重试或重建递增epoch，普通快照查询不增代次。业务Service决定终态，进度中心验证并发布完整快照，不能根据工作量计数推断业务成果是否成功。
+`ProgressSnapshot.progressId` 唯一标识一条实时进度消息。上传、工作区接入、处理及归档共用 ProgressSnapshot、gis.progress 事件和 /api/gis/progress/{progressId} 补查。Redis 保存共享进度快照，通过原子比较更新递增 revision；GIS SSE 经 Redis 转发到各实例的消息连接。进度只描述工作量和阶段，不保存历史文件清单。持久化处理/归档任务仍由数据库提供状态，接入终态短期保留30分钟。
 
-工作区接入复用 `taskExecutor`、`RealtimeProgressService` 和 `/api/gis/events/stream`，不新增任务或传输表。请求只校验入口并返回202，后台流式遍历、逐文件短事务登记，运行态将新文件关联到本次进度。空间提取成功、失败、源失效或删除事件在事务提交后汇总进度，避免数据库回滚却推送成功；登记后读取一次文件状态，关闭通知早于运行态关联建立的竞态。扫描总量未知时只报告已扫描数，扫描结束才计算解析百分比，所有新文件进入元数据终态后才结束接入。统一补查入口为 `/api/gis/progress/{progressId}`。工作区运行态及终态短期查询属于本实例能力，服务重启不恢复目录扫描；持久化的文件提取待办继续按既有租约机制恢复。
+客户端分块上传和工作区扫描登记均逐文件记录真实文件信息，整批上传或扫描登记结束后统一放行空间元数据提取。扫描总量未知时不推算百分比；上传按落盘工作量、解析按实际处理文件数展示串行阶段。文件仅在执行期间通过 ingest_progress_id 回报进度，结束后解除关联，不建立传输历史或批次文件列表。多实例部署须共享上传、暂存及受控工作区文件存储。
 
 平台业务使用 `ocean_platform` Schema，平台核心表采用 `sys_` 前缀；GIS 业务使用 `ocean_gis` Schema，表采用 `gis_` 前缀。两个 Schema 分别维护唯一的初始化 SQL，业务对象不跨 Schema 混写。
 
@@ -48,7 +48,7 @@ GIS 文件传输与空间元数据提取分阶段执行。原始文件保存在�
 
 可编辑矢量业务位于 `ocean-business-geo`。`FileSpatialMetadataService` 在文件元数据领取周期内流式读取 GeoJSON、分批写入真实要素，并在完整成功后开放图层。首期一文件生成一个图层，文件、图层与要素直接关联，不建立独立矢量导入任务。现有静态瓦片处理与发布流程继续负责静态成果。
 
-`gis_file_meta` 的元数据状态、版本和租约是文件提取流程的唯一权威状态。矢量解析中断后重新领取同一文件，先清理未完成图层再从头提取；成功图层不会被元数据重试覆盖。图层 READY、文件元数据 COMPLETED 和原上传明细 SUCCESS 在同一事务提交。`FileTransferRecordService` 汇总批次并返回由文件直接关联的图层 ID。
+`gis_file_meta` 的元数据状态、版本和租约是文件提取的权威状态。图层 READY 与文件元数据 COMPLETED 在同一事务提交，提交后按数据库计数更新接入进度。接入中断后保留已登记文件并明确标记失败；用户删除失败记录后重新录入。不提供单文件或上传批次的人工重试接口。上传与下载操作由统一操作日志留痕。
 
 `VectorLayerService` 提供真实几何范围查询及要素编辑，以图层行锁维护数量、范围和数据版本，以要素版本及 HTTP If-Match 防止编辑覆盖。来源文件保持为提取时的数据依据；制图查询访问当前要素，编辑不回写原文件。空间响应使用 GeoJSON，图层管理响应使用统一 ResponseResult。
 

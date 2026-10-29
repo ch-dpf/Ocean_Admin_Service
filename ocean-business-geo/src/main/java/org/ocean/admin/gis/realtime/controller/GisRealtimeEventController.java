@@ -29,7 +29,7 @@ public class GisRealtimeEventController {
     @Operation(summary = "订阅GIS实时事件", tags = "GIS实时事件",
             description = "建立SSE长连接，仅推送gis域事件。事件名为app.event，data为完整EventMessage JSON。"
                     + "省略topics订阅全部GIS事件，跨域主题返回400。通用进度事件为gis.progress.updated，"
-                    + "本地批量上传为gis.upload.progress。无历史重放；重连后使用任务响应中的progress.queryUrl补查。"
+                    + "上传与工作区接入均使用统一gis.progress事件。无历史重放；重连后使用任务响应中的progress.queryUrl补查。"
                     + "请使用EventSource或支持SSE的客户端持续接收事件。")
     @ApiResponse(responseCode = "200", description = "GIS事件流，上传批次通过recordNo关联，其余进度通过progressId关联",
             content = @Content(mediaType = MediaType.TEXT_EVENT_STREAM_VALUE, schema = @Schema(type = "string")))

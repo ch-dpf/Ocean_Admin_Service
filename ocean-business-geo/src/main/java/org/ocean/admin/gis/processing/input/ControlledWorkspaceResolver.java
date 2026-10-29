@@ -89,7 +89,7 @@ public class ControlledWorkspaceResolver {
                 if (file.getSourceModifiedAt() == null || file.getSizeBytes() == null
                         || file.getSizeBytes() != attributes.size()
                         || file.getSourceModifiedAt() != attributes.lastModifiedTime().toMillis()) {
-                    throw new SourceException("SOURCE_CHANGED", "工作区源文件已变化，请重新提取空间元信息");
+                    throw new SourceException("SOURCE_CHANGED", "工作区源文件已变化，请删除记录后重新接入");
                 }
                 return path;
             } catch (SourceException ex) {

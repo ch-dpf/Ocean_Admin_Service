@@ -1,6 +1,10 @@
 package org.ocean.admin.gis.realtime.service;
 
 import jakarta.annotation.PreDestroy;
+import jakarta.annotation.PostConstruct;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.data.redis.listener.ChannelTopic;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.kernel.realtime.EventMessage;
 import org.ocean.admin.kernel.realtime.RealtimeEventPublisher;
@@ -37,7 +41,10 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
     public static final String REQUEST_EMITTER_ATTRIBUTE = GisRealtimeSsePublisher.class.getName() + ".emitter";
     private static final String EVENT_DOMAIN = "gis";
     private static final int SEND_BATCH_SIZE = 16;
+    private static final String CHANNEL = "ocean-admin:gis:events";
     private final ObjectMapper objectMapper;
+    private final StringRedisTemplate redis;
+    private RedisMessageListenerContainer relay;
     private final int maxConnections;
     private final int maxPendingMessages;
     private final long maxPendingBytes;
@@ -50,7 +57,7 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
     private final ThreadPoolExecutor completionExecutor;
     private final ScheduledExecutorService maintenance;
 
-    public GisRealtimeSsePublisher(ObjectMapper objectMapper,
+    public GisRealtimeSsePublisher(ObjectMapper objectMapper, StringRedisTemplate redis,
             @Value("${ocean.gis.realtime.sse.max-connections:256}") int maxConnections,
             @Value("${ocean.gis.realtime.sse.max-pending-messages:64}") int maxPendingMessages,
             @Value("${ocean.gis.realtime.sse.max-pending-bytes:524288}") long maxPendingBytes,
@@ -63,6 +70,7 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
                 || sendQueueCapacity < 1 || heartbeatMillis < 1 || sendTimeoutMillis < 1 || connectionTimeoutMillis < 1)
             throw new IllegalArgumentException("SSE连接、队列与超时配置必须为正数，字节上限至少128");
         this.objectMapper = objectMapper;
+        this.redis = redis;
         this.maxConnections = maxConnections;
         this.maxPendingMessages = maxPendingMessages;
         this.maxPendingBytes = maxPendingBytes;
@@ -122,18 +130,32 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
 
     @Override
     public boolean hasSubscribers(String eventType) {
-        return !stopped.get() && connections.values().stream().anyMatch(connection -> connection.accepts(eventType));
+        return !stopped.get();
+    }
+
+    @PostConstruct
+    public void startRelay() {
+        relay = new RedisMessageListenerContainer();
+        relay.setConnectionFactory(redis.getConnectionFactory());
+        relay.addMessageListener((message, pattern) -> publishLocal(new String(message.getBody(), StandardCharsets.UTF_8)),
+                new ChannelTopic(CHANNEL));
+        relay.afterPropertiesSet();
+        relay.start();
     }
 
     @Override
     public void publish(EventMessage<?> message) {
+        if (!stopped.get()) redis.convertAndSend(CHANNEL, objectMapper.writeValueAsString(message));
+    }
+
+    private void publishLocal(String json) {
         if (stopped.get()) return;
-        List<Connection> recipients = connections.values().stream()
-                .filter(connection -> connection.accepts(message.type())).toList();
-        if (recipients.isEmpty()) return;
-        String json = objectMapper.writeValueAsString(message);
-        Frame frame = new Frame(json, json.getBytes(StandardCharsets.UTF_8).length + 64L, false);
-        for (Connection connection : recipients) connection.offer(frame);
+        try {
+            EventMessage<?> message = objectMapper.readValue(json, EventMessage.class);
+            Frame frame = new Frame(json, json.getBytes(StandardCharsets.UTF_8).length + 64L, false);
+            for (Connection connection : connections.values())
+                if (connection.accepts(message.type())) connection.offer(frame);
+        } catch (RuntimeException ex) { log.warn("GIS实时消息接收失败", ex); }
     }
 
     private void maintainSafely() {
@@ -159,6 +181,11 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
     @PreDestroy
     public void destroy() {
         synchronized (connections) { stopped.set(true); }
+        if (relay != null) {
+            relay.stop();
+            try { relay.destroy(); }
+            catch (Exception ex) { log.warn("关闭GIS消息订阅失败", ex); }
+        }
         maintenance.shutdownNow();
         for (Connection connection : connections.values()) connection.close("SHUTDOWN");
         sendExecutor.shutdownNow();

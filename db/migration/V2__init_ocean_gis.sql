@@ -99,94 +99,6 @@ COMMENT ON COLUMN ocean_gis.gis_vector_group.default_style_key IS '数据集不�
 -- GIS 原始文件上传、下载传输记录
 -- =========================================================
 
-CREATE TABLE ocean_gis.gis_file_transfer_record (
-    progress_epoch BIGINT NOT NULL DEFAULT 0 CHECK (progress_epoch >= 0),
-    id                  BIGINT        PRIMARY KEY,
-    record_no           VARCHAR(64)   NOT NULL,
-    request_id          VARCHAR(64),
-    operation_type      VARCHAR(16)   NOT NULL,
-    data_set_id         BIGINT        NOT NULL,
-    vector_placement    VARCHAR(10) CHECK (vector_placement IN ('AUTO','UNKNOWN')),
-    vector_dataset_style_id BIGINT,
-    total_count         INTEGER       NOT NULL DEFAULT 0,
-    completed_count     INTEGER       NOT NULL DEFAULT 0,
-    failed_count        INTEGER       NOT NULL DEFAULT 0,
-    total_bytes         BIGINT        NOT NULL DEFAULT 0,
-    uploaded_bytes      BIGINT        NOT NULL DEFAULT 0,
-    record_status       VARCHAR(20)   NOT NULL DEFAULT 'QUEUED',
-    current_stage       VARCHAR(32),
-    result_storage_key  VARCHAR(1000),
-    error_message       VARCHAR(1000),
-    operator_id         BIGINT,
-    version             BIGINT        NOT NULL DEFAULT 0,
-    start_time          TIMESTAMP,
-    finish_time         TIMESTAMP,
-    create_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted             INTEGER       NOT NULL DEFAULT 0,
-    CONSTRAINT uk_gis_file_transfer_record_no
-        UNIQUE (record_no),
-    CONSTRAINT fk_gis_file_transfer_record_data_set
-        FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id) ON DELETE CASCADE,
-    FOREIGN KEY (data_set_id,vector_dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id) ON DELETE CASCADE,
-    CONSTRAINT ck_gis_file_transfer_record_operation
-        CHECK (operation_type IN ('IMPORT', 'EXPORT')),
-    CONSTRAINT ck_gis_file_transfer_record_status
-        CHECK (record_status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'PARTIAL_FAILED', 'FAILED')),
-    CONSTRAINT ck_gis_file_transfer_record_counts
-        CHECK (
-            total_count >= 0
-            AND completed_count >= 0
-            AND failed_count >= 0
-            AND completed_count + failed_count <= total_count
-        ),
-    CONSTRAINT ck_gis_file_transfer_record_bytes
-        CHECK (
-            total_bytes >= 0
-            AND uploaded_bytes >= 0
-            AND uploaded_bytes <= total_bytes
-        ),
-    CONSTRAINT ck_gis_file_transfer_record_version
-        CHECK (version >= 0),
-    CONSTRAINT ck_gis_file_transfer_record_timing
-        CHECK (
-            (record_status = 'QUEUED' AND finish_time IS NULL)
-            OR (record_status = 'RUNNING' AND start_time IS NOT NULL AND finish_time IS NULL)
-            OR (
-                record_status IN ('COMPLETED', 'PARTIAL_FAILED', 'FAILED')
-                AND start_time IS NOT NULL
-                AND finish_time IS NOT NULL
-                AND completed_count + failed_count = total_count
-            )
-        ),
-    CONSTRAINT ck_gis_file_transfer_record_deleted
-        CHECK (deleted IN (0, 1))
-);
-
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.progress_epoch IS '实时进度流代次，重试或快照重建时原子递增';
-COMMENT ON TABLE ocean_gis.gis_file_transfer_record IS 'GIS 原始文件上传、下载传输记录';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.record_no IS '对外暴露的稳定文件传输记录编号';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.request_id IS '客户端上传批次幂等标识，仅导入任务使用';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.operation_type IS '操作类型：IMPORT-导入，EXPORT-导出';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.record_status IS '记录状态：QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.total_bytes IS '批次声明的文件总字节数';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.uploaded_bytes IS '已确认落盘的文件字节数';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.result_storage_key IS '导出结果的相对存储路径或对象存储 Key';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record.version IS '状态版本号，用于进度快照与实时事件合并';
-
-CREATE INDEX idx_gis_file_transfer_record_data_set
-    ON ocean_gis.gis_file_transfer_record (data_set_id, operation_type, create_time DESC)
-    WHERE deleted = 0;
-
-CREATE INDEX idx_gis_file_transfer_record_status
-    ON ocean_gis.gis_file_transfer_record (record_status, create_time)
-    WHERE deleted = 0;
-
-CREATE UNIQUE INDEX uk_gis_file_transfer_record_request
-    ON ocean_gis.gis_file_transfer_record (request_id)
-    WHERE deleted = 0 AND operation_type = 'IMPORT' AND request_id IS NOT NULL;
-
-
 -- =========================================================
 -- GIS 文件元数据
 -- =========================================================
@@ -201,6 +113,8 @@ CREATE TABLE ocean_gis.gis_file_meta (
     workspace_code           VARCHAR(64),
     relative_path            VARCHAR(1000),
     source_modified_at       BIGINT,
+    ingest_progress_id       VARCHAR(128),
+    ingest_file_index        INTEGER CHECK (ingest_file_index >= 0),
     storage_name             VARCHAR(255),
     storage_key              VARCHAR(1000),
     storage_type             VARCHAR(20),
@@ -245,7 +159,7 @@ CREATE TABLE ocean_gis.gis_file_meta (
     CONSTRAINT ck_gis_file_meta_completed_point
         CHECK ((metadata_status = 'COMPLETED') = (representative_longitude IS NOT NULL)),
     CONSTRAINT ck_gis_file_meta_metadata_lease
-        CHECK ((metadata_status = 'RUNNING' OR (metadata_status = 'WAITING' AND source_type = 'WORKSPACE'))
+        CHECK ((metadata_status IN ('RUNNING', 'WAITING'))
                = (metadata_lease_expires_at IS NOT NULL)),
     CONSTRAINT ck_gis_file_meta_size
         CHECK (size_bytes >= 0),
@@ -295,6 +209,10 @@ COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_longitude IS '元数据
 COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_latitude IS '元数据完成时保存的文件代表点纬度，EPSG:4326';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_layer_key IS '代表点来源图层键；面按实际面积、线按实际长度选择主要分块';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_extent_kind IS '代表点来源范围类型；VECTOR_ENVELOPE 不保证点位于真实矢量要素内';
+
+COMMENT ON COLUMN ocean_gis.gis_file_meta.ingest_progress_id IS '仅关联执行期间的实时进度，接入结束后清空，不保存接入历史';
+CREATE INDEX idx_gis_file_meta_ingest_progress ON ocean_gis.gis_file_meta (ingest_progress_id) WHERE ingest_progress_id IS NOT NULL;
+CREATE UNIQUE INDEX uk_gis_file_meta_ingest_index ON ocean_gis.gis_file_meta (ingest_progress_id, ingest_file_index) WHERE ingest_progress_id IS NOT NULL AND ingest_file_index IS NOT NULL;
 
 CREATE UNIQUE INDEX uk_gis_file_meta_active_storage
     ON ocean_gis.gis_file_meta (storage_type, storage_key)
@@ -530,62 +448,6 @@ BEGIN
     END IF;
     RETURN false;
 END $$;
-
-
-CREATE TABLE ocean_gis.gis_file_transfer_record_item (
-    id                  BIGINT        PRIMARY KEY,
-    record_id           BIGINT        NOT NULL,
-    file_meta_id        BIGINT,
-    sequence_no         INTEGER       NOT NULL,
-    original_name       VARCHAR(255)  NOT NULL,
-    operation_status    VARCHAR(20)   NOT NULL,
-    error_message       VARCHAR(1000),
-    size_bytes          BIGINT        NOT NULL DEFAULT 0,
-    storage_name        VARCHAR(255),
-    storage_key         VARCHAR(1000),
-    storage_type        VARCHAR(20),
-    extension           VARCHAR(32),
-    sha256              VARCHAR(64),
-    created_by         BIGINT,
-    file_status       VARCHAR(20),
-    cleanup_status      VARCHAR(20),
-    create_time         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time         TIMESTAMP,
-    CONSTRAINT fk_gis_file_transfer_record_item_record
-        FOREIGN KEY (record_id) REFERENCES ocean_gis.gis_file_transfer_record (id) ON DELETE CASCADE,
-    CONSTRAINT fk_gis_file_transfer_record_item_file
-        FOREIGN KEY (file_meta_id) REFERENCES ocean_gis.gis_file_meta (id) ON DELETE SET NULL,
-    CONSTRAINT uk_gis_file_transfer_record_item_sequence
-        UNIQUE (record_id, sequence_no),
-    CONSTRAINT ck_gis_file_transfer_record_item_status
-        CHECK (operation_status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED')),
-    CONSTRAINT ck_gis_file_transfer_record_item_size
-        CHECK (size_bytes >= 0)
-);
-
-COMMENT ON TABLE ocean_gis.gis_file_transfer_record_item IS 'GIS 文件上传下载批次的逐文件处理明细';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.file_meta_id IS '对应文件元数据；文件形成前失败时允许为空';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.operation_status IS '本次操作状态：PENDING、RUNNING、SUCCESS、FAILED';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.storage_name IS '操作发生时的系统存储文件名快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.storage_key IS '操作发生时的存储路径或对象存储 Key 快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.storage_type IS '操作发生时的存储类型快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.extension IS '操作发生时的扩展名快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.sha256 IS '操作发生时的 SHA-256 快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.created_by IS '操作发生时的文件登记人快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.file_status IS '操作发生时的源文件状态快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.cleanup_status IS '操作发生时的资源清理状态快照';
-COMMENT ON COLUMN ocean_gis.gis_file_transfer_record_item.update_time IS '操作完成时的文件更新时间快照';
-
-CREATE INDEX idx_gis_file_transfer_record_item_record
-    ON ocean_gis.gis_file_transfer_record_item (record_id, sequence_no);
-
-CREATE INDEX idx_gis_file_transfer_record_item_file
-    ON ocean_gis.gis_file_transfer_record_item (file_meta_id, create_time)
-    WHERE file_meta_id IS NOT NULL;
-
-CREATE UNIQUE INDEX uk_gis_file_transfer_record_item_file
-    ON ocean_gis.gis_file_transfer_record_item (record_id, file_meta_id)
-    WHERE file_meta_id IS NOT NULL;
 
 
 -- =========================================================

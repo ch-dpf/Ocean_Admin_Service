@@ -40,7 +40,7 @@ public class FileMetaController {
             @Parameter(description = "所属数据集ID", required = true)
             @RequestParam("dataSetId") Long dataSetId,
             @Valid @RequestBody GisFileMetaVO.WorkspaceRequest request) {
-        return ResponseResult.success("服务器工作区数据接入启动，请按progress.progressId跟踪进度",
+        return ResponseResult.success("数据添加成功，请查看进度",
                 fileMetaService.addWorkspaceFiles(dataSetId, request));
     }
 
@@ -49,14 +49,6 @@ public class FileMetaController {
     public ResponseResult<PageResult<List<GisFileMetaVO>>> getFileMetaPage(
             @ModelAttribute GisFileQuery query) {
         return ResponseResult.success(fileMetaService.getFileMetaPage(query));
-    }
-
-    @PostMapping("/{id}/metadata/retry")
-    @Operation(summary = "重新提取文件空间元数据")
-    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT, description = "重新提取空间元数据")
-    public ResponseResult<String> retryMetadata(@PathVariable Long id) {
-        fileMetaService.retryMetadata(id);
-        return ResponseResult.success("已提交元数据提取任务");
     }
 
     @DeleteMapping("/{id}")

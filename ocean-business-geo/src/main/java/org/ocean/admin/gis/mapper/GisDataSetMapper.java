@@ -20,15 +20,6 @@ public interface GisDataSetMapper extends BaseMapper<GisDataSet> {
     @Delete("DELETE FROM ocean_gis.gis_data_set WHERE id = #{id} AND deleted = 0")
     int physicallyDeleteById(@Param("id") Long id);
 
-    @Select("""
-            SELECT EXISTS (
-                SELECT 1 FROM ocean_gis.gis_file_transfer_record
-                WHERE data_set_id = #{dataSetId} AND deleted = 0
-                  AND record_status IN ('QUEUED', 'RUNNING')
-            )
-            """)
-    boolean existsActiveTransfersByDataSetId(@Param("dataSetId") Long dataSetId);
-
     @Update("""
             UPDATE ocean_gis.gis_data_set
             SET file_count = file_count + #{countDelta},

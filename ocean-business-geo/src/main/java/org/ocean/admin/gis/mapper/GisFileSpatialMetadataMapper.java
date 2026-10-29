@@ -15,11 +15,10 @@ public interface GisFileSpatialMetadataMapper {
     List<GisDataSetVO.FootprintRow> selectDataSetFootprints(@Param("ids") List<Long> ids,
             @Param("tolerance") double tolerance);
     List<Long> selectCandidates(@Param("limit") int limit);
-    List<Long> releaseUploadBatch(@Param("recordId") Long recordId);
-    List<Long> releaseWorkspaceFiles(@Param("ids") List<Long> ids);
-    int renewWorkspaceWaiting(@Param("ids") List<Long> ids, @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
-    List<Long> expireWorkspaceWaiting();
-    int failWaitingUpload(@Param("recordId") Long recordId, @Param("message") String message);
+    List<Long> releaseIngestion(@Param("progressId") String progressId);
+    int renewIngestionWaiting(@Param("progressId") String progressId, @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
+    List<Long> expireIngestionWaiting();
+
     GisFileMeta claim(@Param("id") Long id, @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);
     GisFileMeta lockClaim(@Param("id") Long id, @Param("version") Long version);
     int renewLease(@Param("id") Long id, @Param("version") Long version, @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt);

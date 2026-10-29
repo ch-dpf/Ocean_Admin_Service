@@ -188,9 +188,6 @@ public class DataSetService {
         if (dataSet == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数据集不存在或已删除: " + id);
         }
-        if (gisDataSetMapper.existsActiveTransfersByDataSetId(id)) {
-            throw new IllegalStateException("数据集存在正在上传或下载的文件，请等待传输结束后重试");
-        }
         GisProcessingInputMapper.ActiveTaskReference task =
                 processingInputMapper.selectFirstActiveByDataSetId(id);
         if (task != null) {
@@ -198,7 +195,7 @@ public class DataSetService {
                     + task.taskName() + " (" + task.taskNo() + ", " + task.taskStatus() + ")");
         }
         List<GisFileMeta> files = gisFileMetaMapper.selectAllByDataSetIdForUpdate(id);
-        if (files.stream().anyMatch(file -> "RUNNING".equals(file.getMetadataStatus()))) {
+        if (files.stream().anyMatch(file -> java.util.Set.of("WAITING", "QUEUED", "RUNNING").contains(file.getMetadataStatus()))) {
             throw new IllegalStateException("数据集仍有文件正在提取空间元数据，请等待处理结束后重试");
         }
         List<GisFileMeta> unsupportedStorage = files.stream()

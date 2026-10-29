@@ -44,10 +44,6 @@ public record GisUploadChunkCommand(
         }
     }
 
-    public int sequenceNo() {
-        return fileIndex + 1;
-    }
-
     public boolean lastChunk() {
         return offset + chunkSize == fileSize;
     }

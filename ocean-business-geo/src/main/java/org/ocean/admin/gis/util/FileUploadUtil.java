@@ -191,7 +191,8 @@ public class FileUploadUtil {
             long fileSize,
             long chunkSize,
             InputStream input,
-            Consumer<ProgressStage> progressListener) {
+            Consumer<ProgressStage> progressListener,
+            Runnable checkExecutionLease) {
         if (input == null) {
             throw new IllegalArgumentException("上传数据流不能为空");
         }
@@ -221,55 +222,60 @@ public class FileUploadUtil {
                     partial,
                     StandardOpenOption.CREATE,
                     StandardOpenOption.READ,
-                    StandardOpenOption.WRITE)) {
-                while (requestRead < chunkSize) {
-                    int wanted = (int) Math.min(incoming.length, chunkSize - requestRead);
-                    int read = input.read(incoming, 0, wanted);
-                    if (read < 0) {
-                        throw new IllegalArgumentException(
-                                "上传分块内容短于声明大小: " + requestRead + "/" + chunkSize);
-                    }
-                    if (read == 0) {
-                        continue;
-                    }
+                    StandardOpenOption.WRITE);
+                 var fileLock = channel.tryLock()) {
+                if (fileLock == null) throw new IllegalStateException("文件仍由另一接入请求写入");
+                originalSize = channel.size();
+                duplicate = expectedOffset + chunkSize <= originalSize;
+                try {
+                    while (requestRead < chunkSize) {
+                        int wanted = (int) Math.min(incoming.length, chunkSize - requestRead);
+                        int read = input.read(incoming, 0, wanted);
+                        if (read < 0) {
+                            throw new IllegalArgumentException(
+                                    "上传分块内容短于声明大小: " + requestRead + "/" + chunkSize);
+                        }
+                        if (read == 0) {
+                            continue;
+                        }
 
-                    long absolutePosition = expectedOffset + requestRead;
-                    int overlap = (int) Math.min(read, Math.max(0L, originalSize - absolutePosition));
-                    if (overlap > 0) {
-                        readFully(channel, existing, overlap, absolutePosition);
-                        for (int index = 0; index < overlap; index++) {
-                            if (incoming[index] != existing[index]) {
-                                throw new IllegalArgumentException(
-                                        "重试分块与服务端已落盘内容不一致，offset="
-                                                + (absolutePosition + index));
+                        checkExecutionLease.run();
+                        long absolutePosition = expectedOffset + requestRead;
+                        int overlap = (int) Math.min(read, Math.max(0L, originalSize - absolutePosition));
+                        if (overlap > 0) {
+                            readFully(channel, existing, overlap, absolutePosition);
+                            for (int index = 0; index < overlap; index++) {
+                                if (incoming[index] != existing[index]) {
+                                    throw new IllegalArgumentException(
+                                            "重试分块与服务端已落盘内容不一致，offset="
+                                                    + (absolutePosition + index));
+                                }
                             }
                         }
+                        if (overlap < read) {
+                            writeFully(
+                                    channel,
+                                    ByteBuffer.wrap(incoming, overlap, read - overlap),
+                                    absolutePosition + overlap);
+                        }
+                        requestRead += read;
+                        reportUploadProgress(progressListener, "UPLOADING",
+                                Math.max(originalSize, expectedOffset + requestRead), fileSize);
                     }
-                    if (overlap < read) {
-                        writeFully(
-                                channel,
-                                ByteBuffer.wrap(incoming, overlap, read - overlap),
-                                absolutePosition + overlap);
+                    if (input.read() != -1) {
+                        throw new IllegalArgumentException("上传分块内容长于声明大小: " + chunkSize);
                     }
-                    requestRead += read;
-                    reportUploadProgress(progressListener, "UPLOADING",
-                            Math.max(originalSize, expectedOffset + requestRead), fileSize);
+                    channel.force(false);
+                } catch (IOException | RuntimeException ex) {
+                    channel.truncate(originalSize);
+                    channel.force(false);
+                    reportUploadProgress(progressListener, "UPLOAD_ROLLBACK", channel.size(), fileSize);
+                    throw ex;
                 }
-                if (input.read() != -1) {
-                    throw new IllegalArgumentException("上传分块内容长于声明大小: " + chunkSize);
-                }
-                channel.force(false);
-            } catch (IOException | RuntimeException ex) {
-                truncateQuietly(partial, originalSize);
-                reportUploadProgress(progressListener, "UPLOAD_ROLLBACK", Files.size(partial), fileSize);
-                throw ex;
             }
 
             long nextOffset = Files.size(partial);
-            if (nextOffset > fileSize) {
-                truncateQuietly(partial, originalSize);
-                throw new IllegalStateException("上传分块导致暂存文件越界");
-            }
+            if (nextOffset > fileSize) throw new IllegalStateException("上传分块导致暂存文件越界");
             reportUploadProgress(progressListener, "CHUNK_CONFIRMED", nextOffset, fileSize);
             String sha256 = nextOffset == fileSize ? sha256(partial, progressListener) : null;
             return new ChunkWriteResult(nextOffset, duplicate, sha256);
@@ -541,6 +547,39 @@ public class FileUploadUtil {
             throw new IllegalArgumentException("数据集ID必须大于0");
         }
         return "datasets/" + pathResolver.safeSegment(String.valueOf(dataSetId));
+    }
+
+    public String uploadStorageKey(Long dataSetId, String progressId, int index, String originalName) {
+        return dataSetStorageKey(dataSetId, uploadStorageName(progressId, index, originalName));
+    }
+
+    public int cleanupExpiredUploads(java.time.Duration idle,
+            org.ocean.admin.gis.progress.RealtimeProgressService progress) {
+        Path root = resolveKey(".staging");
+        if (!Files.isDirectory(root)) return 0;
+        long threshold = System.currentTimeMillis() - idle.toMillis();
+        int cleaned = 0;
+        try (var directories = Files.list(root)) {
+            for (Path directory : directories.filter(Files::isDirectory)
+                    .filter(path -> path.getFileName().toString().startsWith("upload_")).toList()) {
+                long modified;
+                try (var entries = Files.walk(directory)) {
+                    modified = entries.mapToLong(path -> {
+                        try { return Files.getLastModifiedTime(path).toMillis(); }
+                        catch (IOException ex) { return System.currentTimeMillis(); }
+                    }).max().orElse(System.currentTimeMillis());
+                }
+                if (modified >= threshold) continue;
+                String id = directory.getFileName().toString();
+                try {
+                    progress.withExecutionLock(id, () -> { deleteBatchDirectory(id); return null; });
+                    cleaned++;
+                } catch (org.springframework.web.server.ResponseStatusException busy) {
+                    log.debug("上传仍有执行者，跳过暂存清理: {}", id);
+                }
+            }
+        } catch (IOException ex) { throw new IllegalStateException("清理上传暂存文件失败", ex); }
+        return cleaned;
     }
 
     private Path uploadPartialPath(String taskNo, int fileIndex) {

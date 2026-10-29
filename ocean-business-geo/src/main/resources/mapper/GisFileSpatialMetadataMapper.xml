@@ -46,54 +46,28 @@
         deleted = 0 AND file_status = 'READY'
         AND (metadata_status = 'QUEUED'
              OR (metadata_status = 'RUNNING' AND metadata_lease_expires_at &lt; CURRENT_TIMESTAMP))
-        AND NOT EXISTS (
-            SELECT 1 FROM ocean_gis.gis_file_transfer_record_item i
-            JOIN ocean_gis.gis_file_transfer_record r ON r.id = i.record_id
-            WHERE i.file_meta_id = ocean_gis.gis_file_meta.id AND i.operation_status = 'RUNNING'
-              AND r.deleted = 0 AND r.record_status = 'RUNNING' AND r.current_stage = 'UPLOADING'
-        )
     </sql>
-    <select id="releaseUploadBatch" resultType="long" affectData="true" flushCache="true">
-        UPDATE ocean_gis.gis_file_meta fm
-        SET metadata_status = 'QUEUED', update_time = CURRENT_TIMESTAMP
-        FROM ocean_gis.gis_file_transfer_record_item i
-        JOIN ocean_gis.gis_file_transfer_record r ON r.id = i.record_id
-        WHERE i.record_id = #{recordId} AND i.file_meta_id = fm.id AND i.operation_status = 'RUNNING'
-          AND r.record_status = 'RUNNING' AND r.current_stage = 'EXTRACTING_METADATA' AND r.deleted = 0
-          AND fm.deleted = 0 AND fm.file_status = 'READY' AND fm.metadata_status = 'WAITING'
-        RETURNING fm.id
-    </select>
-    <select id="releaseWorkspaceFiles" resultType="long" affectData="true" flushCache="true">
+    <select id="releaseIngestion" resultType="long" affectData="true" flushCache="true">
         UPDATE ocean_gis.gis_file_meta
         SET metadata_status = 'QUEUED', metadata_lease_expires_at = NULL, update_time = CURRENT_TIMESTAMP
-        WHERE deleted = 0 AND source_type = 'WORKSPACE' AND file_status = 'READY'
-          AND metadata_status = 'WAITING' AND metadata_lease_expires_at &gt; CURRENT_TIMESTAMP
-          AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        WHERE deleted = 0 AND file_status = 'READY' AND metadata_status = 'WAITING'
+          AND ingest_progress_id = #{progressId} AND metadata_lease_expires_at &gt; CURRENT_TIMESTAMP
         RETURNING id
     </select>
-    <update id="renewWorkspaceWaiting">
+    <update id="renewIngestionWaiting">
         UPDATE ocean_gis.gis_file_meta SET metadata_lease_expires_at = #{leaseExpiresAt}
-        WHERE deleted = 0 AND source_type = 'WORKSPACE' AND metadata_status = 'WAITING'
+        WHERE deleted = 0 AND metadata_status = 'WAITING' AND ingest_progress_id = #{progressId}
           AND metadata_lease_expires_at &gt; CURRENT_TIMESTAMP
-          AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
     </update>
-    <select id="expireWorkspaceWaiting" resultType="long" affectData="true" flushCache="true">
+    <select id="expireIngestionWaiting" resultType="long" affectData="true" flushCache="true">
         UPDATE ocean_gis.gis_file_meta
         SET metadata_status = 'FAILED', metadata_lease_expires_at = NULL,
-            metadata_version = metadata_version + 1, metadata_error_code = 'SCAN_INTERRUPTED',
-            metadata_error_message = '工作区扫描等待租约已过期，请重新接入或重试提取', update_time = CURRENT_TIMESTAMP
-        WHERE deleted = 0 AND source_type = 'WORKSPACE' AND metadata_status = 'WAITING'
+            metadata_version = metadata_version + 1, metadata_error_code = 'INGESTION_INTERRUPTED',
+            metadata_error_message = '数据接入已中断，请删除失败记录后重新录入', update_time = CURRENT_TIMESTAMP
+        WHERE deleted = 0 AND metadata_status = 'WAITING'
           AND metadata_lease_expires_at &lt;= CURRENT_TIMESTAMP
         RETURNING id
     </select>
-    <update id="failWaitingUpload">
-        UPDATE ocean_gis.gis_file_meta fm
-        SET metadata_status = 'FAILED', metadata_version = fm.metadata_version + 1,
-            metadata_error_code = 'UPLOAD_BATCH_INTERRUPTED', metadata_error_message = #{message},
-            metadata_lease_expires_at = NULL, update_time = CURRENT_TIMESTAMP
-        FROM ocean_gis.gis_file_transfer_record_item i
-        WHERE i.record_id = #{recordId} AND i.file_meta_id = fm.id AND fm.metadata_status = 'WAITING'
-    </update>
     <select id="selectCandidates" resultType="long">
         SELECT id FROM ocean_gis.gis_file_meta
         WHERE <include refid="eligible"/>

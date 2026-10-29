@@ -23,6 +23,9 @@ public class GisFileMeta {
 
     /** 所属数据集 */
     private Long dataSetId;
+    /** 仅在接入执行期间关联进度，结束后清空，不保存批次历史。 */
+    private String ingestProgressId;
+    private Integer ingestFileIndex;
     /** UPLOAD 使用托管存储，WORKSPACE 原位引用受控服务器文件。 */
     private String sourceType = "UPLOAD";
     private String workspaceCode;

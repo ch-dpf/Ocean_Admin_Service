@@ -18,6 +18,16 @@ import java.util.List;
 @Mapper
 public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
 
+    @org.apache.ibatis.annotations.Select("""
+            SELECT count(*) AS total,
+                   count(*) FILTER (WHERE metadata_status IN ('COMPLETED','NOT_APPLICABLE')) AS succeeded,
+                   count(*) FILTER (WHERE metadata_status = 'FAILED') AS failed
+            FROM ocean_gis.gis_file_meta WHERE deleted = 0 AND ingest_progress_id = #{progressId}
+            """)
+    IngestionCounts ingestionCounts(@Param("progressId") String progressId);
+
+    record IngestionCounts(long total, long succeeded, long failed) { }
+
     List<GisDataSetVO.FileSummary> selectDataSetFileSummaries(@Param("ids") List<Long> ids);
 
     List<GisDataSetVO.FilePoint> selectDataSetFilePoints(@Param("ids") List<Long> ids);

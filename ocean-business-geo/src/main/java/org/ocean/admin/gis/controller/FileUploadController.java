@@ -31,8 +31,8 @@ public class FileUploadController {
 
     @PostMapping(value = "/chunks", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
     @Operation(summary = "分块上传GIS文件",
-            description = "通过gis.upload.progress SSE订阅接收同一批次的上传与空间元数据解析进度；"
-                    + "整批文件传输收口后才进入解析，currentStage表示批次阶段，files为各文件当前步骤，overallPercent表示已处理文件占比")
+            description = "通过gis.progress SSE订阅接收同一批次的上传与空间元数据解析进度；"
+                    + "整批文件传输收口后才进入解析，stage表示当前阶段，activeFiles为正在解析的文件及步骤")
     @OperationLog(module = "GIS_FILE_UPLOAD", type = OperationType.SUBMIT,
             description = "分块流式上传GIS文件", recordResponse = true)
     public ResponseResult<Map<String, Object>> uploadChunk(

@@ -44,10 +44,8 @@ public class FileUploadConfig {
     @NotNull
     private Duration idleTimeout = Duration.ofHours(6);
 
-    /** 清理过期上传任务的调度间隔。 */
+    /** 清理过期上传暂存文件的调度间隔。 */
     @NotNull
     private Duration cleanupInterval = Duration.ofHours(1);
 
-    /** 单次清理任务最多处理的上传记录数量。 */
-    private int cleanupBatchSize = 100;
 }

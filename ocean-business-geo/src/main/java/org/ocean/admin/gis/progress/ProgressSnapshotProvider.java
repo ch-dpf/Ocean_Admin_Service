@@ -3,10 +3,11 @@ package org.ocean.admin.gis.progress;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.TaskStatus;
-import org.ocean.admin.gis.entity.GisFileTransferRecord;
+import org.ocean.admin.gis.entity.GisFileMeta;
+import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisTileSetArchive;
-import org.ocean.admin.gis.mapper.GisFileTransferRecordMapper;
 import org.ocean.admin.gis.mapper.GisProcessingTaskMapper;
 import org.ocean.admin.gis.mapper.GisTileSetArchiveMapper;
 import org.springframework.stereotype.Component;
@@ -22,15 +23,14 @@ import static org.ocean.admin.gis.progress.ProgressSnapshot.*;
 @Component
 @RequiredArgsConstructor
 public class ProgressSnapshotProvider {
-    private final GisFileTransferRecordMapper uploads;
+    private final GisFileMetaMapper files;
     private final GisProcessingTaskMapper processing;
     private final GisTileSetArchiveMapper archives;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ProgressSnapshot rebuild(String id) {
         Long epoch;
-        if (id.startsWith("upload_")) epoch = uploads.nextProgressEpoch(id);
-        else if (id.startsWith("archive_")) epoch = archives.nextProgressEpoch(id);
+        if (id.startsWith("archive_")) epoch = archives.nextProgressEpoch(id);
         else if (id.startsWith("terrain_") || id.startsWith("imagery_") || id.startsWith("vector_"))
             epoch = processing.nextProgressEpoch(id);
         else return null;
@@ -39,19 +39,6 @@ public class ProgressSnapshotProvider {
 
     /** 无副作用地读取业务状态，供补查修复丢失的终态通知。 */
     public ProgressSnapshot load(String id) {
-        if (id.startsWith("upload_")) {
-            GisFileTransferRecord r = uploads.selectOne(new LambdaQueryWrapper<GisFileTransferRecord>()
-                    .eq(GisFileTransferRecord::getRecordNo, id).eq(GisFileTransferRecord::getOperationType, "IMPORT"));
-            if (r == null) return null;
-            long epoch = Math.max(1, r.getProgressEpoch());
-            return snapshot(id, r.getRequestId(), "GIS_UPLOAD", null, "GIS文件接入", r.getRecordStatus(),
-                    r.getCurrentStage(), new ProgressSummary(r.getTotalCount(), r.getCompletedCount(),
-                            r.getFailedCount(), ProgressUnit.FILE),
-                    List.of(new Metric("CONFIRMED_BYTES", "确认落盘字节", r.getUploadedBytes(),
-                            r.getTotalBytes(), ProgressUnit.BYTE)),
-                    new Resource("FILE_TRANSFER_RECORD", id, "/api/gis/file-transfer-records/" + id),
-                    r.getErrorMessage(), r.getStartTime(), r.getFinishTime(), epoch);
-        }
         if (id.startsWith("archive_")) {
             GisTileSetArchive r = archives.selectOne(new LambdaQueryWrapper<GisTileSetArchive>()
                     .eq(GisTileSetArchive::getArchiveNo, id));
@@ -80,6 +67,43 @@ public class ProgressSnapshotProvider {
                     r.getErrorMessage(), r.getStartTime(), r.getFinishTime(), epoch);
         }
         return null;
+    }
+
+    public GisFileMeta ingestionFile(Long id) { return files.selectById(id); }
+
+    public boolean isExtracting(String id) {
+        GisFileMeta file = files.selectById(Long.valueOf(id));
+        return file != null && "RUNNING".equals(file.getMetadataStatus());
+    }
+
+    public List<String> ingestionIds(List<Long> ids) {
+        if (ids.isEmpty()) return List.of();
+        return files.selectList(new LambdaQueryWrapper<GisFileMeta>().in(GisFileMeta::getId, ids))
+                .stream().map(GisFileMeta::getIngestProgressId).filter(java.util.Objects::nonNull).distinct().toList();
+    }
+
+    public ProgressSummary ingestionSummary(String id, ProgressSnapshot snapshot) {
+        var counts = files.ingestionCounts(id);
+        long registrationFailed = snapshot.metrics().stream().filter(metric -> "REGISTRATION_FAILED".equals(metric.code()))
+                .mapToLong(Metric::value).findFirst().orElse(0);
+        return new ProgressSummary(snapshot.summary().total(), counts.succeeded(), counts.failed() + registrationFailed,
+                snapshot.summary().skipped(), ProgressUnit.FILE);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void failWaitingIngestion(String id) {
+        files.update(null, new LambdaUpdateWrapper<GisFileMeta>().eq(GisFileMeta::getIngestProgressId, id)
+                .eq(GisFileMeta::getMetadataStatus, "WAITING").set(GisFileMeta::getMetadataStatus, "FAILED")
+                .set(GisFileMeta::getMetadataLeaseExpiresAt, null).setSql("metadata_version = metadata_version + 1")
+                .set(GisFileMeta::getMetadataErrorCode, "INGESTION_INTERRUPTED")
+                .set(GisFileMeta::getMetadataErrorMessage, "接入中断，请删除失败记录后重新录入")
+                .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void detachIngestion(String id) {
+        files.update(null, new LambdaUpdateWrapper<GisFileMeta>().eq(GisFileMeta::getIngestProgressId, id)
+                .set(GisFileMeta::getIngestProgressId, null).set(GisFileMeta::getIngestFileIndex, null));
     }
 
     private ProgressSnapshot snapshot(String id, String correlation, String type, String category,

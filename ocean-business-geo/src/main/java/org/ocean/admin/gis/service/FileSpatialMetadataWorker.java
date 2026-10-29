@@ -27,7 +27,7 @@ public class FileSpatialMetadataWorker {
 
     @Scheduled(fixedDelayString = "${gis.metadata.poll-interval:5000}", initialDelayString = "${gis.metadata.initial-delay:5000}")
     public void scan() {
-        service.expireWorkspaceWaiting();
+        service.expireIngestionWaiting();
         for (Long fileId : mapper.selectCandidates(2)) {
             if (!submit(fileId)) break;
         }
