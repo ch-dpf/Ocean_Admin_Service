@@ -149,7 +149,7 @@ public class DataSetService {
     }
 
     private String generateDataSetCode() {
-        return "GIS_" + UUID.randomUUID().toString().replace("-", "").toUpperCase();
+        return "GEO_" + UUID.randomUUID().toString().replace("-", "").toUpperCase();
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -176,7 +176,7 @@ public class DataSetService {
         if (updated != 1) {
             throw new IllegalStateException("数据集更新失败: " + reqVO.getId());
         }
-        log.info("更新 GIS 数据集成功: id={}, name={}", reqVO.getId(), dataSetName);
+        log.info("更新数据集成功: id={}, name={}", reqVO.getId(), dataSetName);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -207,7 +207,7 @@ public class DataSetService {
                 .filter(file -> !"LOCAL".equals(file.getStorageType()))
                 .toList();
         if (!unsupportedStorage.isEmpty()) {
-            throw new IllegalStateException("暂不支持物理删除 "
+            throw new IllegalStateException("暂不支持删除 "
                     + unsupportedStorage.getFirst().getStorageType() + " 存储中的数据集文件");
         }
 
@@ -219,11 +219,11 @@ public class DataSetService {
                 .toList());
         processingInputMapper.detachTerminalByDataSetId(id);
         if (gisDataSetMapper.physicallyDeleteById(id) != 1) {
-            throw new IllegalStateException("数据集物理删除失败: " + id);
+            throw new IllegalStateException("数据集删除失败: " + id);
         }
         fileUploadUtil.deleteEmptyDataSetDirectory(id);
         events.publishEvent(new FileSpatialMetadataService.MetadataProgress(files.stream().map(GisFileMeta::getId).toList(), false));
-        log.info("永久删除 GIS 数据集成功: id={}, name={}, fileCount={}",
+        log.info("删除数据集成功: id={}, name={}, fileCount={}",
                 id, dataSet.getDataSetName(), files.size());
     }
 
@@ -330,8 +330,8 @@ public class DataSetService {
 
     /**
      * 确保数据集名称可用
-     * @param dataSetName
-     * @param excludedId
+      * @param dataSetName 数据集名称
+     * @param excludedId 排除的ID
      */
     private void ensureDataSetNameAvailable(String dataSetName, Long excludedId) {
         LambdaQueryWrapper<GisDataSet> query = new LambdaQueryWrapper<GisDataSet>()
