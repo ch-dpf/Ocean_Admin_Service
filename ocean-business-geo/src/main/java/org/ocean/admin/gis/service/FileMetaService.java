@@ -544,46 +544,8 @@ public class FileMetaService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public GisFileMetaVO createFileMeta(GisFileMetaVO reqVO) {
-        validateRequest(reqVO, false);
-        if (reqVO.getSourceType() != null && !"UPLOAD".equals(reqVO.getSourceType()))
-            throw new IllegalArgumentException("工作区文件请通过数据集工作区接入接口登记");
-        ensureDataSetExists(reqVO.getDataSetId());
-
-        String storageType = normalizeUpper(reqVO.getStorageType());
-        if (storageType == null) {
-            storageType = "LOCAL";
-        }
-        String storageKey = reqVO.getStorageKey().trim();
-        ensureStorageKeyAvailable(storageType, storageKey, null);
-
-        LocalDateTime now = LocalDateTime.now();
-        GisFileMeta meta = new GisFileMeta();
-        applyEditableFields(meta, reqVO, storageType, storageKey);
-        meta.setFileStatus(defaultStatus(reqVO.getFileStatus()));
-        meta.setCleanupStatus("NOT_REQUIRED");
-        meta.setMetadataStatus("QUEUED");
-        meta.setMetadataVersion(0L);
-        if (Long.valueOf(2).equals(gisDataSetMapper.selectById(meta.getDataSetId()).getCategoryId())) {
-            var snapshot = vectorDataSetStyles.require(meta.getDataSetId(), false);
-            meta.setVectorDatasetStyleId(snapshot.getId());
-            meta.setVectorPlacement(reqVO.getVectorPlacement() == null ? "AUTO" : reqVO.getVectorPlacement());
-        }
-        meta.setCreateTime(now);
-        meta.setUpdateTime(now);
-        meta.setDeleted(0);
-        if (gisFileMetaMapper.insert(meta) != 1) {
-            throw new IllegalStateException("文件元数据创建失败");
-        }
-        dataSetService.updateFileStatistics(null, meta);
-        log.info("创建 GIS 文件元数据成功: id={}, dataSetId={}, storageKey={}",
-                meta.getId(), meta.getDataSetId(), meta.getStorageKey());
-        return toVOWithCategory(meta);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
     public GisFileMetaVO updateFileMeta(GisFileMetaVO reqVO) {
-        validateRequest(reqVO, true);
+        validateRequest(reqVO);
         GisFileMeta existing = getRequiredForUpdate(reqVO.getId());
         if ("WORKSPACE".equals(existing.getSourceType()))
             throw new IllegalArgumentException("工作区来源信息由服务器维护，调整来源请删除记录后重新接入");
@@ -795,11 +757,11 @@ public class FileMetaService {
         return value instanceof CurrentOperator operator ? operator.userId() : null;
     }
 
-    private void validateRequest(GisFileMetaVO reqVO, boolean requireId) {
+    private void validateRequest(GisFileMetaVO reqVO) {
         if (reqVO == null) {
             throw new IllegalArgumentException("文件元数据请求不能为空");
         }
-        if (requireId && reqVO.getId() == null) {
+        if (reqVO.getId() == null) {
             throw new IllegalArgumentException("文件元数据ID不能为空");
         }
         if (reqVO.getDataSetId() == null) {
@@ -921,11 +883,6 @@ public class FileMetaService {
                 record.setCategoryId(dataSet.getCategoryId());
             }
         });
-    }
-
-    private String defaultStatus(String value) {
-        String normalized = normalizeUpper(value);
-        return normalized == null ? "READY" : normalized;
     }
 
     private String normalizeExtension(String value) {

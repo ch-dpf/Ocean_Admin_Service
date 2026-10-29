@@ -16,16 +16,15 @@ import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 
 /**
- * GIS数据管理
+ * GEO数据管理
  *
  * @author DeepOcean
  * @since 2026-09-11
  */
-@Tag(name = "GIS文件元数据管理", description = "GIS文件元数据管理接口")
+@Tag(name = "文件元数据管理", description = "文件元数据管理接口")
 @RestController
 @RequestMapping("/api/gis/filemeta")
 @RequiredArgsConstructor
@@ -36,7 +35,7 @@ public class FileMetaController {
     @PostMapping("/workspace-files")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(summary = "服务器工作区接入数据")
-    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT, description = "工作区数据接入")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT, description = "添加数据--工作区数据接入")
     public ResponseResult<GisFileMetaVO.WorkspaceSubmission> addWorkspaceFiles(
             @Parameter(description = "所属数据集ID", required = true)
             @RequestParam("dataSetId") Long dataSetId,
@@ -58,14 +57,6 @@ public class FileMetaController {
     public ResponseResult<String> retryMetadata(@PathVariable Long id) {
         fileMetaService.retryMetadata(id);
         return ResponseResult.success("已提交元数据提取任务");
-    }
-
-    @PostMapping("/create")
-    @Operation(summary = "创建文件元数据")
-    @OperationLog(module = "GIS_FILE_META", type = OperationType.INSERT, description = "创建GIS文件元数据",
-            recordResponse = true)
-    public ResponseResult<GisFileMetaVO> createFileMeta(@Valid @RequestBody GisFileMetaVO reqVO) {
-        return ResponseResult.success("创建成功", fileMetaService.createFileMeta(reqVO));
     }
 
     @PutMapping("/update")
