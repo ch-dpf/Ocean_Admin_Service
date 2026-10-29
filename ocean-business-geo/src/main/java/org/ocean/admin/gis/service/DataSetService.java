@@ -7,20 +7,19 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
+import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
-import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
-import org.ocean.admin.kernel.common.PageResult;
-import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.vo.GisDataSetVO;
-import org.springframework.stereotype.Service;
+import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -42,9 +41,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DataSetService {
 
-    private final GisVectorMapper vectorMapper;
     private final VectorDataSetStyleService vectorDataSetStyles;
-
     private final GisDataSetMapper gisDataSetMapper;
     private final GisFileMetaMapper gisFileMetaMapper;
     private final GisProcessingInputMapper processingInputMapper;
