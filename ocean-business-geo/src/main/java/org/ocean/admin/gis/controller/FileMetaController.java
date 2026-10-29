@@ -53,16 +53,15 @@ public class FileMetaController {
 
     @PostMapping("/{id}/metadata/retry")
     @Operation(summary = "重新提取文件空间元数据")
-    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT, description = "重新提取GIS空间元数据")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT, description = "重新提取空间元数据")
     public ResponseResult<String> retryMetadata(@PathVariable Long id) {
         fileMetaService.retryMetadata(id);
         return ResponseResult.success("已提交元数据提取任务");
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "删除管理文件",
-            description = "删除文件元数据；上传来源同时删除托管文件，工作区来源保留源文件；活动处理任务引用时拒绝删除")
-    @OperationLog(module = "GIS_FILE_META", type = OperationType.DELETE, description = "永久删除GIS文件")
+    @Operation(summary = "删除管理文件")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.DELETE, description = "删除文件")
     public ResponseResult<String> deleteFileMeta(@PathVariable Long id) {
         fileMetaService.deleteFileMeta(id);
         return ResponseResult.success("删除成功");
@@ -77,7 +76,7 @@ public class FileMetaController {
     @GetMapping("/{id}/download")
     @Operation(summary = "下载文件数据",
             description = "下载已入库文件的原始内容，支持单区间 Range 断点续传与 HEAD 探测")
-    @OperationLog(module = "GIS_FILE_META", type = OperationType.EXPORT, description = "下载GIS文件数据")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.EXPORT, description = "下载文件数据")
     public void downloadFile(
             @Parameter(description = "文件元数据ID", required = true)
             @PathVariable Long id,
