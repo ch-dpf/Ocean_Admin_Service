@@ -142,9 +142,11 @@ public class DataSetService {
         if (gisDataSetMapper.insert(dataSet) != 1) {
             throw new IllegalStateException("数据集创建失败");
         }
-        if (Long.valueOf(2).equals(dataSet.getCategoryId())) vectorDataSetStyles.initialize(dataSet.getId());
-
-        log.info("创建 GIS 数据集成功: id={}, code={}, name={}",
+        // 矢量数据集初始化样式
+        if (Long.valueOf(2).equals(dataSet.getCategoryId())) {
+            vectorDataSetStyles.initialize(dataSet.getId());
+        }
+        log.info("创建数据集成功: id={}, code={}, name={}",
                 dataSet.getId(), dataSet.getDataSetCode(), dataSet.getDataSetName());
         return toVO(dataSet);
     }
@@ -156,29 +158,21 @@ public class DataSetService {
     @Transactional(rollbackFor = Exception.class)
     public void updateDataset(GisDataSetVO reqVO) {
         validateDataSetRequest(reqVO, true);
-
         GisDataSet existing = gisDataSetMapper.selectById(reqVO.getId());
         if (existing == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数据集不存在或已删除: " + reqVO.getId());
         }
-
+        if (!existing.getCategoryId().equals(reqVO.getCategoryId())) {
+            throw new IllegalArgumentException("不允许更改数据集分类，请新建目标分类数据集");
+        }
         String dataSetName = reqVO.getDataSetName().trim();
         ensureDataSetNameAvailable(dataSetName, reqVO.getId());
-
-        if (!existing.getCategoryId().equals(reqVO.getCategoryId())) {
-            if (Long.valueOf(2).equals(existing.getCategoryId()) || Long.valueOf(2).equals(reqVO.getCategoryId())) {
-                throw new IllegalArgumentException("矢量数据集的类别不可直接切换，请新建目标类别数据集");
-            }
-            // 推荐层级依赖分类，分类变化后旧结果与正在提取的版本均失效。
-            spatialMetadataMapper.invalidateDataSetRasters(reqVO.getId());
-        }
 
         int updated = gisDataSetMapper.update(
                 null,
                 new LambdaUpdateWrapper<GisDataSet>()
                         .eq(GisDataSet::getId, reqVO.getId())
                         .set(GisDataSet::getDataSetName, dataSetName)
-                        .set(GisDataSet::getCategoryId, reqVO.getCategoryId())
                         .set(GisDataSet::getDescription, reqVO.getDescription())
                         .set(GisDataSet::getUpdateTime, LocalDateTime.now())
         );
@@ -206,7 +200,6 @@ public class DataSetService {
             throw new IllegalStateException("数据集文件正在被处理任务使用，请等待任务结束后重试: "
                     + task.taskName() + " (" + task.taskNo() + ", " + task.taskStatus() + ")");
         }
-
         List<GisFileMeta> files = gisFileMetaMapper.selectAllByDataSetIdForUpdate(id);
         if (files.stream().anyMatch(file -> "RUNNING".equals(file.getMetadataStatus()))) {
             throw new IllegalStateException("数据集仍有文件正在提取空间元数据，请等待处理结束后重试");
@@ -263,15 +256,16 @@ public class DataSetService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数据集不存在或已删除: " + id);
         }
         GisDataSetVO result = toVO(dataSet);
-        if (Long.valueOf(2).equals(dataSet.getCategoryId())) {
-            var s = vectorMapper.dataSetStyle(id);
-            if (s != null) result.setVectorStyle(new GisDataSetVO.VectorStyleSummary(s.getId().toString(), s.getTemplateId(),
-                    s.getTemplateVersion(), s.getStyleVersion(), s.getDataRevision(), s.getDisplayRevision()));
-        }
         populateFileInformation(List.of(result), includeFootprints, tolerance);
         return result;
     }
 
+    /**
+     * 填充数据集文件信息
+     * @param records   数据集记录
+     * @param includeFootprints 是否包含脚印信息
+     * @param tolerance 简化容差
+     */
     private void populateFileInformation(List<GisDataSetVO> records, boolean includeFootprints, double tolerance) {
         if (records.isEmpty()) return;
         List<Long> ids = records.stream().map(GisDataSetVO::getId).toList();
@@ -300,6 +294,10 @@ public class DataSetService {
         }
     }
 
+    /**
+     * 填充数据集文件点
+     * @param records 数据集记录
+     */
     private void populateFilePoints(List<GisDataSetVO> records) {
         if (records.isEmpty()) return;
         Map<Long, List<GisDataSetVO.FilePoint>> points = gisFileMetaMapper.selectDataSetFilePoints(
@@ -310,6 +308,11 @@ public class DataSetService {
         }
     }
 
+    /**
+     * 验证数据集请求
+     * @param reqVO 数据集请求
+     * @param requireId 是否需要ID
+     */
     private void validateDataSetRequest(GisDataSetVO reqVO, boolean requireId) {
         if (reqVO == null) {
             throw new IllegalArgumentException("数据集请求不能为空");
@@ -328,6 +331,11 @@ public class DataSetService {
         }
     }
 
+    /**
+     * 确保数据集名称可用
+     * @param dataSetName
+     * @param excludedId
+     */
     private void ensureDataSetNameAvailable(String dataSetName, Long excludedId) {
         LambdaQueryWrapper<GisDataSet> query = new LambdaQueryWrapper<GisDataSet>()
                 .eq(GisDataSet::getDataSetName, dataSetName)
@@ -337,6 +345,11 @@ public class DataSetService {
         }
     }
 
+    /**
+     * 将数据集实体转换为数据集VO
+     * @param dataSet 数据集实体
+     * @return 数据集VO
+     */
     private GisDataSetVO toVO(GisDataSet dataSet) {
         GisDataSetVO result = new GisDataSetVO();
         result.setId(dataSet.getId());

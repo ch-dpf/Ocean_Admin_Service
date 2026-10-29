@@ -31,10 +31,6 @@ public class GisDataSetVO {
     )
     @NotNull(message = "数据类别不能为空")
     private Long categoryId;
-    @Schema(description = "矢量样式快照摘要，仅详情返回，不含规则与几何", accessMode = Schema.AccessMode.READ_ONLY)
-    private VectorStyleSummary vectorStyle;
-    public record VectorStyleSummary(String snapshotId, String templateId, int templateVersion,
-            long styleVersion, long dataRevision, long displayRevision) { }
 
     @Schema(description = "数据集描述")
     private String description;

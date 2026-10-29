@@ -26,7 +26,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/gis/dataSet")
-@Tag(name = "GIS数据集管理", description = "GIS数据集管理接口")
+@Tag(name = "数据集管理", description = "数据集管理接口")
 @RequiredArgsConstructor
 public class DataSetController {
 
@@ -35,12 +35,11 @@ public class DataSetController {
 
     @PostMapping("/{id}/workspace-files")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    @Operation(summary = "从受控服务器工作区接入数据",
-            description = "自动识别文件或目录，扫描登记收口后再异步提取空间元信息；progress快照的activeFiles提供并行文件解析工作量。原位引用，不创建传输记录")
+    @Operation(summary = "服务器工作区接入数据")
     @OperationLog(module = "GIS_DATASET", type = OperationType.SUBMIT, description = "工作区数据接入")
     public ResponseResult<GisFileMetaVO.WorkspaceSubmission> addWorkspaceFiles(
             @PathVariable Long id, @Valid @RequestBody GisFileMetaVO.WorkspaceRequest request) {
-        return ResponseResult.success("工作区接入已受理，请按progress.progressId跟踪进度",
+        return ResponseResult.success("服务器工作区数据接入启动，请按progress.progressId跟踪进度",
                 fileMetaService.addWorkspaceFiles(id, request));
     }
 
@@ -67,7 +66,7 @@ public class DataSetController {
 
     @PostMapping("/create")
     @Operation(summary = "创建数据集")
-    @OperationLog(module = "GIS_DATASET", type = OperationType.INSERT, description = "创建GIS数据集",
+    @OperationLog(module = "GIS_DATASET", type = OperationType.INSERT, description = "创建数据集",
             recordResponse = true)
     public ResponseResult<GisDataSetVO> createDataset(@RequestBody GisDataSetVO reqVO) {
         GisDataSetVO created = dataSetService.createDataset(reqVO);
@@ -76,7 +75,7 @@ public class DataSetController {
 
     @PutMapping("/update")
     @Operation(summary = "更新数据集")
-    @OperationLog(module = "GIS_DATASET", type = OperationType.UPDATE, description = "更新GIS数据集")
+    @OperationLog(module = "GIS_DATASET", type = OperationType.UPDATE, description = "更新数据集")
     public ResponseResult<String> updateDataset(@RequestBody GisDataSetVO reqVO) {
         dataSetService.updateDataset(reqVO);
         return ResponseResult.success("更新成功");
@@ -84,7 +83,7 @@ public class DataSetController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除数据集")
-    @OperationLog(module = "GIS_DATASET", type = OperationType.DELETE, description = "删除GIS数据集")
+    @OperationLog(module = "GIS_DATASET", type = OperationType.DELETE, description = "删除数据集")
     public ResponseResult<String> deleteDataset(@PathVariable Long id) {
         dataSetService.deleteDataset(id);
         return ResponseResult.success("删除成功");
@@ -97,7 +96,7 @@ public class DataSetController {
     }
 
     @GetMapping("/{id}/footprints")
-    @Operation(summary = "获取数据集详情（含文件覆盖轮廓）")
+    @Operation(summary = "获取数据集详情（覆盖轮廓）")
     public ResponseResult<GisDataSetVO> getDatasetFootprints(
             @PathVariable Long id,
             @Parameter(description = "拓扑保持简化容差，单位为度，范围0至1；0返回完整几何")
