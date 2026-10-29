@@ -4,10 +4,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
-import org.ocean.admin.gis.service.FileMetaService;
-import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
@@ -31,17 +27,6 @@ import java.util.List;
 public class DataSetController {
 
     private final DataSetService dataSetService;
-    private final FileMetaService fileMetaService;
-
-    @PostMapping("/{id}/workspace-files")
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    @Operation(summary = "服务器工作区接入数据")
-    @OperationLog(module = "GIS_DATASET", type = OperationType.SUBMIT, description = "工作区数据接入")
-    public ResponseResult<GisFileMetaVO.WorkspaceSubmission> addWorkspaceFiles(
-            @PathVariable Long id, @Valid @RequestBody GisFileMetaVO.WorkspaceRequest request) {
-        return ResponseResult.success("服务器工作区数据接入启动，请按progress.progressId跟踪进度",
-                fileMetaService.addWorkspaceFiles(id, request));
-    }
 
     @GetMapping("/page")
     @Operation(summary = "获取数据集分页")

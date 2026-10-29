@@ -69,7 +69,7 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 ## 从受控服务器工作区接入数据
 
-`POST /api/gis/dataSet/{id}/workspace-files` 原位接入服务器文件，不复制、不移动源文件，也不创建文件传输记录或切片处理任务。工作区沿用 `gis.processing.workspaces` 配置。接口只校验入口，立即以HTTP 202返回 `dataSetId` 和统一 `progress` 引用（`progressId`、`type=GIS_WORKSPACE_IMPORT`、`status=QUEUED`、`queryUrl`、`eventsUrl`），目录遍历、登记及空间提取进度均在后台推进。
+`POST /api/gis/filemeta/workspace-files?dataSetId={id}` 原位接入服务器文件，必填查询参数 `dataSetId` 指定所属数据集。不复制、不移动源文件，也不创建文件传输记录或切片处理任务。工作区沿用 `gis.processing.workspaces` 配置。接口只校验入口，立即以HTTP 202返回 `dataSetId` 和统一 `progress` 引用（`progressId`、`type=GIS_WORKSPACE_IMPORT`、`status=QUEUED`、`queryUrl`、`eventsUrl`），目录遍历、登记及空间提取进度均在后台推进。
 
 ```json
 {"workspaceCode":"DEFAULT","relativePath":"survey/2026","includeSubdirectories":true,"vectorPlacement":"AUTO"}

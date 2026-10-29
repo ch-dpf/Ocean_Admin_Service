@@ -14,6 +14,7 @@ import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,6 +32,18 @@ import java.util.List;
 public class FileMetaController {
 
     private final FileMetaService fileMetaService;
+
+    @PostMapping("/workspace-files")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @Operation(summary = "服务器工作区接入数据")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT, description = "工作区数据接入")
+    public ResponseResult<GisFileMetaVO.WorkspaceSubmission> addWorkspaceFiles(
+            @Parameter(description = "所属数据集ID", required = true)
+            @RequestParam("dataSetId") Long dataSetId,
+            @Valid @RequestBody GisFileMetaVO.WorkspaceRequest request) {
+        return ResponseResult.success("服务器工作区数据接入启动，请按progress.progressId跟踪进度",
+                fileMetaService.addWorkspaceFiles(dataSetId, request));
+    }
 
     @GetMapping("/page")
     @Operation(summary = "分页查询文件元数据")
