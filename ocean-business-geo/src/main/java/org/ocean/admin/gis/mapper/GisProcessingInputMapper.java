@@ -33,16 +33,18 @@ public interface GisProcessingInputMapper extends BaseMapper<GisProcessingInput>
     List<ActiveTaskReference> selectActiveByFileMetaId(@Param("fileMetaId") Long fileMetaId);
 
     @Select("""
-            SELECT DISTINCT t.id AS task_id, t.task_no, t.task_name, t.task_status
-            FROM ocean_gis.gis_processing_input i
-            JOIN ocean_gis.gis_processing_task t ON t.id = i.task_id
-            LEFT JOIN ocean_gis.gis_file_meta f ON f.id = i.file_meta_id
-            WHERE COALESCE(i.source_data_set_id, f.data_set_id) = #{dataSetId}
-              AND t.deleted = 0
+            SELECT t.id AS task_id, t.task_no, t.task_name, t.task_status
+            FROM ocean_gis.gis_processing_task t
+            WHERE t.deleted = 0
               AND t.task_status IN ('QUEUED', 'RUNNING')
+              AND EXISTS (
+                  SELECT 1 FROM ocean_gis.gis_processing_input i
+                  WHERE i.task_id = t.id AND i.source_data_set_id = #{dataSetId}
+              )
             ORDER BY t.id
+            LIMIT 1
             """)
-    List<ActiveTaskReference> selectActiveByDataSetId(@Param("dataSetId") Long dataSetId);
+    ActiveTaskReference selectFirstActiveByDataSetId(@Param("dataSetId") Long dataSetId);
 
     @Update("""
             UPDATE ocean_gis.gis_processing_input i
@@ -59,10 +61,8 @@ public interface GisProcessingInputMapper extends BaseMapper<GisProcessingInput>
             SET file_meta_id = NULL, update_time = CURRENT_TIMESTAMP
             FROM ocean_gis.gis_processing_task t
             WHERE t.id = i.task_id
-              AND COALESCE(i.source_data_set_id, (
-                    SELECT f.data_set_id FROM ocean_gis.gis_file_meta f
-                    WHERE f.id = i.file_meta_id
-                  )) = #{dataSetId}
+              AND i.source_data_set_id = #{dataSetId}
+              AND i.file_meta_id IS NOT NULL
               AND t.task_status IN ('COMPLETED', 'PARTIAL_FAILED', 'FAILED')
             """)
     int detachTerminalByDataSetId(@Param("dataSetId") Long dataSetId);

@@ -83,8 +83,7 @@ public class DataSetController {
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "删除数据集",
-            description = "删除数据集、托管物理文件及自有矢量数据；工作区源文件保留")
+    @Operation(summary = "删除数据集")
     @OperationLog(module = "GIS_DATASET", type = OperationType.DELETE, description = "删除GIS数据集")
     public ResponseResult<String> deleteDataset(@PathVariable Long id) {
         dataSetService.deleteDataset(id);

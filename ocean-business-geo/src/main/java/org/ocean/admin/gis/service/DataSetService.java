@@ -197,13 +197,12 @@ public class DataSetService {
         if (dataSet == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数据集不存在或已删除: " + id);
         }
-        if (gisDataSetMapper.countActiveTransfersByDataSetId(id) > 0) {
+        if (gisDataSetMapper.existsActiveTransfersByDataSetId(id)) {
             throw new IllegalStateException("数据集存在正在上传或下载的文件，请等待传输结束后重试");
         }
-        List<GisProcessingInputMapper.ActiveTaskReference> activeTasks =
-                processingInputMapper.selectActiveByDataSetId(id);
-        if (!activeTasks.isEmpty()) {
-            var task = activeTasks.getFirst();
+        GisProcessingInputMapper.ActiveTaskReference task =
+                processingInputMapper.selectFirstActiveByDataSetId(id);
+        if (task != null) {
             throw new IllegalStateException("数据集文件正在被处理任务使用，请等待任务结束后重试: "
                     + task.taskName() + " (" + task.taskNo() + ", " + task.taskStatus() + ")");
         }
