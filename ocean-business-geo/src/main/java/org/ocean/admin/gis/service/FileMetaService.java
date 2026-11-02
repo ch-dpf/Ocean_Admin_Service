@@ -468,10 +468,7 @@ public class FileMetaService {
     }
 
     /**
-     * 下载已入库文件的原始内容，支持单区间 Range 与 HEAD 请求。
-     *
-     * <p>文件范围优先交给 Tomcat sendfile，连接器不支持时由应用流式写出。
-     * 下载操作由统一操作日志留痕。</p>
+     * 文件下载
      */
     public void downloadFile(
             Long id,

@@ -22,7 +22,7 @@ import java.util.function.Consumer;
 @Component
 @RequiredArgsConstructor
 public class GeoJsonFeatureReader {
-    private static final int MAX_VERTICES = 100_000;
+    private static final int MAX_VERTICES = 200_000;
     private static final int MAX_NODES = 400_000;
     private static final int MAX_TEXT = 4 * 1024 * 1024;
     private static final Set<String> WGS84_SOURCE_CRS_NAMES = Set.of(
@@ -284,7 +284,7 @@ public class GeoJsonFeatureReader {
         if (point.size() > 3) throw new IllegalArgumentException("仅支持 XY 或 XYZ 坐标");
         if (state.dimensions != 0 && point.size() != state.dimensions) throw new IllegalArgumentException("单要素不能混合 XY 和 XYZ 坐标");
         state.dimensions = point.size();
-        if (++state.vertices > MAX_VERTICES) throw new IllegalArgumentException("单要素不能超过100000个顶点");
+        if (++state.vertices > MAX_VERTICES) throw new IllegalArgumentException("单要素不能超过" + MAX_VERTICES + "个顶点");
         for (int i = 0; i < point.size(); i++) {
             if (!point.get(i).isNumber() || !Double.isFinite(point.get(i).asDouble())) {
                 throw new IllegalArgumentException("坐标必须为有限数值");

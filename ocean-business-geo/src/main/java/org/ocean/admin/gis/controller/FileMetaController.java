@@ -66,8 +66,7 @@ public class FileMetaController {
     }
 
     @GetMapping("/{id}/download")
-    @Operation(summary = "下载文件数据",
-            description = "下载已入库文件的原始内容，支持单区间 Range 断点续传与 HEAD 探测")
+    @Operation(summary = "下载文件数据")
     @OperationLog(module = "GIS_FILE_META", type = OperationType.EXPORT, description = "下载文件数据")
     public void downloadFile(
             @Parameter(description = "文件元数据ID", required = true)
