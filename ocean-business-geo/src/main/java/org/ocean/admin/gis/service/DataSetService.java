@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
+import org.ocean.admin.gis.entity.GisDataSetCategory;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
@@ -24,6 +25,7 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -49,6 +51,23 @@ public class DataSetService {
     private final FileUploadUtil fileUploadUtil;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher events;
+
+    /** 按固定分类返回全部未删除数据集数量，空分类补零。 */
+    @Transactional(readOnly = true)
+    public GisDataSetVO.CategorySummary getDataSetCategories() {
+        Map<Long, Long> counts = gisDataSetMapper.selectCategoryCounts().stream()
+                .collect(Collectors.toMap(GisDataSetMapper.CategoryCount::categoryId,
+                        GisDataSetMapper.CategoryCount::dataSetCount));
+        List<GisDataSetVO.CategoryStatistics> categories = new ArrayList<>();
+        long totalCount = 0;
+        for (GisDataSetCategory category : GisDataSetCategory.values()) {
+            long dataSetCount = counts.getOrDefault(category.categoryId(), 0L);
+            categories.add(new GisDataSetVO.CategoryStatistics(
+                    category.categoryId(), category.categoryName(), dataSetCount));
+            totalCount += dataSetCount;
+        }
+        return new GisDataSetVO.CategorySummary(totalCount, categories);
+    }
 
     /** 调用方必须在文件写入事务内提供变更前后快照；文件数与大小均只统计未删除的 READY 文件。 */
     @Transactional(propagation = Propagation.MANDATORY)
@@ -320,7 +339,7 @@ public class DataSetService {
         if (reqVO.getCategoryId() == null) {
             throw new IllegalArgumentException("数据类别不能为空");
         }
-        if (reqVO.getCategoryId() < 0 || reqVO.getCategoryId() > 2) {
+        if (!GisDataSetCategory.isValid(reqVO.getCategoryId())) {
             throw new IllegalArgumentException("数据类别只能为0-影像数据、1-地形数据、2-矢量数据");
         }
     }

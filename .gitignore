@@ -6,6 +6,7 @@ logs/
 *.log
 .env
 .cursor/
+.runtime/
 **/src/test/
 /gis/uploads/
 /gis/processing/

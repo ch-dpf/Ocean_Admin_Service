@@ -3,7 +3,6 @@ package org.ocean.admin.gis.progress;
 import org.ocean.admin.gis.dto.TaskStatus;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 
 /** 查询、缓存及进度事件共用的完整不可变快照。 */
@@ -76,8 +75,4 @@ public record ProgressSnapshot(String progressId, String correlationId, String t
     public record FileWork(String fileId, String fileName, ProgressStage stage, TaskStatus status, long runVersion) { }
     public record ErrorInfo(String code, String message) { }
 
-    public static ProgressStage normalizeStage(ProgressStage stage) {
-        return new ProgressStage(stage.code().toUpperCase(Locale.ROOT), stage.message(),
-                stage.completed(), stage.total(), stage.unit());
-    }
 }

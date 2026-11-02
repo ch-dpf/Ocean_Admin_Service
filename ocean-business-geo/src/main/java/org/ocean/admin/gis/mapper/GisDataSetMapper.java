@@ -8,12 +8,25 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 import org.ocean.admin.gis.entity.GisDataSet;
 
+import java.util.List;
+
 /**
  * @author DeepOcean
  * @since 2026-09-11
  */
 @Mapper
 public interface GisDataSetMapper extends BaseMapper<GisDataSet> {
+    @Select("""
+            SELECT category_id, COUNT(*) AS data_set_count
+            FROM ocean_gis.gis_data_set
+            WHERE deleted = 0
+            GROUP BY category_id
+            """)
+    List<CategoryCount> selectCategoryCounts();
+
+    /** 分类分组统计的数据库查询投影。 */
+    record CategoryCount(Long categoryId, long dataSetCount) { }
+
     @Select("SELECT * FROM ocean_gis.gis_data_set WHERE id = #{id} AND deleted = 0 FOR UPDATE")
     GisDataSet selectActiveByIdForUpdate(@Param("id") Long id);
 

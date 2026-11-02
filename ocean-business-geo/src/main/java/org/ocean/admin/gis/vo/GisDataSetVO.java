@@ -17,6 +17,17 @@ import tools.jackson.databind.JsonNode;
 @Data
 public class GisDataSetVO {
 
+    @Schema(description = "数据集分类统计汇总")
+    public record CategorySummary(
+            @Schema(description = "全部未删除数据集数量") long totalCount,
+            @Schema(description = "按影像、地形、矢量顺序返回的分类统计") List<CategoryStatistics> categories) { }
+
+    @Schema(description = "单个分类的数据集统计")
+    public record CategoryStatistics(
+            @Schema(description = "分类编码：0-影像、1-地形、2-矢量") Long categoryId,
+            @Schema(description = "分类名称") String categoryName,
+            @Schema(description = "该分类下未删除数据集数量") long dataSetCount) { }
+
     @Schema(description = "ID")
     private Long id;
 
