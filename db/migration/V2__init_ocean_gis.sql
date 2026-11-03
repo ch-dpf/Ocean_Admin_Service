@@ -815,6 +815,7 @@ CREATE INDEX idx_gis_tile_set_archive_create_time
 CREATE TABLE ocean_gis.gis_publication (
     id                  BIGINT       PRIMARY KEY,
     service_code        VARCHAR(64)  NOT NULL,
+    service_name        VARCHAR(200) NOT NULL,
     tile_set_id         BIGINT       NOT NULL,
     data_set_id         BIGINT,
     status              VARCHAR(20)  NOT NULL DEFAULT 'PUBLISHED',
@@ -834,6 +835,7 @@ CREATE TABLE ocean_gis.gis_publication (
 );
 
 COMMENT ON TABLE ocean_gis.gis_publication IS '静态瓦片集的公开发布记录';
+COMMENT ON COLUMN ocean_gis.gis_publication.service_name IS '可重命名的服务名称';
 COMMENT ON COLUMN ocean_gis.gis_publication.service_code IS '公开服务 URL 中使用的稳定编码';
 COMMENT ON COLUMN ocean_gis.gis_publication.tile_set_id IS '被发布的静态瓦片集 ID';
 

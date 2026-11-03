@@ -4,6 +4,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.service.PublicationService;
 import org.ocean.admin.gis.vo.GisPublicationVO;
@@ -31,6 +35,25 @@ import java.util.List;
 public class PublicationController {
 
     private final PublicationService publicationService;
+
+    /** 发布和重命名共用的服务名称请求。 */
+    public record ServiceNameRequest(@NotBlank @Size(max = 200) String serviceName) {
+        public ServiceNameRequest {
+            if (serviceName != null) serviceName = serviceName.strip();
+        }
+    }
+
+    @PutMapping("/{processingType}/{serviceCode}/name")
+    @Operation(summary = "重命名GIS服务")
+    @OperationLog(module = "GIS_PUBLICATION", type = OperationType.UPDATE,
+            description = "重命名GIS服务", recordResponse = true)
+    public ResponseResult<GisPublicationVO> rename(
+            @PathVariable GisProcessingType processingType,
+            @PathVariable String serviceCode,
+            @Valid @RequestBody ServiceNameRequest request) {
+        return ResponseResult.success("服务名称已更新",
+                publicationService.rename(processingType, serviceCode, request.serviceName()));
+    }
 
     @GetMapping("/page")
     @Operation(summary = "分页查询GIS发布记录")
@@ -63,9 +86,10 @@ public class PublicationController {
     public ResponseResult<GisPublicationVO> publish(
             @Parameter(description = "发布类型：TERRAIN 或 IMAGERY")
             @PathVariable GisProcessingType processingType,
-            @PathVariable Long sourceTaskId) {
+            @PathVariable Long sourceTaskId,
+            @Valid @RequestBody ServiceNameRequest request) {
         return ResponseResult.success("GIS服务发布成功",
-                publicationService.publish(processingType, sourceTaskId));
+                publicationService.publish(processingType, sourceTaskId, request.serviceName()));
     }
 
     @GetMapping("/{processingType}/{serviceCode}")

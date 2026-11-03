@@ -1,6 +1,7 @@
 package org.ocean.admin.gis.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisPublication;
@@ -96,7 +97,8 @@ public class PublicationRecordService {
 
     @Transactional(rollbackFor = Exception.class)
     public GisPublication publish(
-            GisTileSet tileSet, String initialServiceCode, String displayName) {
+            GisTileSet tileSet, String initialServiceCode, String displayName, String serviceName) {
+        String normalizedName = normalizeServiceName(serviceName);
         GisPublication publication = publicationMapper.selectOne(
                 new LambdaQueryWrapper<GisPublication>()
                         .eq(GisPublication::getTileSetId, tileSet.getId()));
@@ -111,6 +113,7 @@ public class PublicationRecordService {
             publication.setDataSetId(commonDataSetId(tileSet.getTaskId()));
             publication.setDeleted(0);
         }
+        publication.setServiceName(normalizedName);
         publication.setStatus(PUBLISHED);
         publication.setPublishTime(now);
         publication.setUpdateTime(now);
@@ -130,11 +133,40 @@ public class PublicationRecordService {
         if (!DISABLED.equals(publication.getStatus())) {
             publication.setStatus(DISABLED);
             publication.setUpdateTime(LocalDateTime.now());
-            if (publicationMapper.updateById(publication) != 1) {
+            if (publicationMapper.update(null, new LambdaUpdateWrapper<GisPublication>()
+                    .eq(GisPublication::getId, publication.getId())
+                    .set(GisPublication::getStatus, DISABLED)
+                    .set(GisPublication::getUpdateTime, publication.getUpdateTime())) != 1) {
                 throw new IllegalStateException(displayName + "停用失败: " + serviceCode);
             }
         }
         return publication;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public GisPublication rename(GisProcessingType processingType, String serviceCode, String serviceName) {
+        String normalizedName = normalizeServiceName(serviceName);
+        GisPublication publication = getRequired(processingType, serviceCode);
+        LocalDateTime now = LocalDateTime.now();
+        // 仅更新名称与时间，避免覆盖并发停用操作修改的状态。
+        int affected = publicationMapper.update(null, new LambdaUpdateWrapper<GisPublication>()
+                .eq(GisPublication::getId, publication.getId())
+                .set(GisPublication::getServiceName, normalizedName)
+                .set(GisPublication::getUpdateTime, now));
+        if (affected != 1) {
+            throw new IllegalStateException("服务重命名失败: " + serviceCode);
+        }
+        publication.setServiceName(normalizedName);
+        publication.setUpdateTime(now);
+        return publication;
+    }
+
+    private String normalizeServiceName(String serviceName) {
+        String name = serviceName == null ? "" : serviceName.strip();
+        if (name.isBlank() || name.length() > 200) {
+            throw new IllegalArgumentException("服务名称不能为空且最多200个字符");
+        }
+        return name;
     }
 
     public GisTileSet getRequiredTileSet(Long taskId, GisProcessingType processingType) {
