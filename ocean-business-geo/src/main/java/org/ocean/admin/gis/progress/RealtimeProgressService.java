@@ -214,7 +214,8 @@ public class RealtimeProgressService {
         if (id == null) return;
         ProgressSnapshot result = change(id, old -> {
             if (old.status().isTerminal() || !"EXTRACTING_METADATA".equals(old.stage().code())) return old;
-            ProgressSummary summary = provider.ingestionSummary(id, old);
+            var ingestion = provider.ingestionProgress(id, old);
+            ProgressSummary summary = ingestion.summary();
             long registrationFailed = old.metrics().stream().filter(metric -> "REGISTRATION_FAILED".equals(metric.code()))
                     .mapToLong(Metric::value).findFirst().orElse(0);
             long total = summary.total() - summary.skipped() - registrationFailed;
@@ -225,14 +226,15 @@ public class RealtimeProgressService {
                 status = TaskStatus.RUNNING;
             } else if (summary.failed() == 0) {
                 status = TaskStatus.COMPLETED;
-            } else if (summary.succeeded() + summary.skipped() == 0) {
+            } else if (summary.succeeded() == 0) {
                 status = TaskStatus.FAILED;
             } else {
                 status = TaskStatus.PARTIAL_FAILED;
             }
-            String message = (done ? "接入结束" : "空间元数据解析中") + "，成功" + summary.succeeded()
-                    + "个，失败" + summary.failed() + "个，跳过" + summary.skipped() + "个";
-            ProgressStage stage = done || total == 0 ? ProgressStage.indeterminate(status.name(), message)
+            String message = (done ? "接入结束" : "空间元数据解析中") + "，空间解析成功" + summary.succeeded()
+                    + "个，受影响失败" + summary.failed() + "个，跳过解析" + summary.skipped() + "个";
+            ProgressStage stage = done ? ProgressStage.indeterminate(status.name(), message)
+                    : total == 0 ? ProgressStage.indeterminate("EXTRACTING_METADATA", message)
                     : ProgressStage.determinate("EXTRACTING_METADATA", message, processed, total, ProgressUnit.FILE);
             List<FileWork> active = old.activeFiles().stream().filter(work -> provider.isExtracting(work.fileId())).toList();
             Integer percent;
@@ -242,7 +244,7 @@ public class RealtimeProgressService {
                 percent = (int) (processed * 100 / total);
             }
             return new ProgressSnapshot(old.progressId(), old.correlationId(), old.type(), old.category(), old.title(), status,
-                    Overall.of(percent), stage, old.metrics(),
+                    Overall.of(percent), stage, ingestion.metrics(),
                     done ? List.of() : active, summary, old.resource(),
                     done && summary.failed() > 0 ? new ErrorInfo("INGESTION_FAILED", message) : null,
                     old.startedAt(), done ? LocalDateTime.now() : null, nextRevision(old));
@@ -279,7 +281,7 @@ public class RealtimeProgressService {
     public void onMetadataWork(FileSpatialMetadataService.MetadataWork event) {
         GisFileMeta file = provider.ingestionFile(event.fileId());
         if (file == null || file.getIngestProgressId() == null || !"RUNNING".equals(file.getMetadataStatus())
-                || !Objects.equals(event.version(), file.getMetadataVersion())) return;
+                || !Objects.equals(event.version(), file.getMetadataVersion()) || !provider.isExtracting(file.getId().toString())) return;
         change(file.getIngestProgressId(), old -> {
             if (old.status().isTerminal() || !"EXTRACTING_METADATA".equals(old.stage().code())) return old;
             List<FileWork> active = new ArrayList<>(old.activeFiles());

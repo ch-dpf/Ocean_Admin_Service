@@ -103,9 +103,52 @@ COMMENT ON COLUMN ocean_gis.gis_vector_group.default_style_key IS '数据集不�
 -- GIS 文件元数据
 -- =========================================================
 
+CREATE TABLE ocean_gis.gis_file_group (
+    id BIGINT PRIMARY KEY,
+    data_set_id BIGINT NOT NULL REFERENCES ocean_gis.gis_data_set(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    format VARCHAR(32) NOT NULL,
+    entry_file_id BIGINT,
+    assembly_status VARCHAR(24) NOT NULL DEFAULT 'INCOMPLETE'
+        CHECK (assembly_status IN ('COMPLETE','INCOMPLETE','UNKNOWN','BLOCKED','DUPLICATE')),
+    parse_status VARCHAR(24) NOT NULL DEFAULT 'PARKED'
+        CHECK (parse_status IN ('PARKED','QUEUED','RUNNING','COMPLETED','FAILED','NOT_APPLICABLE','REIMPORT_REQUIRED')),
+    input_revision BIGINT NOT NULL DEFAULT 0 CHECK (input_revision >= 0),
+    fingerprint VARCHAR(64) CHECK (fingerprint ~ '^[a-f0-9]{64}$'),
+    duplicate_of_group_id BIGINT,
+    matched_revision BIGINT CHECK (matched_revision >= 0),
+    read_options_json TEXT NOT NULL DEFAULT '{}',
+    error_code VARCHAR(64),
+    error_message VARCHAR(1000),
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
+    UNIQUE (data_set_id,id),
+    CONSTRAINT ck_gis_file_group_duplicate CHECK (
+        (assembly_status='DUPLICATE') = (duplicate_of_group_id IS NOT NULL AND matched_revision IS NOT NULL)
+        AND (assembly_status<>'DUPLICATE' OR fingerprint IS NULL)),
+    CONSTRAINT ck_gis_file_group_queued CHECK (
+        parse_status NOT IN ('QUEUED','RUNNING') OR (assembly_status='COMPLETE' AND entry_file_id IS NOT NULL)),
+    CONSTRAINT ck_gis_file_group_not_self_duplicate CHECK (duplicate_of_group_id IS NULL OR duplicate_of_group_id<>id),
+    CONSTRAINT fk_gis_file_group_duplicate FOREIGN KEY (data_set_id,duplicate_of_group_id)
+        REFERENCES ocean_gis.gis_file_group(data_set_id,id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE UNIQUE INDEX uk_gis_file_group_fingerprint ON ocean_gis.gis_file_group(data_set_id,fingerprint)
+    WHERE deleted=0 AND fingerprint IS NOT NULL;
+CREATE INDEX idx_gis_file_group_data_set ON ocean_gis.gis_file_group(data_set_id,create_time DESC) WHERE deleted=0;
+CREATE INDEX idx_gis_file_group_duplicate ON ocean_gis.gis_file_group(duplicate_of_group_id) WHERE duplicate_of_group_id IS NOT NULL;
+COMMENT ON TABLE ocean_gis.gis_file_group IS '文件组逻辑数据源；独立于矢量业务分类树，每个物理成员只属于一个组';
+COMMENT ON COLUMN ocean_gis.gis_file_group.fingerprint IS '完整规范化成员清单及SHA256指纹；不包含路径、批次及读取参数';
+COMMENT ON COLUMN ocean_gis.gis_file_group.input_revision IS '仅有效成员或读取参数变化时递增，解析提交必须核对';
+COMMENT ON COLUMN ocean_gis.gis_file_group.duplicate_of_group_id IS '重复输入匹配的规范组ID快照；源文件保留在本组，不迁移或自动删除';
+COMMENT ON COLUMN ocean_gis.gis_file_group.matched_revision IS '重复匹配时规范组的输入修订快照';
+
 CREATE TABLE ocean_gis.gis_file_meta (
     id                       BIGINT        PRIMARY KEY,
     data_set_id              BIGINT        NOT NULL,
+    file_group_id            BIGINT,
+    member_path              VARCHAR(1000),
+    ingest_outcome           VARCHAR(32) CHECK (ingest_outcome IN ('REGISTERED','DUPLICATE')),
     vector_placement         VARCHAR(10) CHECK (vector_placement IN ('AUTO','UNKNOWN')),
     vector_dataset_style_id  BIGINT,
     original_name            VARCHAR(255)  NOT NULL,
@@ -141,9 +184,15 @@ CREATE TABLE ocean_gis.gis_file_meta (
     CONSTRAINT ck_gis_file_meta_storage_type
         CHECK (storage_type IN ('LOCAL', 'MINIO', 'S3')),
     FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set(id) ON DELETE CASCADE,
+    CONSTRAINT fk_gis_file_meta_group FOREIGN KEY (data_set_id,file_group_id)
+        REFERENCES ocean_gis.gis_file_group(data_set_id,id),
+    CONSTRAINT ck_gis_file_meta_member CHECK (
+        (file_group_id IS NULL AND member_path IS NULL)
+        OR (file_group_id IS NOT NULL AND member_path IS NOT NULL AND member_path<>''
+            AND member_path !~ '(^/|(^|/)\.\.(/|$)|:|\\)')),
     FOREIGN KEY (data_set_id,vector_dataset_style_id) REFERENCES ocean_gis.gis_vector_dataset_style(data_set_id,id) ON DELETE CASCADE,
     CONSTRAINT ck_gis_file_meta_metadata_status
-        CHECK (metadata_status IN ('WAITING', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'NOT_APPLICABLE')),
+        CHECK (metadata_status IN ('WAITING', 'PARKED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'NOT_APPLICABLE')),
     CONSTRAINT ck_gis_file_meta_metadata_version CHECK (metadata_version >= 0),
     CONSTRAINT ck_gis_file_meta_representative_point
         CHECK (
@@ -195,6 +244,16 @@ CREATE TABLE ocean_gis.gis_file_meta (
         )
 );
 
+ALTER TABLE ocean_gis.gis_file_meta ADD CONSTRAINT uk_gis_file_meta_group_identity UNIQUE (file_group_id,id);
+ALTER TABLE ocean_gis.gis_file_group ADD CONSTRAINT fk_gis_file_group_entry
+    FOREIGN KEY (id,entry_file_id) REFERENCES ocean_gis.gis_file_meta(file_group_id,id)
+    DEFERRABLE INITIALLY DEFERRED;
+CREATE UNIQUE INDEX uk_gis_file_meta_group_member ON ocean_gis.gis_file_meta(file_group_id,lower(member_path))
+    WHERE deleted=0 AND file_group_id IS NOT NULL;
+COMMENT ON COLUMN ocean_gis.gis_file_meta.file_group_id IS '物理文件唯一所属的逻辑组；无法可靠识别时为空';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.member_path IS '可靠来源的组内成员相对路径，不使用UUID存储名推测';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.ingest_outcome IS '本次接入结果，独立于文件组解析状态';
+
 COMMENT ON TABLE ocean_gis.gis_file_meta IS 'GIS 文件元数据';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.source_type IS 'UPLOAD-上传托管文件；WORKSPACE-受控工作区原位引用，不产生接入传输记录';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.workspace_code IS '服务器配置的工作区编码，不保存服务器绝对路径';
@@ -234,7 +293,7 @@ CREATE INDEX idx_gis_file_meta_metadata_queue
     ON ocean_gis.gis_file_meta (metadata_status, metadata_lease_expires_at, create_time)
     WHERE deleted = 0 AND file_status = 'READY';
 
-COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_status IS '元数据提取状态：WAITING 等待整批上传或扫描登记结束，QUEUED 可领取，RUNNING 解析中；COMPLETED 后空间信息可检索';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_status IS '元数据提取状态：WAITING等待本批收口；PARKED已接收但暂不能解析；QUEUED可领取，RUNNING解析中；COMPLETED后空间信息可检索';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_version IS '领取或重新提取时递增，阻止过期任务提交';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.metadata_lease_expires_at IS '解析执行或工作区扫描等待租约到期时间；扫描中断后等待文件转为失败';
 
@@ -521,6 +580,9 @@ CREATE TABLE ocean_gis.gis_processing_input (
     input_status    VARCHAR(20)  NOT NULL DEFAULT 'READY',
     file_meta_id    BIGINT,
     source_file_meta_id BIGINT,
+    source_file_group_id BIGINT,
+    source_group_revision BIGINT,
+    source_group_snapshot TEXT,
     source_data_set_id BIGINT,
     source_data_set_name VARCHAR(100),
     source_storage_type VARCHAR(20),
@@ -573,6 +635,11 @@ CREATE TABLE ocean_gis.gis_processing_input (
         ),
     CONSTRAINT ck_gis_processing_input_live_file
         CHECK (file_meta_id IS NULL OR source_file_meta_id IS NOT NULL),
+    CONSTRAINT ck_gis_processing_input_group_snapshot CHECK (
+        (file_meta_id IS NULL AND source_file_group_id IS NULL
+            AND source_group_revision IS NULL AND source_group_snapshot IS NULL)
+        OR (source_file_meta_id IS NOT NULL AND source_file_group_id IS NOT NULL
+            AND source_group_revision IS NOT NULL AND source_group_revision >= 0 AND source_group_snapshot IS NOT NULL)),
     CONSTRAINT ck_gis_processing_input_source_storage_type
         CHECK (source_storage_type IS NULL OR source_storage_type IN ('LOCAL', 'MINIO', 'S3'))
 );

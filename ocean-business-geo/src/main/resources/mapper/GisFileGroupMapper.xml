@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisFileGroupMapper">
+    <select id="lock" resultType="org.ocean.admin.gis.entity.GisFileGroup">
+        SELECT * FROM ocean_gis.gis_file_group WHERE id=#{id} AND deleted=0 FOR UPDATE
+    </select>
+    <select id="lockByDataSet" resultType="org.ocean.admin.gis.entity.GisFileGroup">
+        SELECT * FROM ocean_gis.gis_file_group WHERE data_set_id=#{dataSetId} AND deleted=0 ORDER BY id FOR UPDATE
+    </select>
+    <select id="ingestionFiles" resultType="org.ocean.admin.gis.entity.GisFileMeta">
+        SELECT * FROM ocean_gis.gis_file_meta WHERE ingest_progress_id=#{progressId} AND deleted=0
+        ORDER BY data_set_id,id
+    </select>
+    <select id="members" resultType="org.ocean.admin.gis.entity.GisFileMeta">
+        SELECT * FROM ocean_gis.gis_file_meta WHERE file_group_id=#{groupId} AND deleted=0 ORDER BY member_path,id
+    </select>
+    <select id="canonical" resultType="org.ocean.admin.gis.entity.GisFileGroup">
+        SELECT * FROM ocean_gis.gis_file_group WHERE data_set_id=#{dataSetId} AND fingerprint=#{fingerprint} AND deleted=0
+    </select>
+    <update id="attach">
+        UPDATE ocean_gis.gis_file_meta SET file_group_id=#{groupId},member_path=#{path},ingest_outcome=#{outcome},
+            update_time=CURRENT_TIMESTAMP WHERE id=#{id} AND deleted=0 AND file_group_id IS NULL
+    </update>
+    <update id="outcome">
+        UPDATE ocean_gis.gis_file_meta SET ingest_outcome=#{outcome},update_time=CURRENT_TIMESTAMP
+        WHERE file_group_id=#{groupId} AND ingest_progress_id=#{progressId} AND deleted=0
+    </update>
+    <update id="park">
+        UPDATE ocean_gis.gis_file_meta SET metadata_status='PARKED',metadata_lease_expires_at=NULL,
+            metadata_version=metadata_version+1,metadata_error_code=#{code},metadata_error_message=#{message},
+            representative_longitude=NULL,representative_latitude=NULL,representative_layer_key=NULL,
+            representative_extent_kind=NULL,metadata_extracted_at=NULL,update_time=CURRENT_TIMESTAMP
+        WHERE id=#{id} AND deleted=0 AND metadata_status IN ('WAITING','QUEUED','RUNNING','PARKED','FAILED')
+    </update>
+    <update id="queueEntry">
+        UPDATE ocean_gis.gis_file_meta SET metadata_status='QUEUED',metadata_lease_expires_at=NULL,
+            metadata_version=metadata_version+1,metadata_error_code=NULL,metadata_error_message=NULL,
+            representative_longitude=NULL,representative_latitude=NULL,representative_layer_key=NULL,
+            representative_extent_kind=NULL,metadata_extracted_at=NULL,update_time=CURRENT_TIMESTAMP
+        WHERE id=#{id} AND deleted=0 AND file_status='READY'
+    </update>
+    <update id="setSha256">
+        UPDATE ocean_gis.gis_file_meta SET sha256=#{sha256} WHERE id=#{id} AND deleted=0 AND sha256 IS NULL
+    </update>
+    <update id="updateState">
+        UPDATE ocean_gis.gis_file_group SET name=#{group.name},format=#{group.format},entry_file_id=#{group.entryFileId},
+            assembly_status=#{group.assemblyStatus},parse_status=#{group.parseStatus},input_revision=#{group.inputRevision},
+            fingerprint=#{group.fingerprint},duplicate_of_group_id=#{group.duplicateOfGroupId},matched_revision=#{group.matchedRevision},
+            read_options_json=#{group.readOptionsJson},error_code=#{group.errorCode},error_message=#{group.errorMessage},
+            update_time=CURRENT_TIMESTAMP WHERE id=#{group.id} AND deleted=0
+    </update>
+    <delete id="clearEntryMetadata">
+        DELETE FROM ocean_gis.gis_file_spatial_metadata WHERE file_meta_id=#{id}
+    </delete>
+    <delete id="physicallyDelete">
+        DELETE FROM ocean_gis.gis_file_group WHERE id=#{id} AND deleted=0
+    </delete>
+</mapper>

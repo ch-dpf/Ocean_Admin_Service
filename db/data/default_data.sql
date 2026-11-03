@@ -2,9 +2,9 @@
 -- Data for Name: sys_role; Type: TABLE DATA; Schema: ocean_platform; Owner: -
 --
 
-INSERT INTO ocean_platform.sys_role (id, role_code, role_name, description, sort_order, status, create_time, update_time, deleted) VALUES (1, 'SUPER_ADMIN', '超级管理员', '拥有所有权限', 1, 1, '2026-09-10 16:46:02.85921', '2026-09-10 16:46:02.85921', 0);
-INSERT INTO ocean_platform.sys_role (id, role_code, role_name, description, sort_order, status, create_time, update_time, deleted) VALUES (2, 'ADMIN', '管理员', '系统管理员', 2, 1, '2026-09-10 16:46:02.85921', '2026-09-10 16:46:02.85921', 0);
-INSERT INTO ocean_platform.sys_role (id, role_code, role_name, description, sort_order, status, create_time, update_time, deleted) VALUES (3, 'USER', '普通用户', '普通用户', 3, 1, '2026-09-10 16:46:02.85921', '2026-09-10 16:46:02.85921', 0);
+INSERT INTO ocean_platform.sys_role (id, role_code, role_name, description, sort_order, status, create_time, update_time, deleted) VALUES (1, 'SUPER_ADMIN', '超级管理员', '拥有所有权限', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0);
+INSERT INTO ocean_platform.sys_role (id, role_code, role_name, description, sort_order, status, create_time, update_time, deleted) VALUES (2, 'ADMIN', '管理员', '系统管理员', 2, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0);
+INSERT INTO ocean_platform.sys_role (id, role_code, role_name, description, sort_order, status, create_time, update_time, deleted) VALUES (3, 'USER', '普通用户', '普通用户', 3, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0);
 
 
 --
@@ -17,4 +17,4 @@ INSERT INTO ocean_platform.sys_user (id, username, password, real_name, email, p
 -- Data for Name: sys_user_role; Type: TABLE DATA; ocean_platform: public; Owner: -
 --
 
-INSERT INTO ocean_platform.sys_user_role (id, user_id, role_id, create_time) VALUES (1, 1, 1, '2026-09-10 16:46:02.860389');
+INSERT INTO ocean_platform.sys_user_role (id, user_id, role_id, create_time) VALUES (1, 1, 1, CURRENT_TIMESTAMP);

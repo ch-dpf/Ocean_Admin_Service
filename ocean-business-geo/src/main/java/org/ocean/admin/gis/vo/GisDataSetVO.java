@@ -51,6 +51,8 @@ public class GisDataSetVO {
 
     @Schema(description = "未删除且源状态为READY的管理文件数量，包含工作区引用，与总大小同口径", accessMode = Schema.AccessMode.READ_ONLY)
     private Integer fileCount;
+    @Schema(description = "有效逻辑文件组数量，不含重复输入追溯组", accessMode = Schema.AccessMode.READ_ONLY)
+    private long fileGroupCount;
 
     @Schema(description = "未删除且源状态为READY的管理文件总大小（字节），包含工作区引用及配套文件，与元数据提取状态无关",
             accessMode = Schema.AccessMode.READ_ONLY)

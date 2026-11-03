@@ -26,6 +26,8 @@ public class GisProcessingTaskDetailVO {
             String inputStatus,
             Long fileMetaId,
             Long sourceFileMetaId,
+            Long sourceFileGroupId,
+            Long sourceGroupRevision,
             Long sourceDataSetId,
             String sourceDataSetName,
             String sourceStorageType,

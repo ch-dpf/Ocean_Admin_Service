@@ -9,6 +9,7 @@ import org.ocean.admin.gis.dto.TerrainProcessingParameters;
 import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.dto.GisWorkspaceProcessingRequest;
 import org.ocean.admin.gis.entity.GisProcessingInput;
+import org.ocean.admin.gis.entity.GisFileFormat;
 import org.ocean.admin.gis.imagery.ImageryTileOptions;
 import org.ocean.admin.gis.processing.GisInputSourceType;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
@@ -165,6 +166,16 @@ public class ProcessingService {
                 if (command.processingType() != GisProcessingType.TERRAIN || inputs.size() != 1) {
                     throw new IllegalArgumentException("当前仅地形处理支持单个目录输入");
                 }
+                continue;
+            }
+            if (command.sourceType() == GisInputSourceType.MANAGED_FILE) {
+                GisFileFormat format = GisFileFormat.fromFileName(input.getOriginalName());
+                if (command.processingType() == GisProcessingType.VECTOR || format == null || !format.isRaster()
+                        || input.getSourceFileGroupId() == null || input.getSourceGroupRevision() == null
+                        || input.getSourceGroupSnapshot() == null) {
+                    throw new IllegalArgumentException("已管理处理输入必须为已完成解析的影像或地形文件组");
+                }
+                // 大文件规范化留在后台执行；请求阶段只接收已有解析结果确认的栅格来源。
                 continue;
             }
             engine.validate(input.getOriginalName(), input.getExtension(), path);

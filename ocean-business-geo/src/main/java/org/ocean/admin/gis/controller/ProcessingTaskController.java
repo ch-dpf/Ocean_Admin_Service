@@ -7,6 +7,8 @@ import io.swagger.v3.oas.annotations.media.Encoding;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
 import org.ocean.admin.gis.dto.GisManagedProcessingRequest;
@@ -23,6 +25,8 @@ import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -43,6 +47,30 @@ public class ProcessingTaskController {
 
     private final ProcessingTaskRecordService taskService;
     private final ProcessingService processingService;
+
+    /** 静态瓦片生成任务的名称修改请求。 */
+    public record RenameTaskRequest(
+            @NotBlank @Size(max = 200) String taskName) { }
+
+    @PatchMapping("/{taskId}/name")
+    @Operation(summary = "重命名静态瓦片生成任务")
+    @OperationLog(module = "GIS_PROCESSING_TASK", type = OperationType.UPDATE,
+            description = "重命名静态瓦片生成任务")
+    public ResponseResult<Void> renameTask(@PathVariable Long taskId,
+            @Valid @org.springframework.web.bind.annotation.RequestBody RenameTaskRequest request) {
+        taskService.renameTask(taskId, request.taskName());
+        return ResponseResult.success();
+    }
+
+    @DeleteMapping("/{taskId}")
+    @Operation(summary = "删除静态瓦片生成任务",
+            description = "仅允许删除终态且无已发布服务、无进行中归档的任务；清理生成产物，保留来源文件")
+    @OperationLog(module = "GIS_PROCESSING_TASK", type = OperationType.DELETE,
+            description = "删除静态瓦片生成任务及其产物")
+    public ResponseResult<Void> deleteTask(@PathVariable Long taskId) {
+        taskService.deleteTask(taskId);
+        return ResponseResult.success();
+    }
 
     @GetMapping("/page")
     @Operation(summary = "分页条件查询 GIS 处理任务")

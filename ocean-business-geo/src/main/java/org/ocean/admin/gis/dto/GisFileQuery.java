@@ -12,6 +12,7 @@ public class GisFileQuery {
     private Integer current = 1;
     private Integer size = 10;
     private Long dataSetId;
+    private Long fileGroupId;
     private Long categoryId;
     private String sourceType;
     private String originalName;
@@ -34,6 +35,7 @@ public class GisFileQuery {
     }
 
     public void validate() {
+        if (fileGroupId != null && fileGroupId < 1) throw new IllegalArgumentException("文件组ID无效");
         current = current == null || current < 1 ? 1 : current;
         size = size == null || size < 1 ? 10 : Math.min(size, 100);
         originalName = trim(originalName);
@@ -52,7 +54,7 @@ public class GisFileQuery {
         if (fileStatus != null && !Set.of("PENDING", "READY", "FAILED").contains(fileStatus)) {
             throw new IllegalArgumentException("文件状态只能为 PENDING、READY 或 FAILED");
         }
-        if (metadataStatus != null && !Set.of("WAITING", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "NOT_APPLICABLE").contains(metadataStatus)) {
+        if (metadataStatus != null && !Set.of("WAITING", "PARKED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "NOT_APPLICABLE").contains(metadataStatus)) {
             throw new IllegalArgumentException("元数据状态无效");
         }
         boolean any = west != null || south != null || east != null || north != null;

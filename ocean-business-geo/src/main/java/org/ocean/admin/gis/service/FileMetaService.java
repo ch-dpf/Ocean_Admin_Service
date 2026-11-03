@@ -11,6 +11,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
+import org.ocean.admin.gis.entity.GisFileFormat;
+import org.ocean.admin.gis.entity.GisFileGroup;
+import org.ocean.admin.gis.mapper.GisFileGroupMapper;
 import org.ocean.admin.gis.dto.GisFileQuery;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
@@ -68,6 +71,8 @@ import org.ocean.admin.gis.dto.TaskStatus;
 public class FileMetaService {
 
     private final GisFileMetaMapper gisFileMetaMapper;
+    private final GisFileGroupMapper fileGroupMapper;
+    private final FileGroupService fileGroups;
     private final GisProcessingInputMapper processingInputMapper;
     private final GisDataSetMapper gisDataSetMapper;
     private final DataSetService dataSetService;
@@ -309,18 +314,8 @@ public class FileMetaService {
     }
 
     private boolean supportsWorkspaceFile(Long categoryId, Path path) {
-        try {
-            String extension = FileUploadUtil.extensionOf(path.getFileName().toString());
-            return switch (categoryId.intValue()) {
-                case 0, 1 -> Set.of("tif", "tiff").contains(extension);
-                case 2 -> Set.of("geojson", "json").contains(extension);
-                default -> throw new IllegalArgumentException("未知GIS数据类别");
-            };
-        } catch (IllegalArgumentException ex) {
-            return false;
-        }
+        return GisFileFormat.accepts(categoryId, path.getFileName().toString());
     }
-
     /** 边遍历边登记，不收集目录路径或文件清单，文件结果通过进度标识回报。 */
     private void scanWorkspace(Path entry, WorkspaceRun run) {
         try {
@@ -427,6 +422,17 @@ public class FileMetaService {
 
     @Transactional(rollbackFor = Exception.class)
     public void deleteFileMeta(Long id) {
+        GisFileMeta located = getRequired(id);
+        if (gisDataSetMapper.selectActiveByIdForUpdate(located.getDataSetId()) == null)
+            throw new IllegalArgumentException("数据集不存在或已删除");
+        located = getRequired(id);
+        GisFileGroup group = located.getFileGroupId() == null ? null : fileGroupMapper.lock(located.getFileGroupId());
+        if (group != null && Set.of("QUEUED", "RUNNING").contains(group.getParseStatus()))
+            throw new IllegalStateException("文件组正在解析，不能删除成员");
+        if (group != null && group.getEntryFileId() != null) {
+            ensureVectorSourceUnreferenced(group.getEntryFileId());
+            ensureNoActiveProcessingTask(group.getEntryFileId());
+        }
         GisFileMeta existing = getRequiredForUpdate(id);
         ensureMutable(existing);
         ensureVectorSourceUnreferenced(id);
@@ -440,6 +446,7 @@ public class FileMetaService {
         if (gisFileMetaMapper.physicallyDeleteActiveById(id) != 1) {
             throw new IllegalStateException("文件物理删除失败: " + id);
         }
+        if (existing.getFileGroupId() != null) fileGroups.invalidateMember(existing.getFileGroupId(), id);
         dataSetService.updateFileStatistics(existing, null);
         fileUploadUtil.deleteEmptyDataSetDirectory(existing.getDataSetId());
         events.publishEvent(new FileSpatialMetadataService.MetadataProgress(List.of(id), false));
@@ -578,6 +585,9 @@ public class FileMetaService {
         result.setCleanupStatus(meta.getCleanupStatus());
         result.setErrorMessage(meta.getErrorMessage());
         result.setMetadataStatus(meta.getMetadataStatus());
+        result.setFileGroupId(meta.getFileGroupId());
+        result.setMemberPath(meta.getMemberPath());
+        result.setIngestOutcome(meta.getIngestOutcome());
         result.setMetadataVersion(meta.getMetadataVersion());
         result.setMetadataErrorCode(meta.getMetadataErrorCode());
         result.setMetadataErrorMessage(meta.getMetadataErrorMessage());

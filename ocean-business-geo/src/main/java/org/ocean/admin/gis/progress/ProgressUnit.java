@@ -4,6 +4,7 @@ package org.ocean.admin.gis.progress;
 public enum ProgressUnit {
     ENTRY, // 扫描条目（文件与目录）
     FILE, // 文件
+    FILE_GROUP, // 独立逻辑数据源的文件组
     INPUT, // 输入
     BYTE, // 字节
     BLOCK, // 块

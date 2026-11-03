@@ -20,6 +20,12 @@ public class GisFileMetaVO {
 
     @Schema(description = "所属数据集 ID", accessMode = Schema.AccessMode.READ_ONLY)
     private Long dataSetId;
+    @Schema(description = "服务端识别的文件组 ID；尚未归组时为空", accessMode = Schema.AccessMode.READ_ONLY)
+    private Long fileGroupId;
+    @Schema(description = "组内相对路径", accessMode = Schema.AccessMode.READ_ONLY)
+    private String memberPath;
+    @Schema(description = "本次接入结果", accessMode = Schema.AccessMode.READ_ONLY)
+    private String ingestOutcome;
     @Schema(description = "文件来源：UPLOAD 或 WORKSPACE", accessMode = Schema.AccessMode.READ_ONLY)
     private String sourceType;
     @Schema(accessMode = Schema.AccessMode.READ_ONLY)
@@ -72,7 +78,7 @@ public class GisFileMetaVO {
     @Schema(description = "处理错误信息", accessMode = Schema.AccessMode.READ_ONLY)
     private String errorMessage;
 
-    @Schema(description = "元数据状态：WAITING等待整批上传或扫描结束，QUEUED等待解析，RUNNING解析中，COMPLETED、FAILED、NOT_APPLICABLE", accessMode = Schema.AccessMode.READ_ONLY)
+    @Schema(description = "元数据状态：WAITING等待传输收口，PARKED已保存但暂不能解析，QUEUED、RUNNING、COMPLETED、FAILED、NOT_APPLICABLE", accessMode = Schema.AccessMode.READ_ONLY)
     private String metadataStatus;
     @Schema(accessMode = Schema.AccessMode.READ_ONLY)
     private Long metadataVersion;
