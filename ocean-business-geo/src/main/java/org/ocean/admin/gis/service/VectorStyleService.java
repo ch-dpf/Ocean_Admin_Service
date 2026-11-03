@@ -53,9 +53,23 @@ public class VectorStyleService {
         var custom = mapper.defaultStyle(layerId);
         JsonNode definition = effectiveDefinition(layer, group, dataSetStyles.compile(snapshot), custom);
         boolean configured = !"UNCONFIGURED".equals(layer.getStyleMode());
-        return new GisVectorVO.EffectiveStyle(layerId.toString(), configured ? "CUSTOM".equals(layer.getStyleMode()) ? "CUSTOM" : "GROUP" : "UNCONFIGURED",
-                group.getId().toString(), "CUSTOM".equals(layer.getStyleMode()) && custom != null ? custom.getId().toString() : group.getDefaultStyleKey(),
-                "CUSTOM".equals(layer.getStyleMode()) && custom != null ? custom.getVersion() : snapshot.getStyleVersion(),
+        boolean customMode = "CUSTOM".equals(layer.getStyleMode());
+        String source;
+        if (!configured) {
+            source = "UNCONFIGURED";
+        } else if (customMode) {
+            source = "CUSTOM";
+        } else {
+            source = "GROUP";
+        }
+        String styleId = group.getDefaultStyleKey();
+        Long styleVersion = snapshot.getStyleVersion();
+        if (customMode && custom != null) {
+            styleId = custom.getId().toString();
+            styleVersion = custom.getVersion();
+        }
+        return new GisVectorVO.EffectiveStyle(layerId.toString(), source,
+                group.getId().toString(), styleId, styleVersion,
                 layer.getPresentationVersion(), configured, definition);
     }
 
@@ -116,8 +130,11 @@ public class VectorStyleService {
         if (request == null || request.featureId() == null || request.featureId() <= 0 || request.zoom() == null) {
             throw error(HttpStatus.BAD_REQUEST, "featureId 与 zoom 必填");
         }
-        try { rules.requireZoom(request.zoom()); }
-        catch (IllegalArgumentException ex) { throw error(HttpStatus.BAD_REQUEST, ex.getMessage()); }
+        try {
+            rules.requireZoom(request.zoom());
+        } catch (IllegalArgumentException ex) {
+            throw error(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
         requireLayer(layerId, false);
         GisVectorStyle style = requireStyle(layerId, id);
         var feature = layers.feature(layerId, request.featureId());
@@ -233,14 +250,15 @@ public class VectorStyleService {
     private void validateKind(GisVectorLayer layer, GisVectorStyle style) {
         for (var rule : json.readTree(style.getDefinitionJson()).path("rules")) {
             validateTileFields(rule.path("filter"));
-            if (!layer.getGeometryType().equals(rule.path("geometryType").asText())) throw error(HttpStatus.BAD_REQUEST, "样式只能使用当前图层的几何类别");
+            if (!layer.getGeometryType().equals(rule.path("geometryType").asText())) {
+                throw error(HttpStatus.BAD_REQUEST, "样式只能使用当前图层的几何类别");
+            }
             try {
                 templateRules.bounds(rule.path("minZoom").asDouble(0), rule.path("maxZoom").asDouble(22));
-                for (String name : java.util.List.of("radius", "width", "strokeWidth")) if (rule.path("symbol").has(name)) {
-                    double size = rule.path("symbol").path(name).asDouble();
-                    if (size > 12 || size < ("strokeWidth".equals(name) ? 0 : .5)) throw new IllegalArgumentException("符号尺寸超出数据集允许范围");
-                }
-            } catch (IllegalArgumentException ex) { throw error(HttpStatus.BAD_REQUEST, ex.getMessage()); }
+                validateSymbolSize(rule.path("symbol"), "符号尺寸超出数据集允许范围");
+            } catch (IllegalArgumentException ex) {
+                throw error(HttpStatus.BAD_REQUEST, ex.getMessage());
+            }
         }
     }
 
@@ -311,10 +329,7 @@ public class VectorStyleService {
             var template = dataSetStyles.compile(dataSetStyles.require(layer.getDataSetId(), false));
             var symbol = templateRules.symbol(layer.getGeometryType(), templateRules.merge(
                     templateRules.groupStyle(template, target.getGroupKey()).path("symbol"), request.symbol()));
-            for (String field : java.util.List.of("radius", "width", "strokeWidth")) if (symbol.has(field)) {
-                double size = symbol.path(field).asDouble();
-                if (size > 12 || size < ("strokeWidth".equals(field) ? 0 : .5)) throw new IllegalArgumentException("符号尺寸须在允许范围内");
-            }
+            validateSymbolSize(symbol, "符号尺寸须在允许范围内");
             ObjectNode rule = json.createObjectNode().put("id", "custom").put("geometryType", layer.getGeometryType())
                     .put("minZoom", request.minZoom()).put("maxZoom", request.maxZoom()).put("visible", true);
             rule.set("symbol", symbol);
@@ -325,12 +340,37 @@ public class VectorStyleService {
             if (insert) {
                 if (mapper.styles(layer.getId()).size() >= 100) throw new IllegalArgumentException("图层样式方案已达上限");
                 style = new GisVectorStyle();
-                style.setId(IdWorker.getId()); style.setLayerId(layer.getId());
-                style.setName("手动样式-" + style.getId()); style.setIsDefault(true);
+                style.setId(IdWorker.getId());
+                style.setLayerId(layer.getId());
+                style.setName("手动样式-" + style.getId());
+                style.setIsDefault(true);
             }
             style.setDefinitionJson(json.writeValueAsString(rules.validate(definition)));
-            if ((insert ? mapper.insertStyle(style) : mapper.updateStyle(style, style.getVersion())) != 1) throw stale();
-        } catch (IllegalArgumentException ex) { throw error(HttpStatus.BAD_REQUEST, ex.getMessage()); }
+            int updated;
+            if (insert) {
+                updated = mapper.insertStyle(style);
+            } else {
+                updated = mapper.updateStyle(style, style.getVersion());
+            }
+            if (updated != 1) {
+                throw stale();
+            }
+        } catch (IllegalArgumentException ex) {
+            throw error(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
+    }
+
+    /** 两个样式写入入口共用尺寸边界，错误文案由各入口保留。 */
+    private void validateSymbolSize(JsonNode symbol, String errorMessage) {
+        for (String field : List.of("radius", "width", "strokeWidth")) {
+            if (!symbol.has(field)) {
+                continue;
+            }
+            double size = symbol.path(field).asDouble();
+            if (size > 12 || size < ("strokeWidth".equals(field) ? 0 : .5)) {
+                throw new IllegalArgumentException(errorMessage);
+            }
+        }
     }
 
     private GisVectorStyle requireStyle(Long layerId, Long id) {

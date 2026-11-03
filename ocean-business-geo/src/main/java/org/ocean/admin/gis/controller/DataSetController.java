@@ -28,6 +28,12 @@ public class DataSetController {
 
     private final DataSetService dataSetService;
 
+    @GetMapping("/categories")
+    @Operation(summary = "获取数据集分类及数量", description = "统计全部未删除数据集，不受名称筛选和分页影响")
+    public ResponseResult<GisDataSetVO.CategorySummary> getDataSetCategories() {
+        return ResponseResult.success(dataSetService.getDataSetCategories());
+    }
+
     @GetMapping("/page")
     @Operation(summary = "获取数据集分页")
     public ResponseResult<PageResult<List<GisDataSetVO>>> getDataSetPage(
