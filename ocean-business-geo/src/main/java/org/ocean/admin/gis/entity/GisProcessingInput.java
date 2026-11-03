@@ -21,6 +21,11 @@ public class GisProcessingInput {
     private Long fileMetaId;
     /** 数据管理文件提交任务时保存的不可变来源快照。 */
     private Long sourceFileMetaId;
+    /** 主入口所属文件组及提交时的输入修订，仅用于不可变历史快照。 */
+    private Long sourceFileGroupId;
+    private Long sourceGroupRevision;
+    /** 包含组读取选项和全部成员定位、内容摘要的 JSON，不跟随当前组变化。 */
+    private String sourceGroupSnapshot;
     private Long sourceDataSetId;
     private String sourceDataSetName;
     private String sourceStorageType;

@@ -46,11 +46,25 @@ mvn -pl ocean-bootstrap -am spring-boot:run
 
 ## GIS 空间元数据与范围查询
 
-原始文件传输完成后，导入批次仍处于 `RUNNING`，阶段为 `EXTRACTING_METADATA`。普通文件提取空间元数据；矢量数据集中的 GeoJSON 在同一文件提取阶段继续生成图层与要素，图层 READY 后该文件才计入成功。批次内可继续上传下一文件，无需等待前一文件处理完成。
+上传或工作区扫描整批收口后，后台自动识别文件组，再进入 `EXTRACTING_METADATA`。文件组是业务管理和解析单位，单个独立文件也建立组；同一数据集可包含多个组，每个物理文件最多属于一个组。矢量组在同一次提取中生成可编辑图层与要素，所有图层 READY 后才计为解析成功。接入仍使用现有数据集、文件或工作区路径参数，不要求客户端提供分组清单。
 
-首期提取 GeoTIFF（`.tif/.tiff`）与 GeoJSON（`.geojson/.json`）。GeoJSON 必须使用 WGS84 经度、纬度顺序；默认按 RFC 7946 读取，文件顶层也接受下文列出的旧式 WGS84 命名 `crs` 声明。配套附件标记 `NOT_APPLICABLE`，其他主格式返回 `UNSUPPORTED_FORMAT`，原文件保留。
+支持的矢量入口为 GeoJSON、SHP、DXF、MIF、TAB、CSV、GPX、DWG；栅格入口为 GeoTIFF、IMG、JPG/JPEG、PNG、GIF、GRIB2。GeoJSON 与 GeoTIFF 保留既有 Java 解析链路，其他格式通过 GDAL/OGR 读取真实图层或波段。GeoJSON 继续要求 RFC 7946 的 WGS84 经度、纬度顺序，接受下文列出的顶层旧式 WGS84 命名 `crs` 声明；读取配置不能将任意投影的 JSON 当作标准 GeoJSON 导入。
 
-文件分页接口 `GET /api/gis/filemeta/page` 返回当前管理文件，可显式传入 `metadataStatus=QUEUED/RUNNING/COMPLETED/FAILED/NOT_APPLICABLE` 按元数据状态筛选。`DELETE /api/gis/filemeta/{id}` 删除文件元数据；上传来源同时删除托管物理文件，工作区来源保留原文件。活动处理任务引用时返回冲突，调用方必须进行二次确认。
+业务列表使用 `GET /api/gis/file-groups/page`，默认排除重复输入追溯记录，传 `includeDuplicates=true` 可查看。详情 `GET /api/gis/file-groups/{id}` 返回组、成员与 `effectiveGroupId`；重复输入指向原规范组。`assemblyStatus` 表示完整、缺件、未识别、能力阻塞或重复，`parseStatus` 表示等待、排队、执行、完成、失败或 `REIMPORT_REQUIRED`。文件组与矢量业务分类树 `gis_vector_group` 是两个独立概念。
+
+SHP 必须有 `.shx/.dbf`，矢量 TAB 必须有 `.dat/.map/.id`；MIF 含属性列时需要 MID，`Columns 0` 可无 MID。IMG 外部像素文件、world file、PRJ 等按真实格式关系识别；`Type RASTER` 的 TAB 可作为图像配套。缺件、归属歧义、缺 CRS 或驱动缺失会保留文件并进入等待或阻塞状态，配套文件不单独领取解析任务。上传只有原始文件名和批内索引，服务端不按上传顺序猜配件，也不按同名跨批拼接；工作区仅在同一可靠来源目录、格式或内容证据能唯一匹配时补件。
+
+完整组按格式、规范化成员清单及内容 SHA-256 去重，不把 UUID、批次、绝对路径或读取参数计入指纹。重复输入保留独占的追溯组及物理文件，记录 `duplicateOfGroupId/matchedRevision`，不会重试或改变规范组既有状态。未完成组补齐后若命中规范组，同样记录重复关系，不迁移成员或自动删源。`inputRevision` 仅随有效成员或读取参数变化递增；已成功成果发生输入变化时进入 `REIMPORT_REQUIRED`，不会自动覆盖 READY 图层或编辑结果。
+
+`PUT /api/gis/file-groups/{id}/options` 保存读取配置，未提供的字段保留，显式空白字符串清除对应字段。CSV 必须明确配置 `sourceCrs`、`xField`、`yField`，X/Y 字段须不同，不能默认猜测 WGS84；DXF/DWG 也需明确源 CRS。CRS 接受 EPSG 编码、`OGC:CRS84` 或明确 WKT，拒绝文件或 URL 引用。例如：
+
+```json
+{"sourceCrs":"EPSG:4326","xField":"longitude","yField":"latitude"}
+```
+
+首次有效输入就绪后自动解析；补齐读取配置可解除相应阻塞。显式重新提取使用 `POST /api/gis/file-groups/{id}/retry`，已有矢量成果引用时须先处理相关成果，避免覆盖。`DELETE /api/gis/file-groups/{id}` 检查全组任务及成果引用后删除成员登记；上传来源清理托管文件，工作区原文件保留。源文件变化或不可用时须保留源文件、删除失效登记后重新接入，重试不会默默刷新来源快照。
+
+`GET /api/gis/filemeta/page` 继续提供物理文件列表，支持 `fileGroupId`、来源和元数据状态筛选；物理文件详情、下载及 `DELETE /api/gis/filemeta/{id}` 保留原有语义。删除单成员会使组修订失效并重新等待完整输入，活动解析、处理任务或矢量成果引用会阻止删除。物理文件的 `PARKED` 表示已保存但暂不能独立解析，应结合所属组状态展示。
 
 ```text
 GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=INTERSECTS
@@ -63,35 +77,46 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 `recommendedMaxZoom` 按文件所属数据集的默认处理类型估算，并限制为 0～22。影像使用 `WebMercatorQuad`、256×256 像素口径，以 3×3 位置采样的 EPSG:3857 像素间距最大值估算；向下取整前对距整数层级不超过 1e-7 的浮点误差归整，避免原生第 14 层被误判为第 13 层。地形使用 `WorldCRS84Quad`，按当前固定版本 mago-3d-terrainer 的源 X 像素间距及末级细分规则计算默认可用深度。查询 `requiredZoom` 时须同时选择对应的 `tileMatrixSetId`，两种矩阵不混比。矢量或无法估算的文件该值为空；未知层级不命中 `requiredZoom`。该值不代表显式修改处理参数后或多文件组合生成的成果实际层级。
 
-`POST /api/gis/filemeta/{id}/metadata/retry` 仅重新提交提取失败的文件；已成功生成且可能被编辑的矢量图层不会被覆盖。提取使用数据库待办、版本校验和 15 分钟租约，服务重启后自动恢复。扫描间隔由 `gis.metadata.poll-interval` 配置，默认 5000 毫秒；使用独立的两个执行线程。
+提取沿用主入口文件的数据库待办、版本校验和 15 分钟租约，并同时核对组的 `inputRevision`，过期执行不能提交。服务重启后恢复可领取的解析待办，`PARKED` 不属于执行租约。扫描间隔由 `gis.metadata.poll-interval` 配置，默认 5000 毫秒；使用独立的两个执行线程。
+
+需 GDAL 处理的格式统一通过 GDAL 3.13.0 Java API 读取和转换，由主服务启动独立 Java 工作进程加载 JNI，业务不调用 GDAL 命令行程序。父 POM 固定 `org.gdal:gdal` 版本；该 JAR 只提供 Java API，运行环境还须具备同版本的 `gdalalljni` 桥接库、GDAL 核心库、格式驱动与 PROJ 数据。部署镜像从固定版本源码和 SHA256 构建核心库及 JNI，构建时检查目标驱动、GeoJSON/GeoTIFF 写入能力和 EPSG 解析。直接在 Windows 启动 Java 时，配置 `GIS_GDAL_NATIVE_LIBRARY_PATH` 为同版本 `gdalalljni.dll` 所在目录，并把 GDAL 及其依赖 DLL 的目录加入 `PATH`，正确配置 `GDAL_DATA`、`PROJ_DATA`。工作进程使用主服务同一 JRE；`GIS_GDAL_WORKER_MAX_HEAP` 默认 `1g`，只约束 Java 堆，原生缓存与驱动内存另计。`GET /api/gis/file-groups/formats` 返回格式及配件规则，实际驱动能力在读取时检查。DWG 依赖 GDAL 构建中可用的 CAD/DWG 驱动及其支持的文件版本，普通安装不保证具备该能力；缺驱动明确阻塞。无 CRS 或无有效定位的栅格不会生成虚构范围，world file 也不能代替 CRS 声明。
+
+从已管理文件提交影像或地形处理任务时，`fileMetaIds` 必须选择已完整解析栅格组的主入口。任务保存整组成员、来源、SHA、读取配置及输入修订的不可变快照，活动任务保护全组成员；执行时按该快照核验来源并准备临时 GeoTIFF，继续交给既有切片引擎。当前 `MANAGED_FILE` 不承接矢量组切片，矢量接入直接生成可编辑图层。
 
 数据库须安装 PostGIS；部署镜像使用 `postgis/postgis:16-3.5-alpine`。业务表与索引统一维护在 `db/migration/V2__init_ocean_gis.sql`。已有开发库需先补齐最终结构，再依次执行 `mvn flyway:repair`、`mvn flyway:validate`；repair 本身不会修改业务表结构。
 
+栅格与 GDAL 输入在隔离的临时目录中重建，只暴露已登记组成员，避免自动借用源目录中未登记的辅助文件；原文件只读。GeoTIFF 显式配置 `sourceCrs` 时也进入 Java GDAL 工作进程，生成带投影的临时 GeoTIFF 后读取。主服务监控整个工作进程的租约、超时、日志、元数据及临时输出限额；失败或取消后终止该进程及其后代，释放 Windows 文件句柄后清理临时目录。工作进程在读取前检查原生版本和实际驱动，缺库、版本不匹配、缺驱动或不支持文件版本时明确阻塞，不切换其他读取路径。
+
 ## 从受控服务器工作区接入数据
 
-`POST /api/gis/filemeta/workspace-files?dataSetId={id}` 原位接入服务器文件，必填查询参数 `dataSetId` 指定所属数据集。不复制、不移动源文件，也不创建文件传输记录或切片处理任务。工作区沿用 `gis.processing.workspaces` 配置。接口只校验入口，立即以HTTP 202返回 `dataSetId` 和统一 `progress` 引用（`progressId`、`type=GIS_WORKSPACE_IMPORT`、`status=QUEUED`、`queryUrl`、`eventsUrl`），目录遍历、登记及空间提取进度均在后台推进。
+`POST /api/gis/filemeta/workspace-files?dataSetId={id}` 原位接入服务器文件，必填查询参数 `dataSetId` 指定所属数据集。不转存或移动源文件，也不创建文件传输记录或切片处理任务；格式读取所需临时副本随读取上下文清理。工作区沿用 `gis.processing.workspaces` 配置。接口只校验入口，立即以HTTP 202返回 `dataSetId` 和统一 `progress` 引用（`progressId`、`type=GIS_WORKSPACE_IMPORT`、`status=QUEUED`、`queryUrl`、`eventsUrl`），目录遍历、登记、组装及空间提取进度均在后台推进。
 
 ```json
 {"workspaceCode":"DEFAULT","relativePath":"survey/2026","includeSubdirectories":true,"vectorPlacement":"AUTO"}
 ```
 
-服务端自动识别文件或目录。文件必须符合数据集分类支持的空间解析格式，否则直接失败且不登记。影像和地形当前支持 `.tif/.tiff`，矢量支持 `.geojson/.json`；扩展名通过后仍须解析真实内容。`vectorPlacement` 仅用于矢量数据集，可省略，默认AUTO。
+服务端自动识别文件或目录，按数据集分类接收上述入口及允许的配套文件；扩展名通过后仍须解析真实内容，不能可靠归组的文件先保留。`vectorPlacement` 仅用于矢量数据集，可省略，默认AUTO。
 
 目录只登记匹配格式的普通文件；`includeSubdirectories` 默认false，仅扫描当前层，true递归扫描所有层级。不支持的文件跳过，同一数据集内已登记的工作区相对路径按重复跳过；无符合条件文件时任务失败。扫描不跟随链接或Windows目录联接，禁止绝对路径、上级目录和盘符路径。`gis.processing.workspace-max-scan-entries` 默认10000，计入目录和文件条目；后台边扫描边登记，超限明确停止，保留已登记文件，等待这些文件解析结束后报告失败。执行复用现有有界 `taskExecutor`，最多保留100个活动接入任务，繁忙时返回503。
 
-前端用提交响应的 `progress.progressId` 匹配 `/api/gis/events/stream` 消息的 `data.progressId`。`SCANNING` 阶段 `overall.percent=null`，通过 `metrics` 读取扫描条目、登记、重复、不支持及失败计数。扫描结束进入 `EXTRACTING_METADATA`，按确定的解析对象计算整体百分比。只有新登记文件全部进入空间提取终态后才结束；重复和不支持文件记录为 `summary.skipped`，不计入解析百分比分母。
+前端用提交响应的 `progress.progressId` 匹配 `/api/gis/events/stream` 消息的 `data.progressId`。`SCANNING` 阶段 `overall.percent=null`，通过 `metrics` 读取扫描条目、登记、重复、不支持及失败计数。扫描结束进入 `EXTRACTING_METADATA`。`summary.unit=FILE` 统计本批物理文件的接收结果，成员随所属组结果归集；重复和已接收未解析文件计入 `summary.skipped`，允许本次接收收尾，不代表空间解析成功。`FILE_GROUPS`、`COMPLETED_FILE_GROUPS`、`FAILED_FILE_GROUPS`、`DUPLICATE_FILE_GROUPS`、`PARKED_FILE_GROUPS` 指标使用 `unit=FILE_GROUP`，按组去重；`RECEIVED_UNPARSED_FILES` 明确展示缺件、未知或能力阻塞的文件数。
 
 `GET /api/gis/progress/{progressId}` 返回统一完整快照，用于提交竞态、刷新及断线补查。工作区终态保留30分钟，服务重启或过期后返回404（PROGRESS_EXPIRED）。逐文件明细使用文件分页及 `sourceType=UPLOAD/WORKSPACE` 筛选。已入库元数据待办仍按数据库队列恢复；快照恢复不等于恢复目录扫描。
 
-文件模型和查询统一使用 `fileStatus`、`createdBy`，替代原 `uploadStatus`、`uploadedBy`；传输明细的文件快照同步使用新名称。工作区文件返回 `sourceType=WORKSPACE`、`workspaceCode`、`relativePath` 和Unix毫秒单位的 `sourceModifiedAt`，托管存储字段为空。读取时校验源大小和修改时间；发现变化或不可用时空间元数据标记失败。重试会刷新源文件快照，已生成的矢量图层仍按现有规则保护，避免覆盖编辑内容。源文件变化不会主动推送，须在读取或重新接入时验证。
+文件模型和查询使用 `fileStatus`、`createdBy`。工作区文件返回 `sourceType=WORKSPACE`、`workspaceCode`、`relativePath` 和Unix毫秒单位的 `sourceModifiedAt`，托管存储字段为空。读取时校验源大小和修改时间；摘要与格式头在组装事务外读取，锁内重验属性和归属。发现变化或不可用时失效相关解析资格及组指纹，已有编辑成果受保护。源文件变化不会主动推送，须在读取或重新接入时验证。
 
-删除工作区文件记录或整个数据集都保留工作区源文件。下载和从已管理文件提交处理任务统一按来源解析路径；实际下载仍按既有规则记录导出传输记录。
+删除工作区文件记录、文件组或整个数据集都保留工作区源文件。下载和从已管理文件提交处理任务统一按来源解析路径；上传、下载操作由统一操作日志留痕。
 
 ### 任务标识的关系
 
-`ProgressSnapshot.progressId` 是字符串进度键：上传使用 `recordNo=upload_...`，数据处理使用 `taskNo`，工作区接入使用 `workspace_...`，归档使用 `archiveNo`。工作区进度通过 `resource` 指向对应数据集，归档的 `summary` 统计一个最终归档文件，打包源文件数放在 `metrics`。数据处理统一 `type=GIS_PROCESSING`，`category=TERRAIN/IMAGERY/VECTOR`。
+`ProgressSnapshot.progressId` 是字符串进度键：上传使用 `upload_...`，数据处理使用 `taskNo`，工作区接入使用 `workspace_...`，归档使用 `archiveNo`。上传和工作区进度通过 `resource` 指向对应数据集，归档的 `summary` 统计一个最终归档文件，打包源文件数放在 `metrics`。数据处理统一 `type=GIS_PROCESSING`，`category=TERRAIN/IMAGERY/VECTOR`。
 
 现有切片处理提交响应中的 `taskId` 是 `gis_processing_task.id`，用于 `GET /api/gis/task/{taskId}`；同一响应中的 `taskNo` 才对应事件消息 `data.progressId`。文件的 `fileMetaId` 是独立的数据身份，一个接入进度可以产生多个文件，这些文件以后可被多个独立的切片处理任务引用。工作区进度编号不能传给处理任务详情接口。
+
+当前处理任务均为静态瓦片生成任务，每个任务对应一个静态瓦片集。`COMPLETED` 表示瓦片生成完成，服务发布状态由发布记录单独管理。
+
+- `PATCH /api/gis/task/{taskId}/name`：请求体为 `{"taskName":"新名称"}`，去除首尾空白后须为 1～200 个字符；仅修改名称和更新时间。
+- `DELETE /api/gis/task/{taskId}`：仅允许删除终态任务，存在已发布服务时须先停用，存在排队中或运行中的归档时须等待结束。删除任务、输入快照、瓦片集、已停用发布记录和归档记录，同时清理生成的瓦片、日志及归档包，保留来源文件。文件清理失败时返回错误并保留数据库记录，可再次删除；已清理的文件无法随数据库事务回滚。
 
 ## 统一实时事件与进度协议
 
@@ -120,7 +145,7 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
       {"code": "CONFIRMED_BYTES", "name": "确认落盘字节", "value": 0, "total": 4096, "unit": "BYTE"}
     ],
     "summary": {"total": 2, "succeeded": 0, "failed": 0, "skipped": 0, "unit": "FILE"},
-    "resource": {"type": "FILE_TRANSFER_RECORD", "id": "upload_20261027153000_abcdef123456", "detailUrl": "/api/gis/file-transfer-records/upload_20261027153000_abcdef123456"},
+    "resource": {"type": "DATA_SET", "id": "1", "detailUrl": "/api/gis/dataSet/1"},
     "error": null,
     "startedAt": "2026-10-27T15:30:00",
     "finishedAt": null,
@@ -133,7 +158,7 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 前端按 `progressId` 保存最新快照，再按 `(revision.epoch, revision.sequence)` 比较新旧；HTTP补查也走相同合并规则。持久化流程重试或快照重新建立时原子递增业务表的 `progress_epoch`，新代次可以从 sequence=0 开始，旧执行句柄不能覆盖新代次。普通查询命中内存快照时不修改版本。持久化进度缺失时先核对有效的Redis终态缓存；运行态或缓存缺失时从业务表恢复，只返回能够确认的工作量。补查发现数据库已结束而内存仍在运行时，会修复并补发终态。
 
-上传、工作区接入、数据处理、归档的提交及重试响应提供统一 `progress` 引用；分块响应保留 nextOffset 等传输确认字段。上传记录的字节比例字段为 `transferPercent`，归档记录的字节比例字段为 `packingPercent`，两者均不等于完整业务流程的整体百分比。
+上传、工作区接入、数据处理、归档的提交响应提供统一 `progress` 引用；分块响应保留 nextOffset 等传输确认字段。上传阶段的字节指标与归档记录的 `packingPercent` 均不等于完整业务流程的整体百分比。组配置及重试结果通过组详情和现有进度事件查看，不建立上传批次历史接口。
 
 数值更新每500毫秒最多推送一次，并补发窗口末尾的最新快照；创建、阶段切换和终态立即推送。Redis使用 `ocean-admin:progress:v1:` 前缀，终态缓存30分钟，运行态6小时无活动后清理。业务状态仍以数据库为准；服务重启后的精细计量可能丢失，重建快照不会恢复执行器。当前工作区运行态和连接路由仍为单实例能力。
 
@@ -196,15 +221,15 @@ location ~ ^/api/(platform/monitor/metrics|gis/events/stream)$ {
 
 ## 可编辑矢量图层与要素
 
-向矢量数据集（`categoryId=2`）调用现有 `POST /api/gis/uploads/chunks` 上传 `.geojson/.json`，空间元数据完成后会自动生成可编辑图层，无需从已管理文件再次提交导入。默认每个文件一个 SINGLE 图层，名称取原文件名去扩展名并截取前100个字符。
+向矢量数据集（`categoryId=2`）调用现有 `POST /api/gis/uploads/chunks` 或工作区接入接口，提交支持的矢量主文件及其配件。完整文件组在空间元数据提取中自动生成可编辑图层，无需再从已管理文件提交矢量导入。多图层格式保留来源图层标识，再按数据集分类规则和几何类别形成业务图层。
 
-原上传批次持续展示 `UPLOADING → EXTRACTING_METADATA → COMPLETED/FAILED/PARTIAL_FAILED`；多个文件可并行提取。矢量文件在 `EXTRACTING_METADATA` 阶段内流式写入图层和要素，仅图层 READY 后批次成功数量才增加。
+原接入进度持续展示 `UPLOADING/SCANNING → EXTRACTING_METADATA → COMPLETED/FAILED/PARTIAL_FAILED`；不同组可并行提取。矢量组在 `EXTRACTING_METADATA` 阶段内流式写入图层和要素，仅所有图层 READY 后关联成员才计入解析成功；缺件和阻塞输入作为已接收未解析项收尾。
 
-通过 `GET /api/gis/file-transfer-records/{taskId}` 查询原上传批次；`files[]` 中的 `vectorLayerIds` 返回由该原始文件提取的图层 ID。矢量提取共用原批次的 Redis/SSE 进度，不创建独立任务。
+通过 `GET /api/gis/progress/{progressId}` 查询本次接入进度，通过文件组详情和现有图层列表查询持久结果。矢量提取共用接入的 Redis/SSE 进度，不创建独立导入任务或上传批次历史表。
 
-`POST /api/gis/file-transfer-records/{taskId}/retry` 重试该批次中已完整上传但提取失败的文件。未完成矢量图层及要素会先清理后重新提取；成功文件及其编辑成果不会重新提取。传输失败的文件需重新上传。
+完整且具备读取条件的失败组通过文件组重试接口重新提取；未完成图层及要素清理后重建，已有成功图层及其编辑成果不会自动覆盖。传输失败文件需重新上传。
 
-首期每个 GeoJSON 文件生成一个 `layerKey=default` 的图层，所有 Feature 进入该图层；MultiPolygon、GeometryCollection 不拆成多条要素。文件、图层与要素通过 `gis_vector_layer.source_file_id` 和 `gis_vector_feature.layer_id` 直接关联。
+图层通过 `gis_vector_layer.source_file_id` 关联文件组主入口，要素通过 `gis_vector_feature.layer_id` 关联图层。来源图层、Feature 序号和几何路径用于追溯；GeometryCollection 按分类需要拆分递归分量，Multi 几何保持整体。原始文件和配件不因要素编辑而改写。
 
 ```text
 GET    /api/gis/vector/layers?dataSetId=...&current=1&size=10
@@ -228,17 +253,17 @@ DELETE /api/gis/vector/layers/{layerId}/features/{featureId}
 
 文件导入长期兼容顶层旧式 WGS84 命名 CRS，格式为 `{"crs":{"type":"name","properties":{"name":"..."}}}`。允许的 name 为 `CRS84`、`OGC:CRS84`、`urn:ogc:def:crs:OGC:1.3:CRS84`、`urn:ogc:def:crs:OGC::CRS84`、`EPSG:4326`、`urn:ogc:def:crs:EPSG::4326`。crs 可以出现在 features 之前或之后；仅校验声明并保持原坐标，不交换经纬度、不执行坐标转换。空间元数据与要素导入共用校验，原声明保存在空间元数据的 `extraMetadata.declaredCrs`，内部按 OGC:CRS84/SRID4326 处理，原文件不变。
 
-`crs:null`、链接型声明、未知或其他坐标系（如 EPSG:3857）以及 FeatureCollection 内的子级声明均不支持；元数据提取阶段返回 UNSUPPORTED_CRS。顶层 Feature、Geometry 或 GeometryCollection 文件同样支持上述声明，子级声明一律拒绝。仅在业务 properties 内名为 crs 的普通属性不受影响。没有 crs 的标准文件继续按原规则导入；此前因受支持声明被拒绝的上传文件可重试原导入批次，元数据提取成功后自动继续要素入库。
+`crs:null`、链接型声明、未知或其他坐标系（如 EPSG:3857）以及 FeatureCollection 内的子级声明均不支持；元数据提取阶段返回 UNSUPPORTED_CRS。顶层 Feature、Geometry 或 GeometryCollection 文件同样支持上述声明，子级声明一律拒绝。仅在业务 properties 内名为 crs 的普通属性不受影响。没有 crs 的标准文件继续按原规则导入；失败输入可在满足读取条件后显式重试文件组。
 
 要素详情及新增修改响应提供 ETag。PUT、DELETE 要素时必须把该值原样放入 `If-Match`；删除图层使用图层详情的 ETag。缺失返回428，版本过期返回412。编辑在同一事务内更新要素版本、图层数据版本、数量及范围；图层范围与原文件的空间元数据独立维护。被活动图层或待执行导入引用的来源文件，不能删除或变更来源信息；删除图层会解除其来源引用。
 
 范围查询使用真实要素 `ST_Intersects`，`bbox=west,south,east,north`，west>east 表示跨日期变更线。limit 为1至1000，默认200；每页另有约8MiB载荷预算。响应包含 hasMore、nextCursor、dataVersion；后续页保留相同bbox并传cursor。图层编辑后旧cursor返回409，客户端应重新加载第一页。省略bbox可用于有界的属性列表遍历。
 
-后台默认每5秒扫描，使用独立的两个矢量执行线程；可通过 `gis.vector.poll-interval` 配置扫描间隔。持久化任务为权威状态，Redis/SSE仅用于实时进度。
+矢量提取共用 `gis.metadata.poll-interval` 和空间元数据执行线程，不另建矢量任务队列。文件组状态、输入修订与主入口解析租约共同约束提交，Redis/SSE仅用于实时进度。
 
 ## 矢量图层样式方案
 
-SINGLE 导入模式保持不变。同一数据图层可以包含点、线、面，并关联多份样式方案。新建图层在同一事务内生成一份包含面、线、点基础规则的默认方案。样式保存在 `gis_vector_style.definition` JSONB 中，修改样式不改写几何、要素版本或图层 dataVersion，已有要素分页游标仍可继续使用。
+接入图层按来源图层、分类与几何类别生成。已识别图层继承数据集分类样式；未知图层默认关闭，须显式配置。自定义样式方案保存在 `gis_vector_style.definition` JSONB 中，修改样式不改写几何、要素版本或图层 dataVersion，已有要素分页游标仍可继续使用。
 
 前端调用 `GET /api/gis/vector/layers/{layerId}/default-style` 获取默认方案，使用动态 MVT 浏览并本地应用规则；原始 GeoJSON 用于精确查询及编辑。也可从方案列表选择其他方案。后端不把样式混入 Feature.properties，样式层级不改变原始要素。点、线、面可以使用不同渲染层共享同一份数据。三维地图的相机高度或比例尺须由前端换算为双方约定的 zoom，服务端不把地形瓦片层级自动当作样式层级。
 
@@ -305,7 +330,7 @@ symbol 使用以下字段，保存时会补齐可选字段默认值，前端可�
 
 ## 动态矢量瓦片与原始要素编辑
 
-制图浏览使用 EPSG:3857 的 XYZ MVT，保留 SINGLE 数据图层与混合几何。地图不再截取视窗中的前2000个要素。点默认按全球对齐的64像素网格聚合，可关闭聚合；线使用半像素容差简化，面使用一致的瓦片网格量化及裁剪，不逐面独立简化，避免破坏共享边界。原始 EPSG:4326 的 XY/XYZ 几何及属性不随瓦片生成改变。极区显示裁剪到 Web Mercator 纬度范围，原始要素仍可精确查询。
+制图浏览使用 EPSG:3857 的 XYZ MVT，按已导入业务图层组织显示。地图不再截取视窗中的前2000个要素。点默认按全球对齐的64像素网格聚合，可关闭聚合；线使用半像素容差简化，面使用一致的瓦片网格量化及裁剪，不逐面独立简化，避免破坏共享边界。原始 EPSG:4326 的 XY/XYZ 几何及属性不随瓦片生成改变。极区显示裁剪到 Web Mercator 纬度范围，原始要素仍可精确查询。
 
 调用顺序：
 

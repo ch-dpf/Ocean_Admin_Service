@@ -114,6 +114,13 @@ gis:
     imagery-overview-min-size: ${GIS_IMAGERY_OVERVIEW_MIN_SIZE:512}
     archive-compression-level: ${GIS_ARCHIVE_COMPRESSION_LEVEL:1}
     workspace-max-scan-entries: ${GIS_WORKSPACE_MAX_SCAN_ENTRIES:10000}
+    gdal-version: '@gdal.version@'
+    gdal-worker-max-heap: ${GIS_GDAL_WORKER_MAX_HEAP:1g}
+    gdal-native-library-path: ${GIS_GDAL_NATIVE_LIBRARY_PATH:}
+    gdal-process-timeout: ${GIS_GDAL_PROCESS_TIMEOUT:30m}
+    gdal-max-log-bytes: ${GIS_GDAL_MAX_LOG_BYTES:65536}
+    gdal-max-metadata-bytes: ${GIS_GDAL_MAX_METADATA_BYTES:16777216}
+    gdal-max-output-bytes: ${GIS_GDAL_MAX_OUTPUT_BYTES:107374182400}
     workspaces:
       default: ${GIS_PROCESSING_WORKSPACE_DEFAULT:gis/workspaces/default}
   publication:

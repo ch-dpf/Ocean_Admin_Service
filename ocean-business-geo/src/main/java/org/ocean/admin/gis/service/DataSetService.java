@@ -10,6 +10,9 @@ import org.ocean.admin.gis.entity.GisDataSetCategory;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import org.ocean.admin.gis.mapper.GisFileGroupMapper;
+import org.ocean.admin.gis.entity.GisFileGroup;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
@@ -46,6 +49,7 @@ public class DataSetService {
     private final VectorDataSetStyleService vectorDataSetStyles;
     private final GisDataSetMapper gisDataSetMapper;
     private final GisFileMetaMapper gisFileMetaMapper;
+    private final GisFileGroupMapper fileGroupMapper;
     private final GisProcessingInputMapper processingInputMapper;
     private final GisFileSpatialMetadataMapper spatialMetadataMapper;
     private final FileUploadUtil fileUploadUtil;
@@ -213,6 +217,9 @@ public class DataSetService {
             throw new IllegalStateException("数据集文件正在被处理任务使用，请等待任务结束后重试: "
                     + task.taskName() + " (" + task.taskNo() + ", " + task.taskStatus() + ")");
         }
+        List<GisFileGroup> groups = fileGroupMapper.lockByDataSet(id);
+        if (groups.stream().anyMatch(group -> java.util.Set.of("QUEUED", "RUNNING").contains(group.getParseStatus())))
+            throw new IllegalStateException("数据集仍有文件组正在解析，请等待结束");
         List<GisFileMeta> files = gisFileMetaMapper.selectAllByDataSetIdForUpdate(id);
         if (files.stream().anyMatch(file -> java.util.Set.of("WAITING", "QUEUED", "RUNNING").contains(file.getMetadataStatus()))) {
             throw new IllegalStateException("数据集仍有文件正在提取空间元数据，请等待处理结束后重试");
@@ -282,6 +289,12 @@ public class DataSetService {
     private void populateFileInformation(List<GisDataSetVO> records, boolean includeFootprints, double tolerance) {
         if (records.isEmpty()) return;
         List<Long> ids = records.stream().map(GisDataSetVO::getId).toList();
+        Map<Long, Long> groupCounts = new TreeMap<>();
+        for (Map<String, Object> row : fileGroupMapper.selectMaps(new QueryWrapper<GisFileGroup>()
+                .select("data_set_id", "COUNT(*) AS group_count").in("data_set_id", ids)
+                .ne("assembly_status", "DUPLICATE").groupBy("data_set_id"))) {
+            groupCounts.put(((Number) row.get("data_set_id")).longValue(), ((Number) row.get("group_count")).longValue());
+        }
         Map<Long, GisDataSetVO.FileSummary> summaries = gisFileMetaMapper.selectDataSetFileSummaries(ids).stream()
                 .collect(Collectors.toMap(GisDataSetVO.FileSummary::getDataSetId, item -> item));
         Map<Long, List<GisDataSetVO.FootprintRow>> footprints = includeFootprints
@@ -295,6 +308,7 @@ public class DataSetService {
                 summary.setDataSetId(record.getId());
             }
             record.setFileSummary(summary);
+            record.setFileGroupCount(groupCounts.getOrDefault(record.getId(), 0L));
             if (includeFootprints) {
                 List<GisDataSetVO.FootprintFeature> features = footprints.getOrDefault(record.getId(), List.of()).stream()
                         .map(row -> new GisDataSetVO.FootprintFeature("Feature", row.getId().toString(),

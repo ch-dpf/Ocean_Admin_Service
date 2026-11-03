@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,7 @@ import org.springframework.validation.annotation.Validated;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.time.Duration;
 
 /** GIS 处理产物目录及服务器受控工作空间配置。 */
 @Data
@@ -46,4 +48,19 @@ public class GisProcessingProperties {
     @Min(1)
     @Max(100000)
     private int workspaceMaxScanEntries = 10000;
+    /** Java API、JNI 与原生核心库使用同一固定版本，由工作进程核验。 */
+    @NotBlank
+    private String gdalVersion = "3.13.0";
+    /** 独立 Java 读取进程的堆上限；原生内存另计，不继承主服务 JVM 参数。 */
+    @Pattern(regexp = "[1-9][0-9]*[mMgG]")
+    private String gdalWorkerMaxHeap = "1g";
+    /** JNI 及其依赖所在目录；留空时使用操作系统已配置的原生库搜索路径。 */
+    private String gdalNativeLibraryPath = "";
+    private Duration gdalProcessTimeout = Duration.ofMinutes(30);
+    @Min(1024)
+    private int gdalMaxLogBytes = 65536;
+    @Min(1024)
+    private int gdalMaxMetadataBytes = 16777216;
+    @Positive
+    private long gdalMaxOutputBytes = 107374182400L;
 }

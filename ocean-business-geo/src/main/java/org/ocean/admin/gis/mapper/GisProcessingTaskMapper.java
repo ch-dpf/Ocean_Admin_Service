@@ -2,6 +2,7 @@ package org.ocean.admin.gis.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Insert;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -9,6 +10,12 @@ import org.ocean.admin.gis.entity.GisProcessingTask;
 
 @Mapper
 public interface GisProcessingTaskMapper extends BaseMapper<GisProcessingTask> {
+
+    @Select("SELECT id FROM ocean_gis.gis_processing_task WHERE id = #{taskId} AND deleted = 0 FOR UPDATE")
+    Long lockActiveTask(@Param("taskId") Long taskId);
+
+    @Delete("DELETE FROM ocean_gis.gis_processing_task WHERE id = #{taskId}")
+    int deletePermanently(@Param("taskId") Long taskId);
 
     @org.apache.ibatis.annotations.Select(value = "UPDATE ocean_gis.gis_processing_task "
             + "SET progress_epoch = progress_epoch + 1 "

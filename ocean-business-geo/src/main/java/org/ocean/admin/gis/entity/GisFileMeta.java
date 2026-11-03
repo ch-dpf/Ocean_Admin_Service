@@ -23,6 +23,12 @@ public class GisFileMeta {
 
     /** 所属数据集 */
     private Long dataSetId;
+    /** 服务端识别的独占文件组；尚不能确定归属时为空。 */
+    private Long fileGroupId;
+    /** 根据可靠来源保留的组内相对路径，不使用永久存储名推测。 */
+    private String memberPath;
+    /** 本次接入的文件处理结果，独立于文件组的解析状态。 */
+    private String ingestOutcome;
     /** 仅在接入执行期间关联进度，结束后清空，不保存批次历史。 */
     private String ingestProgressId;
     private Integer ingestFileIndex;
@@ -68,7 +74,7 @@ public class GisFileMeta {
     /** 文件处理错误信息 */
     private String errorMessage;
 
-    /** WAITING（前置阶段未结束）、QUEUED、RUNNING、COMPLETED、FAILED、NOT_APPLICABLE。 */
+    /** WAITING、QUEUED、RUNNING、COMPLETED、FAILED、NOT_APPLICABLE；PARKED 表示已保存但暂不能解析。 */
     private String metadataStatus;
     private Long metadataVersion;
     private LocalDateTime metadataLeaseExpiresAt;

@@ -105,8 +105,9 @@ public class ImageryPublicationService implements PublicationProtocol {
     public PublicationAccess buildAccess(GisPublication publication, GisTileSet tileSet) {
         String root = recordService.buildServiceRoot(PROCESSING_TYPE, publication.getServiceCode());
         String extension = "PNG".equalsIgnoreCase(tileSet.getOutputFormat()) ? "png" : "jpg";
+        String tileUrlTemplate = root + "{z}/{x}/{y}." + extension;
         return new PublicationAccess(
-                root, root + "tilejson.json", root + "{z}/{x}/{y}." + extension);
+                tileUrlTemplate, root + "tilejson.json", tileUrlTemplate);
     }
 
     private PublishedArtifact loadPublishedArtifact(String serviceCode) {

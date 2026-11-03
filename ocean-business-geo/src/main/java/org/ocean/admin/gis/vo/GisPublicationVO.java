@@ -19,6 +19,10 @@ public class GisPublicationVO {
 
     private Long tileSetId;
     private Long sourceTaskId;
+
+    @Schema(description = "通过任务 ID 查询的当前任务名称，不保存名称快照")
+    private String taskName;
+
     private Long dataSetId;
 
     @Schema(description = "发布状态：PUBLISHED、DISABLED")
@@ -31,7 +35,7 @@ public class GisPublicationVO {
     private Integer minZoom;
     private Integer maxZoom;
 
-    @Schema(description = "已发布服务的访问根地址")
+    @Schema(description = "服务访问地址：地形为以 / 结尾的根地址，影像为包含 {z}/{x}/{y} 和格式后缀的瓦片模板")
     private String serviceUrl;
 
     @Schema(description = "服务描述文件地址，影像为 tilejson.json，地形为 layer.json")

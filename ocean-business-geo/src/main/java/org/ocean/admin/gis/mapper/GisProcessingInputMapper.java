@@ -25,7 +25,11 @@ public interface GisProcessingInputMapper extends BaseMapper<GisProcessingInput>
             SELECT t.id AS task_id, t.task_no, t.task_name, t.task_status
             FROM ocean_gis.gis_processing_input i
             JOIN ocean_gis.gis_processing_task t ON t.id = i.task_id
-            WHERE i.file_meta_id = #{fileMetaId}
+            WHERE (i.file_meta_id = #{fileMetaId}
+                OR (i.file_meta_id IS NOT NULL AND i.source_file_group_id = (
+                    SELECT f.file_group_id FROM ocean_gis.gis_file_meta f
+                    WHERE f.id = #{fileMetaId} AND f.deleted = 0
+                )))
               AND t.deleted = 0
               AND t.task_status IN ('QUEUED', 'RUNNING')
             ORDER BY t.create_time, t.id

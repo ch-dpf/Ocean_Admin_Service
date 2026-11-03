@@ -15,6 +15,7 @@ import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngineRegistry;
 import org.ocean.admin.gis.processing.input.GisProcessingInputResolverRegistry;
+import org.ocean.admin.gis.util.FileUploadUtil;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
@@ -53,19 +54,30 @@ public class ProcessingWorker {
             GisProcessingType processingType = task.getProcessingType();
             GisInputSourceType sourceType = task.getSourceType();
             GisProcessingParameters parameters = taskService.readParameters(task);
-            List<Path> paths = inputResolverRegistry.require(sourceType).resolveRuntime(inputs);
             GisProcessingWorkspace workspace = storageService.workspaceFromOutputKey(
                     tileSet.getOutputKey());
             GisFileProcessingEngine engine = engineRegistry.require(processingType);
 
             taskLifecycle.start(taskId, progressHandle, "开始执行切片引擎");
             inputMapper.updateTaskStatus(taskId, "RUNNING", null);
-            if (inputs.size() == 1 && "DIRECTORY".equals(inputs.get(0).getInputKind())) {
-                engine.processFolder(paths.get(0), workspace, parameters,
-                        progress -> taskLifecycle.reportProgress(progressHandle, progress));
-            } else {
-                engine.process(paths, workspace, parameters,
-                        progress -> taskLifecycle.reportProgress(progressHandle, progress));
+            try (var runtime = inputResolverRegistry.require(sourceType).openRuntime(inputs, () -> {
+                if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("切片任务已中断");
+            }, progress -> taskLifecycle.reportProgress(progressHandle, progress))) {
+                List<Path> paths = runtime.paths();
+                if (sourceType == GisInputSourceType.MANAGED_FILE) {
+                    for (Path path : paths) {
+                        String name = path.getFileName().toString();
+                        engine.validate(name, FileUploadUtil.extensionOf(name), path);
+                    }
+                }
+                if (inputs.size() == 1 && "DIRECTORY".equals(inputs.get(0).getInputKind())) {
+                    engine.processFolder(paths.get(0), workspace, parameters,
+                            progress -> taskLifecycle.reportProgress(progressHandle, progress));
+                } else {
+                    engine.process(paths, workspace, parameters,
+                            progress -> taskLifecycle.reportProgress(progressHandle, progress));
+                }
+                runtime.verifySources();
             }
             refreshTileMetadata(tileSet, workspace);
             tileSet.setTileSetStatus("READY");

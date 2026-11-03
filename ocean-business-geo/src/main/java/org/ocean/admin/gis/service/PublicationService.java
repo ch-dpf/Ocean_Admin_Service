@@ -7,6 +7,7 @@ import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.vo.GisPublicationVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -53,9 +54,10 @@ public class PublicationService {
                 page.getRecords().stream().map(this::toVO).toList());
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public GisPublicationVO publish(GisProcessingType processingType, Long sourceTaskId) {
         PublicationProtocol protocol = requireProtocol(processingType);
-        GisProcessingTask task = taskService.getRequired(sourceTaskId);
+        GisProcessingTask task = taskService.getRequiredForUpdate(sourceTaskId);
         GisTileSet tileSet = recordService.getRequiredTileSet(sourceTaskId, processingType);
         PublicationProtocol.PublishedArtifact artifact =
                 protocol.validateForPublish(task, tileSet);
@@ -107,6 +109,7 @@ public class PublicationService {
                 .processingType(tileSet.getTileType())
                 .tileSetId(tileSet.getId())
                 .sourceTaskId(tileSet.getTaskId())
+                .taskName(taskService.getRequired(tileSet.getTaskId()).getTaskName())
                 .dataSetId(publication.getDataSetId())
                 .status(publication.getStatus())
                 .outputKey(tileSet.getOutputKey())

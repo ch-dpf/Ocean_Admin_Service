@@ -10,6 +10,7 @@ import org.ocean.admin.gis.dto.GisUploadChunkCommand;
 import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
+import org.ocean.admin.gis.entity.GisFileFormat;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
@@ -210,15 +211,9 @@ public class FileUploadService {
     }
 
     private void validateType(GisDataSet target, String name) {
-        Set<String> allowed = switch (target.getCategoryId().intValue()) {
-            case 0 -> Set.of("tif", "tiff", "img", "jp2", "png", "jpg", "jpeg", "tfw", "prj", "aux", "xml");
-            case 1 -> Set.of("tif", "tiff", "dem", "hgt", "terrain", "asc", "prj", "xml");
-            case 2 -> Set.of("shp", "shx", "dbf", "prj", "cpg", "sbn", "sbx", "geojson", "json", "kml", "kmz", "gpkg");
-            default -> throw new IllegalArgumentException("数据集分类无效");
-        };
-        if (!allowed.contains(FileUploadUtil.extensionOf(name))) throw new IllegalArgumentException("文件格式与数据集分类不匹配");
+        if (!GisFileFormat.accepts(target.getCategoryId(), name))
+            throw new IllegalArgumentException("文件格式与数据集分类不匹配");
     }
-
     private long metric(ProgressSnapshot snapshot, String code) {
         return snapshot.metrics().stream().filter(value -> code.equals(value.code())).mapToLong(ProgressSnapshot.Metric::value).findFirst().orElse(-1);
     }
