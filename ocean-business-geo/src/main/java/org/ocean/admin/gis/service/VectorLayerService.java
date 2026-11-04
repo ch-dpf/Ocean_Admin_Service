@@ -65,7 +65,7 @@ public class VectorLayerService {
 
     /** 提取结果由文件元数据生命周期统一提交，导入服务不提前将图层标记为 READY。 */
     public record VectorExtraction(List<Long> layerIds, long sourceFeatures, long parts, long unknownParts,
-            long warnings, Map<String, Long> groupCounts) {
+            long warnings, long emptyGeometryFeatures, Map<String, Long> groupCounts) {
         public VectorExtraction {
             layerIds = List.copyOf(layerIds);
             groupCounts = Map.copyOf(groupCounts);
@@ -105,7 +105,7 @@ public class VectorLayerService {
         progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理与入库", 0, progressTotal, ProgressUnit.FEATURE));
         var snapshot = dataSetStyles.require(source.getDataSetId(), false);
         if (!Objects.equals(snapshot.getId(), source.getVectorDatasetStyleId())
-                || source.getVectorPlacement() == null || !Set.of("AUTO", "UNKNOWN").contains(source.getVectorPlacement())) {
+                || source.getVectorPlacement() == null || !Set.of("AUTO", "UNKNOWN", "X_LIGHT", "X_DARK").contains(source.getVectorPlacement())) {
             throw new ImportException("MISSING_VECTOR_IMPORT_CONFIG", "文件未固定样式与归组方式，禁止猜测或重导存量数据");
         }
         var template = dataSetStyles.compile(snapshot);
@@ -124,6 +124,7 @@ public class VectorLayerService {
         long[] statistics = {0, 0, 0, 0};
         long[] committedParts = {0};
         long[] processedFeatures = {0};
+        long[] emptyGeometryFeatures = {0};
         long sourceFeatures = 0;
         for (ImportLayer input : inputs) {
             String layerName = importLayerName(source, input);
@@ -132,8 +133,13 @@ public class VectorLayerService {
                     .findFirst().orElseThrow(() -> new IllegalStateException("原始集合身份缺失"));
             sourceFeatures += reader.read(input.geoJsonPath(), parsed -> {
                 JsonNode properties = json.readTree(parsed.properties());
-                for (var part : templateRules.parts(json.readTree(parsed.geometry()))) {
-                    var match = templateRules.classify(template, properties, part.kind(), "UNKNOWN".equals(source.getVectorPlacement()));
+                JsonNode geometry = json.readTree(parsed.geometry());
+                if (geometry.isNull()) {
+                    emptyGeometryFeatures[0]++;
+                    statistics[3]++;
+                }
+                for (var part : geometry.isNull() ? List.<VectorTemplateRules.GeometryPart>of() : templateRules.parts(geometry)) {
+                    var match = templateRules.classify(template, properties, part.kind(), source.getVectorPlacement(), layerName);
                     var group = targets.get(match.groupKey());
                     if (group == null) throw new IllegalStateException("数据集缺少模板分类: " + match.groupKey());
                     String layerKey = importLayerKey(input.sourceLayerKey(), match.groupKey(), part.kind());
@@ -182,7 +188,7 @@ public class VectorLayerService {
                 sourceFeatures, Math.max(progressTotal, sourceFeatures), ProgressUnit.FEATURE));
         if (sourceFeatures == 0 || layers.isEmpty()) throw new ImportException("EMPTY_GEOMETRY", "来源不包含可制图要素");
         return new VectorExtraction(layers.values().stream().map(GisVectorLayer::getId).toList(),
-                sourceFeatures, statistics[1], statistics[2], statistics[3], counts);
+                sourceFeatures, statistics[1], statistics[2], statistics[3], emptyGeometryFeatures[0], counts);
     }
 
     private int flushImportBatch(List<GisVectorFeature> batch, Runnable claimGuard) {
@@ -367,7 +373,8 @@ public class VectorLayerService {
         var original = mapper.group(source.getDataSetId(),source.getOriginalGroupId());
         if (original != null && "UNKNOWN_CLASSIFICATION".equals(original.getNodeType())) return source.getId();
         var template = dataSetStyles.compile(dataSetStyles.require(source.getDataSetId(),false));
-        var classification = templateRules.classify(template,json.readTree(feature.getPropertiesJson()),source.getGeometryType(),false);
+        String placement = original == null ? "AUTO" : template.groups().get(original.getGroupKey()).path("placement").asText("AUTO");
+        var classification = templateRules.classify(template, json.readTree(feature.getPropertiesJson()), source.getGeometryType(), placement, source.getLayerName());
         var group = mapper.groups(source.getDataSetId()).stream()
                 .filter(g -> g.getGroupKey().equals(classification.groupKey())).findFirst().orElseThrow();
         var target = source;

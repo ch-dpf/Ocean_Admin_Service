@@ -51,6 +51,32 @@ public class ProcessingTaskRecordService {
     private final GisPublicationMapper publicationMapper;
     private final GisProcessingStorageService storageService;
 
+    /** 静态矢量成果只允许读取已完成且仍有效的任务目录。 */
+    public java.nio.file.Path vectorArtifact(Long taskId, String relative) {
+        var task = getRequired(taskId);
+        var tiles = tileSetMapper.selectByTaskId(taskId);
+        if (task.getProcessingType() != GisProcessingType.VECTOR || task.getTaskStatus() != TaskStatus.COMPLETED
+                || tiles == null || !"READY".equals(tiles.getTileSetStatus()))
+            throw new IllegalArgumentException("静态矢量成果尚未完成或已失效");
+        if (!relative.matches("(manifest|style)\\.json|[0-9]{1,2}/[0-9]+/[0-9]+\\.mvt"))
+            throw new IllegalArgumentException("非法矢量成果路径");
+        var root = storageService.resolveTiles(tiles.getOutputKey());
+        var path = root.resolve(relative).normalize();
+        try {
+            if (!path.toRealPath().startsWith(root.toRealPath()) || !java.nio.file.Files.isRegularFile(path))
+                throw new IllegalArgumentException("矢量成果文件不存在");
+        } catch (java.io.IOException ex) { throw new IllegalArgumentException("矢量成果文件不存在", ex); }
+        return path;
+    }
+
+    public JsonNode vectorManifest(Long taskId) throws java.io.IOException {
+        var manifest = (ObjectNode) objectMapper.readTree(vectorArtifact(taskId, "manifest.json").toFile());
+        manifest.put("tiles", "/api/gis/task/" + taskId + "/vector/{z}/{x}/{y}.mvt");
+        manifest.put("style", "/api/gis/task/" + taskId + "/vector/style.json");
+        manifest.put("tileVersion", "static-" + taskId);
+        return manifest;
+    }
+
     /** 发布、归档和删除共用任务行锁，事务调用方持有锁直到完成操作。 */
     public GisProcessingTask getRequiredForUpdate(Long taskId) {
         if (taskMapper.lockActiveTask(taskId) == null) {
@@ -403,10 +429,7 @@ public class ProcessingTaskRecordService {
                     integerOrNull(json, "maxZoom"),
                     textOrDefault(json, "resampling", null),
                     booleanOrNull(json, "transparent"));
-            case VECTOR -> new GisProcessingParameters.VectorProcessingParameters(
-                    textOrDefault(json, "targetCrs", "EPSG:3857"),
-                    textOrDefault(json, "tileProfile", "MVT"),
-                    textOrDefault(json, "outputFormat", "PBF"));
+            case VECTOR -> throw new IllegalArgumentException("该任务没有静态矢量数据与样式快照，请重新创建任务");
         };
     }
 

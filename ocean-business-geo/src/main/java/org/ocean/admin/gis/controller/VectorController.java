@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.GisVectorRequests;
 import org.ocean.admin.gis.service.VectorLayerService;
+import org.ocean.admin.gis.service.ProcessingService;
 import org.ocean.admin.gis.service.VectorStyleService;
 import org.ocean.admin.gis.service.VectorTileService;
 import org.ocean.admin.gis.service.VectorDataSetStyleService;
@@ -38,6 +39,14 @@ public class VectorController {
     private final VectorStyleService styles;
     private final VectorTileService tiles;
     private final VectorDataSetStyleService dataSetStyles;
+    private final ProcessingService processing;
+
+    @PostMapping("/datasets/{dataSetId}/static-tiles")
+    @Operation(summary = "使用已保存样式方案生成静态矢量瓦片")
+    public ResponseResult<?> buildStaticTiles(@PathVariable Long dataSetId,
+            @Valid @RequestBody GisVectorRequests.TileBuild request) {
+        return ResponseResult.success(processing.submitVector(dataSetId, request));
+    }
     private final org.ocean.admin.gis.service.VectorResourceService resources;
 
     @DeleteMapping("/resources/{id}")
@@ -47,7 +56,9 @@ public class VectorController {
     }
 
     @GetMapping("/datasets/{dataSetId}/style-schemes")
-    public ResponseResult<?> schemes(@PathVariable Long dataSetId) { return ResponseResult.success(styles.schemes(dataSetId)); }
+    public ResponseResult<?> schemes(@PathVariable Long dataSetId, @RequestParam(defaultValue = "false") boolean summary) {
+        return ResponseResult.success(summary ? styles.schemeOptions(dataSetId) : styles.schemes(dataSetId));
+    }
 
     @GetMapping("/datasets/{dataSetId}/style-schemes/{id}")
     public ResponseEntity<?> scheme(@PathVariable Long dataSetId,@PathVariable Long id) {

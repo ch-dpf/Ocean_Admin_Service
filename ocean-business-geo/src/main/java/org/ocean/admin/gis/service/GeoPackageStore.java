@@ -99,6 +99,18 @@ public class GeoPackageStore {
         }
     }
 
+    /** 静态任务一次启动一个进程并复用数据源，不经动态瓦片HTTP接口。 */
+    public void staticTiles(Path input, JsonNode definition, List<int[]> ranges, Path output,
+                            int maxBytes, int maxCompressedBytes, Runnable heartbeat) {
+        ObjectNode request = json.createObjectNode().put("packageOperation", "TILES")
+                .put("input", input.toString()).put("output", output.toString())
+                .put("maxBytes", maxBytes).put("maxCompressedBytes", maxCompressedBytes)
+                .put("maxOutputBytes", properties.getGdalMaxOutputBytes());
+        request.set("definition", definition);
+        request.set("ranges", json.valueToTree(ranges));
+        reader.executePackage(request, heartbeat);
+    }
+
     /** 仅由隔离 Worker 调用，路径均由主服务构造，客户端不能提交文件路径或 SQL。 */
     public static ObjectNode executeNative(JsonNode request, Path directory, ObjectMapper json) throws Exception {
         return switch (request.path("packageOperation").asText()) {
@@ -106,6 +118,7 @@ public class GeoPackageStore {
             case "BUILD" -> buildNative(request, json);
             case "QUERY" -> queryNative(request, json);
             case "TILE" -> tileNative(request, json);
+            case "TILES" -> staticTilesNative(request, json);
             case "EXPORT" -> exportNative(request, json);
             default -> throw new IllegalArgumentException("未知矢量包操作");
         };
@@ -134,35 +147,71 @@ public class GeoPackageStore {
 
     /** 一次打开文件完成一块瓦片，避免每页要素启动一次工作进程。 */
     private static ObjectNode tileNative(JsonNode request,ObjectMapper json) throws IOException {
+        DataSource data = ogr.Open(request.path("input").asText(), 0);
+        if (data == null) throw new IllegalStateException("矢量包不可读取");
+        try {
+            var bytes = new java.io.ByteArrayOutputStream();
+            try (var gzip = new java.util.zip.GZIPOutputStream(bytes)) { gzip.write(encodeTile(request, json, data)); }
+            return json.createObjectNode().put("body", java.util.Base64.getEncoder().encodeToString(bytes.toByteArray()));
+        } finally { data.delete(); }
+    }
+
+    private static ObjectNode staticTilesNative(JsonNode request, ObjectMapper json) throws IOException {
+        DataSource data = ogr.Open(request.path("input").asText(), 0);
+        if (data == null) throw new IllegalStateException("矢量工作快照不可读取");
+        Path output = Path.of(request.path("output").asText()).toAbsolutePath().normalize();
+        long completed = 0;
+        long outputBytes = 0;
+        try {
+            ObjectNode tileRequest = (ObjectNode) request.deepCopy();
+            for (JsonNode range : request.path("ranges")) {
+                int z = range.get(0).asInt();
+                for (int x = range.get(1).asInt(); x <= range.get(2).asInt(); x++) {
+                    Path directory = output.resolve(Integer.toString(z)).resolve(Integer.toString(x));
+                    Files.createDirectories(directory);
+                    for (int y = range.get(3).asInt(); y <= range.get(4).asInt(); y++) {
+                        tileRequest.put("z", z).put("x", x).put("y", y);
+                        byte[] body = encodeTile(tileRequest, json, data);
+                        outputBytes += body.length;
+                        if (outputBytes > request.path("maxOutputBytes").asLong())
+                            throw new IllegalStateException("静态矢量成果超过磁盘产物限额");
+                        var compressed = new java.io.ByteArrayOutputStream();
+                        try (var gzip = new java.util.zip.GZIPOutputStream(compressed)) { gzip.write(body); }
+                        if (compressed.size() > request.path("maxCompressedBytes").asInt())
+                            throw new IllegalStateException("静态瓦片超过压缩体积上限: " + z + "/" + x + "/" + y);
+                        Files.write(directory.resolve(y + ".mvt"), body, StandardOpenOption.CREATE_NEW);
+                        completed++;
+                    }
+                }
+            }
+            return json.createObjectNode().put("tileCount", completed);
+        } finally { data.delete(); }
+    }
+
+    private static byte[] encodeTile(JsonNode request, ObjectMapper json, DataSource data) throws IOException {
         JsonNode definition=request.path("definition");
         var encoder=new org.ocean.admin.gis.util.VectorTileEncoder(json,new org.ocean.admin.gis.util.VectorTemplateRules(json,new org.ocean.admin.gis.util.VectorStyleRules(json)));
         var tile=encoder.begin(request.path("z").asInt(),request.path("x").asInt(),request.path("y").asInt(),definition.path("tilePolicy"),request.path("maxBytes").asInt());
         var groups=new java.util.HashMap<Long,String>();
         for(JsonNode group:definition.path("groups")) groups.put(group.path("id").asLong(),group.path("groupKey").asText());
-        DataSource data=ogr.Open(request.path("input").asText(),0);
-        if(data==null) throw new IllegalStateException("矢量包不可读取");
         double[] b=tile.bbox();long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(25);
-        try {
-            for(JsonNode node:definition.path("layers")) {
-                var layer=json.treeToValue(node,org.ocean.admin.gis.entity.GisVectorLayer.class);
-                String table="l_"+layer.getId();
-                Layer rows=data.ExecuteSQL("SELECT feature_json FROM "+table+" WHERE fid IN (SELECT id FROM rtree_"+table+"_geom WHERE minx<="+b[2]+" AND maxx>="+b[0]+" AND miny<="+b[3]+" AND maxy>="+b[1]+") ORDER BY fid");
-                if(rows==null) throw new IllegalStateException("瓦片源图层不存在");
-                try {
-                    Feature row;
-                    while((row=rows.GetNextFeature())!=null) {
-                        try {
-                            if(System.nanoTime()>deadline) throw new IllegalStateException("文件瓦片查询超时");
-                            var feature=json.readValue(row.GetFieldAsString("feature_json"),org.ocean.admin.gis.entity.GisVectorFeature.class);
-                            tile.add(feature,layer,groups.get(layer.getGroupId()));
-                        } finally {row.delete();}
-                    }
-                } finally {data.ReleaseResultSet(rows);}
-            }
-            var bytes=new java.io.ByteArrayOutputStream();
-            try(var gzip=new java.util.zip.GZIPOutputStream(bytes)) {gzip.write(tile.finish());}
-            return json.createObjectNode().put("body",java.util.Base64.getEncoder().encodeToString(bytes.toByteArray()));
-        } finally {data.delete();}
+        for(JsonNode node:definition.path("layers")) {
+            var layer=json.treeToValue(node,org.ocean.admin.gis.entity.GisVectorLayer.class);
+            String table="l_"+layer.getId();
+            Layer rows=data.ExecuteSQL("SELECT feature_json FROM "+table+" WHERE fid IN (SELECT id FROM rtree_"+table+"_geom WHERE minx<="+b[2]+" AND maxx>="+b[0]+" AND miny<="+b[3]+" AND maxy>="+b[1]+") ORDER BY fid");
+            if(rows==null) throw new IllegalStateException("瓦片源图层不存在");
+            try {
+                Feature row;
+                while((row=rows.GetNextFeature())!=null) {
+                    try {
+                        if(System.nanoTime()>deadline) throw new IllegalStateException("文件瓦片查询超时");
+                        var feature=json.readValue(row.GetFieldAsString("feature_json"),org.ocean.admin.gis.entity.GisVectorFeature.class);
+                        tile.add(feature,layer,groups.get(layer.getGroupId()));
+                    } finally {row.delete();}
+                }
+            } finally {data.ReleaseResultSet(rows);}
+        }
+        return tile.finish();
     }
 
     private static DataSource create(Path path) {

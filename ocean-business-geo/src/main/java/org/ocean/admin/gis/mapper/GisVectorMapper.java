@@ -22,6 +22,24 @@ import java.util.List;
 /** 矢量图层、要素与样式的 PostGIS 持久化操作。 */
 @Mapper
 public interface GisVectorMapper {
+    @Update("""
+        UPDATE ocean_gis.gis_vector_dataset_style SET definition=CAST(#{definitionJson} AS jsonb),
+            cartography=CAST(#{cartographyJson} AS jsonb),template_checksum=#{templateChecksum},
+            template_id=#{templateId},template_version=#{templateVersion},
+            data_revision=data_revision+1,display_revision=display_revision+1,style_version=style_version+1,
+            update_time=CURRENT_TIMESTAMP WHERE id=#{id}
+        """)
+    int replaceDataSetRules(GisVectorDataSetStyle snapshot);
+
+    @Select("""
+        SELECT EXISTS(SELECT 1 FROM ocean_gis.gis_file_meta WHERE data_set_id=#{dataSetId} AND vector_dataset_style_id IS NOT NULL)
+            OR EXISTS(SELECT 1 FROM ocean_gis.gis_vector_layer WHERE data_set_id=#{dataSetId})
+            OR EXISTS(SELECT 1 FROM ocean_gis.gis_vector_style s JOIN ocean_gis.gis_vector_group g ON g.id=s.group_id WHERE g.data_set_id=#{dataSetId})
+        """)
+    boolean hasPlacementReferences(Long dataSetId);
+
+    @Delete("DELETE FROM ocean_gis.gis_vector_group WHERE data_set_id=#{dataSetId}")
+    int deleteDataSetGroups(Long dataSetId);
     @Select("SELECT *,definition::text AS definition_json FROM ocean_gis.gis_vector_resource WHERE id=#{id} AND status='READY'")
     GisVectorResource resource(Long id);
 
@@ -84,6 +102,25 @@ public interface GisVectorMapper {
 
     @Select("SELECT *,definition::text AS definition_json FROM ocean_gis.gis_vector_style_scheme WHERE data_set_id=#{id} ORDER BY id")
     List<GisVectorStyleScheme> schemes(Long id);
+
+    @Select("""
+        SELECT s.id,s.name,s.version,
+          COALESCE((SELECT jsonb_agg(color ORDER BY layer_order,color) FROM (
+            SELECT color,MIN(layer_order) AS layer_order FROM (
+              SELECT COALESCE(g.config #>> '{override,symbol,fillColor}',style #>> '{symbol,fillColor}') AS color,
+                     COALESCE((style->>'renderOrder')::numeric,0) AS layer_order
+              FROM jsonb_array_elements(s.definition #> '{cartography,defaults,styles}') AS styles(style)
+              LEFT JOIN LATERAL (
+                SELECT value AS config FROM jsonb_each(s.definition #> '{cartography,groups}')
+                WHERE value->>'styleKey'=style->>'id' ORDER BY key LIMIT 1
+              ) g ON true
+              WHERE style->>'geometryType'='POLYGON'
+            ) fills WHERE color ~ '^#[0-9a-fA-F]{6}$'
+            GROUP BY color ORDER BY layer_order,color LIMIT 3
+          ) palette),'[]'::jsonb)::text AS definition_json
+        FROM ocean_gis.gis_vector_style_scheme s WHERE s.data_set_id=#{id} ORDER BY s.id
+        """)
+    List<GisVectorStyleScheme> schemeOptions(Long id);
 
     @Select("SELECT *,definition::text AS definition_json FROM ocean_gis.gis_vector_style_scheme WHERE id=#{id}")
     GisVectorStyleScheme scheme(Long id);

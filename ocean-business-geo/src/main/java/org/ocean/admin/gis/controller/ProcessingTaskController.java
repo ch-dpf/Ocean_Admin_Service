@@ -48,6 +48,25 @@ public class ProcessingTaskController {
     private final ProcessingTaskRecordService taskService;
     private final ProcessingService processingService;
 
+    @GetMapping("/{taskId}/vector/manifest.json")
+    public ResponseResult<?> vectorManifest(@PathVariable Long taskId) throws java.io.IOException {
+        return ResponseResult.success(taskService.vectorManifest(taskId));
+    }
+
+    @GetMapping("/{taskId}/vector/style.json")
+    public org.springframework.http.ResponseEntity<org.springframework.core.io.Resource> vectorStyle(@PathVariable Long taskId) {
+        return org.springframework.http.ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON)
+                .body(new org.springframework.core.io.FileSystemResource(taskService.vectorArtifact(taskId, "style.json")));
+    }
+
+    @GetMapping(value = "/{taskId}/vector/{z}/{x}/{y}.mvt", produces = "application/vnd.mapbox-vector-tile")
+    public org.springframework.http.ResponseEntity<org.springframework.core.io.Resource> vectorTile(@PathVariable Long taskId,
+            @PathVariable int z, @PathVariable int x, @PathVariable int y) {
+        var path = taskService.vectorArtifact(taskId, z + "/" + x + "/" + y + ".mvt");
+        return org.springframework.http.ResponseEntity.ok().header("Cache-Control", "private, max-age=300")
+                .header("Vary", "Accept-Encoding").body(new org.springframework.core.io.FileSystemResource(path));
+    }
+
     /** 静态瓦片生成任务的名称修改请求。 */
     public record RenameTaskRequest(
             @NotBlank @Size(max = 200) String taskName) { }

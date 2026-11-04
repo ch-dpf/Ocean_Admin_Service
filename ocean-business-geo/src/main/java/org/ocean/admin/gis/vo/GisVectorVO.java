@@ -8,6 +8,7 @@ import tools.jackson.databind.JsonNode;
 /** 矢量响应；GeoJSON 属性保持原始 JSON 类型，系统 ID 显式以字符串输出。 */
 public final class GisVectorVO {
     public record Scheme(String id,String dataSetId,String name,long version,JsonNode definition) { }
+    public record SchemeOption(String id,String name,long version,JsonNode previewColors) { }
     private GisVectorVO() { }
 
     public record Layer(String layerId, String dataSetId, String sourceFileId, String layerKey,

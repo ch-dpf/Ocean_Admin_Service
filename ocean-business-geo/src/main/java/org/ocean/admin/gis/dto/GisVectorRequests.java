@@ -9,7 +9,12 @@ import java.util.List;
 
 /** 矢量管理请求契约。 */
 public final class GisVectorRequests {
-    public record Scheme(@NotBlank @Size(max=100) String name, JsonNode definition) { }
+    public record TileBuild(@NotBlank @Size(max=200) String taskName,
+            @NotNull @Positive Long schemeId, @NotNull @Positive Long schemeVersion,
+            @NotNull Long dataRevision, @NotNull Integer minZoom, @NotNull Integer maxZoom,
+            @NotNull @Size(min=4,max=4) List<@NotNull Double> bounds) { }
+    public record Scheme(@NotBlank @Size(max=100) String name, JsonNode definition,
+            JsonNode groupOverrides, JsonNode groupVisibility, Long styleVersion) { }
     public record Publish(@NotNull @Positive Long dataSetId, @NotBlank @Size(max=200) String serviceName,
             @NotNull @Size(min=1,max=100) List<@NotNull @Positive Long> styleSchemeIds, @NotNull @Positive Long defaultStyleSchemeId) { }
     private GisVectorRequests() { }

@@ -294,8 +294,12 @@
             WHERE #{z} &gt;= (p.value->>'minZoom')::integer
         ), shapes AS MATERIALIZED (
             SELECT f.id,f.layer_id,l.group_id,l.group_key,l.geometry_type,
-                jsonb_strip_nulls(jsonb_build_object('fclass',CASE WHEN jsonb_typeof(f.properties->'fclass') IN ('string','number','boolean') THEN f.properties->'fclass' END,'code',CASE WHEN jsonb_typeof(f.properties->'code') IN ('string','number','boolean') THEN f.properties->'code' END,'id',CASE WHEN jsonb_typeof(f.properties->'id') IN ('string','number','boolean') THEN f.properties->'id' END,'name',CASE WHEN jsonb_typeof(f.properties->'name') IN ('string','number','boolean') THEN f.properties->'name' END,'ref',CASE WHEN jsonb_typeof(f.properties->'ref') IN ('string','number','boolean') THEN f.properties->'ref' END)) AS properties,
-                to_jsonb(array_remove(ARRAY[CASE WHEN f.properties->'fclass'='null'::jsonb THEN 'fclass' END,CASE WHEN f.properties->'code'='null'::jsonb THEN 'code' END,CASE WHEN f.properties->'id'='null'::jsonb THEN 'id' END,CASE WHEN f.properties->'name'='null'::jsonb THEN 'name' END,CASE WHEN f.properties->'ref'='null'::jsonb THEN 'ref' END],NULL))::text AS null_fields,
+                (SELECT COALESCE(jsonb_object_agg(a.key,a.value),'{}'::jsonb) FROM jsonb_each(f.properties) a
+                 WHERE jsonb_typeof(a.value) IN ('string','number','boolean')
+                   AND jsonb_exists(CAST(#{policyJson} AS jsonb)->'propertyFields',a.key)) AS properties,
+                (SELECT COALESCE(jsonb_agg(a.key),'[]'::jsonb)::text FROM jsonb_each(f.properties) a
+                 WHERE a.value='null'::jsonb
+                   AND jsonb_exists(CAST(#{policyJson} AS jsonb)->'propertyFields',a.key)) AS null_fields,
                 CASE WHEN COALESCE((l.rule->>'preserveBoundary')::boolean,false) OR l.geometry_type='POINT' OR #{z}=18
                     THEN f.display_geom
                     WHEN l.geometry_type='LINE' THEN ST_Simplify(f.display_geom,
@@ -313,6 +317,11 @@
             ) r ON true
             WHERE #{z} &gt;= COALESCE((r.value->>'minZoom')::integer,(l.rule->>'minZoom')::integer)
               AND f.display_geom &amp;&amp; ST_TileEnvelope(#{z},#{x},#{y},margin =&gt; 256.0/8192)
+              -- 小视窗先排除仅包围盒相交的大面；保留简化容差及量化余量，避免漏掉瓦片边缘。
+              -- 世界和洲级视窗命中范围广，继续直接使用空间索引筛选。
+              AND (#{z} &lt; 4 OR ST_Intersects(f.display_geom,
+                  ST_TileEnvelope(#{z},#{x},#{y},margin =&gt; 257.0/8192
+                    + (CAST(#{policyJson} AS jsonb)-&gt;&gt;'simplifyPixels')::double precision/512)))
               AND (COALESCE((l.rule->>'preserveBoundary')::boolean,false) OR #{z}=18 OR
                 CASE l.geometry_type
                     WHEN 'POLYGON' THEN ST_Area(f.display_geom)/power(40075016.68557849/(power(2.0,#{z})*512),2)

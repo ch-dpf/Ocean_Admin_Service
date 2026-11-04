@@ -76,6 +76,12 @@ public class TaskExecutionConfig {
         return createExecutor("geo-archive-", sizing.archiveThreads(), 20);
     }
 
+    /** 静态矢量批量切片单独串行执行，队列满时沿用任务失败处理。 */
+    @Bean("vectorTileExecutor")
+    public ThreadPoolTaskExecutor vectorTileExecutor() {
+        return createExecutor("vector-build-", 1, 4);
+    }
+
     /** 创建线程池执行器 */
     private ThreadPoolTaskExecutor createExecutor(String threadNamePrefix, int threads, int queueCapacity) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

@@ -111,12 +111,14 @@ public class FileMetaService {
         if (dataSet == null) {
             throw new IllegalArgumentException("数据集不存在或已删除");
         }
-        if (request.vectorPlacement() != null && !Set.of("AUTO", "UNKNOWN").contains(request.vectorPlacement())) {
-            throw new IllegalArgumentException("矢量归组方式须为AUTO或UNKNOWN");
+        if (request.vectorPlacement() != null && !Set.of("AUTO", "UNKNOWN", "X_LIGHT", "X_DARK").contains(request.vectorPlacement())) {
+            throw new IllegalArgumentException("矢量归组方式须为AUTO、UNKNOWN、X_LIGHT或X_DARK");
         }
         if (request.vectorPlacement() != null && !Long.valueOf(2).equals(dataSet.getCategoryId())) {
             throw new IllegalArgumentException("仅矢量数据集支持设置矢量归组方式");
         }
+        if (Long.valueOf(2).equals(dataSet.getCategoryId()))
+            vectorDataSetStyles.validatePlacement(dataSetId, request.vectorPlacement() == null ? "AUTO" : request.vectorPlacement());
         Path entry = workspaceResolver.resolve(request.workspaceCode(), request.relativePath());
         String kind = Files.isDirectory(entry) ? "DIRECTORY" : "FILE";
         if ("FILE".equals(kind) && !supportsWorkspaceFile(dataSet.getCategoryId(), entry)) {
@@ -405,7 +407,7 @@ public class FileMetaService {
         meta.setCreateTime(LocalDateTime.now());
         meta.setUpdateTime(meta.getCreateTime());
         if (Long.valueOf(2).equals(locked.getCategoryId())) {
-            meta.setVectorDatasetStyleId(vectorDataSetStyles.require(locked.getId(), false).getId());
+            meta.setVectorDatasetStyleId(vectorDataSetStyles.preparePlacement(locked.getId(), request.vectorPlacement() == null ? "AUTO" : request.vectorPlacement()).getId());
             meta.setVectorPlacement(request.vectorPlacement() == null ? "AUTO" : request.vectorPlacement());
         }
         if (gisFileMetaMapper.insert(meta) != 1) throw new IllegalStateException("工作区文件登记失败");

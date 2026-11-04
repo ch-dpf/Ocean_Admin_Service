@@ -14,7 +14,7 @@ public record GisUploadChunkCommand(
         String vectorPlacement) {
 
     public GisUploadChunkCommand {
-        if (vectorPlacement == null || !java.util.Set.of("AUTO", "UNKNOWN").contains(vectorPlacement)) throw new IllegalArgumentException("矢量归组方式须为AUTO或UNKNOWN");
+        if (vectorPlacement == null || !java.util.Set.of("AUTO", "UNKNOWN", "X_LIGHT", "X_DARK").contains(vectorPlacement)) throw new IllegalArgumentException("矢量归组方式须为AUTO、UNKNOWN、X_LIGHT或X_DARK");
         if (requestId == null || requestId.isBlank()) {
             throw new IllegalArgumentException("上传请求标识不能为空");
         }

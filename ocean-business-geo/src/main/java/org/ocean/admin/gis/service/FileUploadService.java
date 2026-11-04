@@ -62,6 +62,10 @@ public class FileUploadService {
         GisDataSet dataSet = dataSets.selectById(command.dataSetId());
         if (dataSet == null) throw new IllegalArgumentException("数据集不存在或已删除");
         validateType(dataSet, command.fileName());
+        if (!Long.valueOf(2).equals(dataSet.getCategoryId()) && command.vectorPlacement().startsWith("X_"))
+            throw new IllegalArgumentException("仅矢量数据集支持选择x院业务分类");
+        if (Long.valueOf(2).equals(dataSet.getCategoryId()))
+            styles.validatePlacement(dataSet.getId(), command.vectorPlacement());
         ProgressSnapshot snapshot = progress.get(id);
         if (snapshot == null) {
             if (command.fileIndex() != 0 || command.offset() != 0)
@@ -83,6 +87,8 @@ public class FileUploadService {
         if (existing != null) {
             if (!existing.getOriginalName().equals(command.fileName()) || existing.getSizeBytes() != command.fileSize())
                 throw new IllegalArgumentException("同一文件的名称或声明大小不能变更");
+            if (existing.getVectorPlacement() != null && !existing.getVectorPlacement().equals(command.vectorPlacement()))
+                throw new IllegalArgumentException("已登记文件的业务分类选择不能变更");
             consume(input, command.chunkSize());
             if (command.lastFile() && !snapshot.status().isTerminal()) beginExtraction(id, command);
             return response(id, command, command.fileSize(), true, true);
@@ -166,7 +172,7 @@ public class FileUploadService {
         meta.setMetadataVersion(0L); meta.setMetadataLeaseExpiresAt(LocalDateTime.now().plus(config.getIdleTimeout()));
         meta.setDeleted(0); meta.setCreateTime(LocalDateTime.now()); meta.setUpdateTime(meta.getCreateTime());
         if (Long.valueOf(2).equals(target.getCategoryId())) {
-            meta.setVectorDatasetStyleId(styles.require(target.getId(), false).getId());
+            meta.setVectorDatasetStyleId(styles.preparePlacement(target.getId(), command.vectorPlacement()).getId());
             meta.setVectorPlacement(command.vectorPlacement());
         }
         if (files.insert(meta) != 1) throw new IllegalStateException("文件登记失败");

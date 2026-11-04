@@ -91,7 +91,8 @@ public class VectorTileEncoder {
             attributes.put("_vector_group_key",json.valueToTree(groupKey));
             var nulls=json.createArrayNode();
             // 与PostGIS MVT契约一致，只投影固定的标量配图字段。
-            for (String name : List.of("fclass", "code", "id", "name", "ref")) {
+            for (JsonNode field : policy.path("propertyFields")) {
+                String name = field.asText();
                 JsonNode value = properties.path(name);
                 if (value.isNull()) nulls.add(name);
                 else if (value.isString() || value.isNumber() || value.isBoolean()) attributes.put(name, value);

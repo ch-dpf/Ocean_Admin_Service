@@ -14,6 +14,9 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties(prefix = "gis.vector.tiles")
 public class VectorTileProperties {
+    /** 单次静态矢量任务允许生成的瓦片数量上限。 */
+    @Positive
+    private long maxStaticTileCount = 50_000;
     /** 单个压缩矢量瓦片允许的最大字节数。 */
     @Positive
     private int maxTileBytes = 2 * 1024 * 1024;
