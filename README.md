@@ -328,31 +328,62 @@ symbol 使用以下字段，保存时会补齐可选字段默认值，前端可�
 
 匹配预览请求为 `{"featureId":"要素ID","zoom":9.5}`，返回 styleId、layerId、featureId、styleVersion、featureVersion、zoom 及 matches。matches 每项包含 geometryPath、geometryType、ruleId、visible、symbol；未匹配时 ruleId和symbol为空、visible为false。该接口用于样式编辑器校验和预览，地图交互时应在前端本地执行相同协议，避免每次缩放逐要素请求服务端。前端保存或切换样式后重新读取方案即可，无需重新导入文件。
 
-## 动态矢量瓦片与原始要素编辑
+## 原始集合、工作存储与动态矢量发布
 
-制图浏览使用 EPSG:3857 的 XYZ MVT，按已导入业务图层组织显示。地图不再截取视窗中的前2000个要素。点默认按全球对齐的64像素网格聚合，可关闭聚合；线使用半像素容差简化，面使用一致的瓦片网格量化及裁剪，不逐面独立简化，避免破坏共享边界。原始 EPSG:4326 的 XY/XYZ 几何及属性不随瓦片生成改变。极区显示裁剪到 Web Mercator 纬度范围，原始要素仍可精确查询。
+原始文件、原始要素集合、工作图层和发布版本分别管理。新导入的矢量文件先生成不可变 GPKG 原始快照，再进行坐标转换、分类和工作图层提取；空集合及不能参与制图的原始记录仍可在快照中浏览。原始 GeoJSON 保留 Feature ID、完整属性 JSON、空几何及坐标维度；其他已支持格式保存 GDAL 读取到的集合、字段类型、属性和源坐标。快照是要素级保存，不是原文件字节备份，也不保证保留 CAD 布局等非要素信息。
 
-调用顺序：
+| 功能 | 接口 | 关键行为 |
+| --- | --- | --- |
+| 生成原始快照 | `POST /api/gis/filemeta/{fileId}/source-snapshot` | 为已有文件显式生成快照；不重新导入工作图层；重复调用返回现有快照 |
+| 原始集合目录 | `GET /api/gis/filemeta/{fileId}/source-layers` | 返回原集合名、数量、源 CRS、字段结构，包含空集合；配件ID定位所属组入口 |
+| 原始要素分页/详情 | `GET /api/gis/vector/source-layers/{id}/features?after=0&limit=100&featureId=…` | `featureId` 可省略；返回 sourceRowId、完整 Feature、hasMore、nextAfter；坐标保持源坐标系 |
+| 释放影响预览 | `GET /api/gis/filemeta/{fileId}/release-preview` | 完整文件组、可释放大小、阻塞任务及保留说明 |
+| 释放原始文件 | `POST /api/gis/filemeta/{fileId}/release` | 整组释放；保留来源记录、原始快照、工作数据和发布版本 |
+| 资源目录 | `GET /api/gis/vector/datasets/{id}/resources` | 原始快照、工作存储、发布资源及转换所需 ETag |
+| 切换工作存储 | `POST /api/gis/vector/datasets/{id}/storage?target=GPKG` | target 为 GPKG 或 POSTGIS；携带资源目录返回的 If-Match |
+| 回收资源 | `DELETE /api/gis/vector/resources/{id}` | 仅允许无工作图层、无发布引用的非原始资源 |
 
-1. 查询图层目录及默认样式，取得 layerId、dataVersion 和渲染规则。
-2. `POST /api/gis/vector/layers/{layerId}/render-contexts`，请求示例 `{"fields":["kind","rank"],"aggregatePoints":true,"bufferPixels":64}`。fields 必须包含所有规则引用的属性名（按字面取值，最多512项）；不需要完整属性。bufferPixels 为最大符号半径或半线宽加余量，范围0至2048。
-3. 从统一包装的 data 中取得 contextId、dataVersion、fields、aggregatePoints、gridPixels、bufferPixels、maxZoom 和 expiresAt。按地图视窗请求 `GET /api/gis/vector/layers/{layerId}/tiles/{z}/{x}/{y}.mvt?contextId=...`。响应为原始二进制 `application/vnd.mapbox-vector-tile`，空瓦片为200及零字节；瓦片尺寸固定256像素，MVT extent为4096。
-4. 点击普通瓦片要素，读取字符串 `_vector_feature_id` 后调用原有 `GET .../features/{featureId}` 获取完整 GeoJSON 和 ETag。点击聚合标记，调用 `GET .../clusters/{clusterId}/features?contextId=...&limit=50&cursor=...`；返回统一包装，data 含 members、hasMore、nextCursor、dataVersion。成员按原始要素ID去重，limit为1至100；游标绑定上下文与聚合。聚合计数是点位数量，featureCount 为不同原始要素数量。
-5. 编辑使用独立选中覆盖层，保留完整属性、集合结构和坐标维度。`PUT .../features/{featureId}` 或 `DELETE .../features/{featureId}` 使用详情的 If-Match。成功后刷新图层版本并重建渲染上下文；412保留草稿。XYZ 顶点可拖动，插入新顶点须显式提供高程。
+原文件释放前验证快照 SHA-256、文件组解析状态及活动处理任务。正在解析或被处理任务实际使用时拒绝释放；已导入图层的来源关系不再阻止物理文件释放。状态为 `RETAINED → RELEASE_PENDING → RELEASED`，删除失败由定时任务重试；工作区文件直接解除接入，外部文件不会被删除。释放后原文件下载及再次以原文件为输入的处理不可用，但原集合浏览和已导入数据不受影响。既有 DELETE 文件接口仍用于删除管理记录；界面上的“释放原文件”应调用新的 release 接口。
 
-MVT 数据层名为 `features`。元数据包含 `_vector_kind`（feature/cluster）、`_vector_feature_id`、`_vector_geometry_path`、`_vector_part_id`、`_vector_cluster_id`、`_vector_category`（POINT/LINE/POLYGON）、`_vector_properties`、`_vector_count`、`_vector_feature_count`。ID和计数均为字符串，属性投影以JSON字符串编码，保留数字、布尔、null、缺失及嵌套值。GeometryCollection仅在显示通道递归拆分，原始要素ID及 `/geometry/geometries/...` 路径保留。客户端不得把瓦片片段当作可编辑原始几何或统计已加载要素总数。
+### 按用途选择存储
 
-聚合按网格及所投影属性的完整JSON分组，确保同一组在任意连续zoom下使用相同规则；属性类别多时可能产生更多标记。颜色、透明度、规则值或层级变化可本地重绘；新增过滤字段、扩大符号缓冲、切换聚合方式或更改数据版本需要重建上下文。相邻瓦片缓冲中的同一聚合使用相同ID及完整成员。
+- 经常编辑、更新或空间分析：保留 POSTGIS 工作存储，沿用要素编辑、空间索引和事务。
+- 只读浏览、归档和发布：显式转换到 GPKG。每个工作资源文件内按图层建表并建立 RTree；转换成功后删除相应 PostGIS 工作要素，不双写。
+- 需要再次编辑：显式转回 POSTGIS，保留要素 ID、版本和来源集合关系。图层返回 `storageType`、`readOnly`、`resourceId`、`sourceLayerId`；GPKG 几何/属性写入返回409。
 
-Redis保存上下文及有界瓦片缓存。缓存键绑定数据版本、字段清单、网格、缓冲及聚合选项；即使命中缓存，也先检查图层状态和版本。默认上下文存活1800秒，瓦片缓存120秒、最多64份，命中时更新最近访问顺序；单瓦片未压缩载荷上限2MiB。每个服务实例最多4个并发空间查询，另有32个有界排队位置，最长等待10秒，单次SQL超时10秒。同一实例内相同瓦片的并发请求合并为一次生成；排队不保留数据库连接，取得执行槽位后才建立只读事务，并重新校验图层版本。
+当前存储选择作用于整个数据集的已就绪工作图层。接入仍先完成 PostGIS 工作导入，可在导入完成后转为 GPKG；大规模导入需要预留转换期间的数据库和文件空间。工作区存在逐要素配图覆盖时，先保存独立样式方案并移除工作区覆盖再转换，避免要素表外键级联造成样式丢失。转换使用数据集锁与 ETag，失败回滚数据库切换并清理新文件；可再次提交原操作。
 
-配置位于 `gis.vector.tiles`，支持 `GIS_VECTOR_TILE_GRID_PIXELS`（须整除256）、`GIS_VECTOR_TILE_MAX_ZOOM`、`GIS_VECTOR_TILE_MAX_BYTES`、`GIS_VECTOR_TILE_MAX_CONCURRENT`、`GIS_VECTOR_TILE_MAX_QUEUED`、`GIS_VECTOR_TILE_QUEUE_WAIT_MS`、`GIS_VECTOR_TILE_QUERY_TIMEOUT_MS`、`GIS_VECTOR_CONTEXT_TTL_SECONDS`、`GIS_VECTOR_TILE_CACHE_TTL_SECONDS` 和 `GIS_VECTOR_TILE_MAX_CACHED`。调大并发不能替代查询优化，队列等待及SQL预算调整后须同步核对前端瓦片HTTP超时（当前35秒）。
+GPKG 适合分散只读存储，不保证任意数据量和并发下都优于 PostGIS。动态瓦片采用 RTree 范围查询、级别抽析、有限进程并发和有界缓存；密集数据仍可能触发体积/时间限额。文件位于 `gis.processing.basePath/vector-resources`，多实例必须能访问相同托管目录；备份应同时包括数据库目录元数据和 GPKG 文件。
 
-前端以整个地理信息应用为范围限制最多2个真实瓦片HTTP在途请求，合并相同瓦片订阅，关闭瓦片GET的隐藏自动重试。取消尚未发送的请求会移出队列；已经发送的请求完成前继续占位，避免取消XHR后数据库仍计算、浏览器却继续补发。取消的订阅不会更新地图。图层范围之外及当前没有可见样式规则的图层不发瓦片请求。OpenLayers的渲染任务数仍独立受控，不将其直接当成HTTP并发数。
+### 一份动态瓦片，多套独立样式
 
-SQL使用已维护的几何类型元数据跳过不需要的点聚合或集合分支，仅对GeometryCollection递归。空间包围盒使用现有GiST索引，常量查询范围不形成阻止索引估算的物化屏障；属性只读取规则需要的字段。原始大几何不进入全局递归物化结果，MVT裁剪每个片段只执行一次，点聚合以坐标均值计算中心，事务内关闭该类复杂SQL的JIT编译。原始要素、属性、集合路径及共享面边界语义保持不变。
+工作地图定义：`GET /api/gis/vector/datasets/{id}/map-definition`；工作数据瓦片：`GET /api/gis/vector/datasets/{id}/tiles/{tileVersion}/{z}/{x}/{y}.mvt`。请以控制器实际返回的地图定义 URL 为准。瓦片版本由数据和抽析规则确定；颜色、显隐及显示缩放配置不改变瓦片数据。
 
-动态MVT本身不保证任意密度都能快速完整显示。2026-10-21本地真实数据抽样中，约37万条道路的一个Z10瓦片生成约286毫秒、755368字节，约16万个建筑轮廓的对应瓦片约106毫秒、175214字节；同一区域Z7道路瓦片约2.9秒但载荷达到11034143字节，会按预算明确返回422。这些是单次只读测量，并非吞吐量保证。密集道路和建筑应配置适合的最小显示层级；若未来对小比例尺访问有确定的性能需求，可以另行生成静态MVT成果。查询预算超限不会静默截断，也不应单纯提高字节或并发上限。
+独立样式方案使用 `/api/gis/vector/datasets/{id}/style-schemes`：GET列表、POST创建，`/{schemeId}` GET详情、PUT修改、DELETE删除。创建时传 `{"name":"标准图"}` 可复制当前完整制图配置；也可提供 `definition`。修改和删除携带详情返回的 `"scheme-{id}-{version}"` If-Match。方案结构为 `{"schemaVersion":1,"kind":"VECTOR_STYLE_SCHEME","cartography":{…},"featureOverrides":{…}}`，其中 cartography 包含 defaults、groups、layers；只描述显示，不能修改瓦片生成策略。
 
-错误处理：400为无效坐标或参数，409为数据版本变化或图层未就绪，410为上下文过期，422为瓦片内容过密，503为查询繁忙、超时或缓存服务不可用。前端409刷新图层和上下文，410重建上下文，422提示放大或开启聚合，其他错误提供重试。瓦片响应为 `Cache-Control: no-store`，由服务端版本缓存及当前前端source管理；网关应保留二进制内容、状态码与ETag。该能力需要 PostgreSQL/PostGIS 和 Redis，无需新增数据库表。
+发布接口：`POST /api/gis/publications/VECTOR/publish`：
 
+```json
+{
+  "dataSetId": "数据集ID",
+  "serviceName": "城市矢量服务",
+  "styleSchemeIds": ["标准样式ID", "夜间样式ID"],
+  "defaultStyleSchemeId": "标准样式ID"
+}
+```
+
+发布至少选择一套样式，默认样式必须属于所选方案。服务固定当时的数据版本及每套样式的内容；同一工作数据版本的多个发布共用同一个不可变 GPKG 资源。之后编辑工作要素、修改/删除草稿样式或释放原文件，都不改变已经发布的内容。
+
+| 公开资源 | 路径 |
+| --- | --- |
+| 服务清单（默认样式、各套样式地址、数据版本及瓦片地址） | `/gis/publications/VECTOR/{serviceCode}/manifest.json` |
+| 固定数据瓦片 | `/gis/publications/VECTOR/{serviceCode}/tiles/{resourceId}/{z}/{x}/{y}.mvt` |
+| 固定版本样式规则 | `/gis/publications/VECTOR/{serviceCode}/styles/{releaseVersion}/{schemeId}.json` |
+
+`PUT /api/gis/publications/VECTOR/{serviceCode}/styles` 使用与发布相同的请求结构，携带 `"release-{releaseVersion}"` If-Match；仅更新发布的样式组合和默认项，继续使用固定瓦片版本。旧样式 URL 可继续读取。需要更新几何数据时重新发布。已有服务重命名和停用接口同样适用于 VECTOR；停用后清单、样式和瓦片均返回404，缓存命中也不能绕过停用状态。
+
+样式 JSON 使用本项目的声明式规则协议，**不是 MapLibre Style Specification**；客户端须按现有规则解释器执行。MVT 只携带数据，不绑定默认样式。数据层名为 `features`，包含字符串 `_vector_feature_id`、`_vector_layer_id`、`_vector_group_id`、`_vector_group_key`、`_vector_representation_id`、`_vector_render_role`、`_vector_category`，以及 fclass/code/id/name/ref 标量属性；`_vector_null_fields` 标记显式 null。面填充、真实边界线和标注锚点分别输出，几何不可用作原始编辑。EPSG:3857 XYZ，extent=8192，逻辑 tileSize=512，实际级别和抽析限制以数据契约为准。
+
+发布瓦片缓存按 resourceId/z/x/y 共享，样式切换不重新生成瓦片。默认压缩上限2MiB、解码上限16MiB、本地缓存最多64块/64MiB；超限不静默截断要素。文件瓦片在受限 GDAL Java Worker 中执行，单次查询有30秒进程预算。工作数据集同时包含新导入PostGIS层和GPKG层时支持联合读取，统一转为GPKG后可一次打开包完成瓦片查询。
+
+配套前端位于同项目第二个源文件夹 `../Ocean_Cloud`。地理信息应用的“原始文件”页已接入原始集合、来源要素分页与释放预览；“存储与发布”页提供工作存储转换、独立样式草稿、多样式发布及默认样式选择，服务详情支持仅更新发布样式。原始要素分页中的 `featureJson` 是供浏览器无损展示的 JSON 文本，避免大整数属性被 JavaScript 数值精度截断。

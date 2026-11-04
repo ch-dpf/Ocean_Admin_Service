@@ -60,7 +60,9 @@ public class PublicationRecordService {
                 .ge(publishTimeStart != null, GisPublication::getPublishTime, publishTimeStart)
                 .le(publishTimeEnd != null, GisPublication::getPublishTime, publishTimeEnd)
                 .orderByDesc(GisPublication::getPublishTime);
-        if (processingType != null) {
+        if (processingType == GisProcessingType.VECTOR) {
+            query.isNotNull(GisPublication::getVectorResourceId);
+        } else if (processingType != null) {
             query.inSql(GisPublication::getTileSetId,
                     "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = '"
                             + processingType.name() + "'");

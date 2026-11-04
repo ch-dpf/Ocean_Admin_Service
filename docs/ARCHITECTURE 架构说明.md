@@ -66,94 +66,36 @@ GIS 业务管理以 `gis_file_group` 表示逻辑数据源，单文件也属于�
 
 旧式 GeoJSON 的兼容限制在文件入口：`FileSpatialMetadataService` 与文件要素读取共用 `GeoJsonFeatureReader.readSourceCrs`，仅接受顶层明确的 WGS84 命名声明，坐标不转换。子级声明、未知坐标系、空声明和链接型声明拒绝导入；在线编辑继续遵循 RFC 7946。该支持作为长期导入能力保留，停用这些来源并转换存量文件后可移除。
 
-### 动态矢量瓦片及编辑链路
+### 原始集合、双存储与独立矢量发布
 
-`VectorTileService` 在 GIS 业务模块生成只读显示数据：`VectorRenderPlanner` 固定数据/显示版本、视窗、样式、预算与筛选阈值，Redis持久化短期上下文并限制缓存份数。PostGIS 使用现有空间索引，按属性、连续级别及屏幕尺寸筛选、简化并编码MVT。点、线、面均不网格聚合，点和行政边界受预算保护；其他线面按业务级别和屏幕尺寸保形选择，等值桶不按ID截断。面分别输出无描边填充、裁剪前提取的真实边界，文字只输出到锚点归属瓦片。源几何、属性和版本由 `VectorLayerService` 管理；预算或资源超限明确失败，禁止全量回退。
+`VectorResourceService` 管理 SOURCE、WORKING、PUBLICATION 三类资源。SOURCE 是坐标转换和业务分类之前的不可变原始集合快照；WORKING 是当前可编辑 PostGIS 或只读 GPKG；PUBLICATION 是数据版本固定的 GPKG。`gis_vector_source_layer` 保留原集合身份，工作图层和要素保存来源集合ID，来源关系不构成对原文件物理字节的依赖。
 
-```mermaid
-classDiagram
-  VectorController --> VectorTileService : 渲染上下文 / 保形MVT
-  VectorController --> VectorLayerService : 原始Feature / If-Match编辑
-  VectorController --> VectorStyleService : 方案及规则
-  VectorTileService --> VectorRenderPlanner : 全视窗保形预算规划
-  VectorRenderPlanner --> VectorDataSetStyleService : 不可变快照
-  VectorRenderPlanner --> VectorStyleService : 有效规则
-  VectorRenderPlanner --> GisVectorMapper : 候选统计及筛选阈值
-  VectorTileService --> GisVectorMapper : 空间查询及MVT编码
-  VectorTileService --> VectorTileProperties : 资源预算
-  VectorTileService --> TransactionTemplate : 取得槽位后开启只读事务
-  VectorTileService --> StringRedisTemplate : 上下文及版本缓存
-  GisVectorMapper --> PostGIS : 原始geometry及properties
-  VectorLayerService --> GisVectorMapper : 编辑与版本递增
-  VectorCartography --> useVectorTiles : 视窗与可见图层
-  useVectorTiles --> vectorService : 上下文请求
-  VectorMap --> vectorTileSource : 256像素XYZ瓦片
-  vectorTileSource --> vectorService : 二进制请求及取消
-  VectorFeatureEditor --> useVectorWorkspace : 完整Feature草稿
-  useVectorWorkspace --> vectorService : 原始查询及乐观锁编辑
-```
+`GeoPackageStore` 管理托管路径、文件安装、校验和、RTree查询。原生读写复用 `GdalDatasetReader` 隔离工作进程，服务JVM不加载JNI。包内每个集合/图层分别建表，用 feature_json 保留完整记录，用 geom 和 RTree 加速空间定位；原始快照保持源CRS，工作和发布数据使用EPSG:4326。包登记前必须写入成功；资源转换与工作编辑持有同一数据集行锁，防止复制期间混入不同版本。转换成功后仅使用目标后端，回滚清理新文件。
+
+`FileMetaService` 将删除管理记录与释放原文件区分。释放按完整文件组检查，验证原始快照完整性并阻止活动任务；先提交 RELEASE_PENDING，再幂等删除托管原文件。失败保留待清理状态。工作区源文件不归平台删除。数据集删除时未被发布引用的资源先标记RETIRED，文件由定时任务清理；发布引用的固定资源独立保留。
 
 ```mermaid
-sequenceDiagram
-  participant UI as 制图工作区
-  participant HTTP as vectorService/httpClient
-  participant API as VectorController
-  participant Tile as VectorTileService
-  participant Redis
-  participant DB as PostGIS
-  UI->>HTTP: 数据集快照、分类树及分页图层目录
-  HTTP->>API: GET datasets/id/style、groups及layers
-  API-->>UI: 数据/显示版本、分类统计及快照定义
-  UI->>HTTP: 世界范围内bbox、连续zoom、CSS尺寸和可见ID
-  HTTP->>API: POST render-contexts
-  API->>Tile: 全视窗规划候选、保护对象和筛选阈值
-  Tile->>Redis: 保存contextId及expiresAt
-  Tile-->>UI: 渲染上下文
-  UI->>HTTP: 视窗及样式层级筛选，最多2个真实HTTP在途
-  HTTP->>API: GET tiles/z/x/y.mvt?contextId
-  API->>Tile: 校验上下文、状态及当前版本
-  Tile->>Redis: 查询版本缓存
-  alt 未命中
-    Tile->>Tile: 合并同瓦片请求，有界排队等待槽位
-    Tile->>Tile: 开启只读事务并重新校验版本
-    Tile->>DB: 重复冻结阈值筛选、全几何简化、真实边界及唯一锚点、缓冲编码
-    DB-->>Tile: 完整显示瓦片及字节数
-    Tile->>Redis: 有界缓存
-  end
-  Tile-->>UI: 二进制MVT
-  UI->>UI: 按FILL/OUTLINE/GEOMETRY/LABEL角色及服务端符号绘制
-  Note over UI,DB: 原始4326 XY/XYZ与完整属性保留，瓦片不作为编辑依据
+flowchart LR
+  Raw[原始文件组] --> Source[SOURCE GPKG与原始集合目录]
+  Raw --> Import[坐标转换与业务分类]
+  Import --> PG[WORKING PostGIS]
+  PG <-->|显式转换| GPKG[WORKING GPKG]
+  PG --> Freeze[固定数据版本]
+  GPKG --> Freeze
+  Freeze --> Published[PUBLICATION GPKG]
+  Schemes[独立样式方案] --> Binding[发布样式内容快照与默认项]
+  Published --> MVT[动态MVT端点]
+  Published --> Manifest[发布清单]
+  Binding --> Manifest
+  Binding --> Styles[多套样式JSON端点]
 ```
 
-```mermaid
-sequenceDiagram
-  participant UI as VectorMap/属性面板
-  participant HTTP as vectorService/httpClient
-  participant API as VectorController
-  participant Tile as VectorTileService
-  participant Layer as VectorLayerService
-  participant DB as PostGIS
-  UI->>HTTP: 点击显示部件取得layerId及原始featureId
-  HTTP->>API: GET features/featureId
-  API->>Layer: 完整要素详情
-  Layer-->>UI: GeoJSON及ETag
-  UI->>UI: 独立覆盖层编辑属性、几何，保留Z
-  HTTP->>API: PUT或DELETE features/featureId + If-Match
-  API->>Layer: 事务及版本校验
-  alt ETag已变化
-    Layer-->>UI: 412，保留草稿
-  else 版本一致
-    Layer->>DB: 更新原始要素、范围、数量和dataVersion
-    Layer-->>UI: 最新Feature/ETag或204
-    UI->>HTTP: 刷新图层并重建上下文
-    Note over UI,Tile: 旧上下文请求返回409，旧缓存不能绕过版本校验
-  end
-```
+`VectorRenderPlanner` 只由分类、数据修订与tilePolicy确定瓦片版本，不读取显示样式。工作地图由 `VectorTileService` 提供当前版本；PostGIS通过空间索引编码MVT，GPKG通过RTree和 `VectorTileEncoder` 编码同一属性协议。瓦片包含 FILL、OUTLINE、LABEL、GEOMETRY 表现形式，客户端使用独立规则决定颜色、显隐和连续缩放。源Feature详情与If-Match编辑不以瓦片几何为依据；GPKG工作图层拒绝编辑，显式转回PostGIS后可编辑。
 
-前端 `VectorMap` 使用MVT的轻量RenderFeature，`vectorTileSource` 负责二进制加载、订阅取消及重入恢复，`vectorService` 管理所有图层共享的真实HTTP并发队列。同一瓦片多个订阅共享请求；排队订阅取消后不发送，已发HTTP完成前仍占用槽位，避免残留JDBC查询与新请求叠加。后端在空间查询前排除当前级别整层不可能显示的计划。后端合并同瓦片生成，按4个执行槽位和32个排队位置保护查询，并在取得槽位后开启事务、重新校验版本；等待不占用数据库连接。
+`VectorStyleService` 除图层工作样式外，管理整个数据集的独立命名方案。方案复制当前defaults、分类覆盖、图层规则及要素覆盖，以独立版本和If-Match保护更新。`VectorPublicationService` 将一份不可变资源与一至多套方案内容快照绑定，并明确默认项。当前清单使用最新releaseVersion；`gis_vector_publication_revision` 保存历次发布样式内容，使旧样式地址稳定。更新发布样式不替换数据源；工作修改或草稿删除不会影响发布。
 
-候选统计与瓦片共享同一SQL筛选链路，先按视窗和规则过滤，简化在瓦片裁剪之前完成。MVT extent=4096、buffer=1024；前端 renderBuffer=64。稳定标注锚点只属于一个XYZ瓦片，避免逐片重复标注。数据库不存储派生概化几何；确需静态发布时走独立发布任务，不扩大动态并发。
+公开服务逐次检查PUBLISHED状态，包括缓存命中。缓存按资源ID与XYZ坐标复用，不含样式ID。样式输出采用本项目声明式规则协议，不转换为MapLibre样式。默认解码限额16MiB、压缩限额2MiB；生成过程不会以截取前若干要素代替完整瓦片。GPKG原生查询进程预算30秒；并发/缓存有界，但不承诺无条件满足任意数据规模的实时性能。
 
-选中要素另以完整GeoJSON覆盖。XYZ几何支持已有顶点拖动，插入顶点需明确高程。样式颜色和透明度只重绘；视窗、显示开关、版本或样式变化重建上下文。显示状态以图层及瓦片加载为准，不能用瓦片片段数量充当视窗要素总数。
+本次只修改本仓库后端。前端通过原始集合浏览、释放预览、工作存储选择、发布样式多选与默认项完成交互；具体接口见README。
 
 ## 安全约束

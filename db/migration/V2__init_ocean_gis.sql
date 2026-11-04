@@ -166,6 +166,7 @@ CREATE TABLE ocean_gis.gis_file_meta (
     sha256                   VARCHAR(64),
     created_by              BIGINT,
     file_status            VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
+    raw_retention          VARCHAR(20)   NOT NULL DEFAULT 'RETAINED' CHECK (raw_retention IN ('RETAINED','RELEASE_PENDING','RELEASED')),
     cleanup_status           VARCHAR(20)   NOT NULL DEFAULT 'NOT_REQUIRED',
     error_message            VARCHAR(1000),
     metadata_status          VARCHAR(24)   NOT NULL DEFAULT 'QUEUED',
@@ -338,10 +339,54 @@ COMMENT ON COLUMN ocean_gis.gis_file_spatial_metadata.recommended_max_zoom IS '�
 -- GIS 文件操作逐文件明细
 -- =========================================================
 
+-- 原始快照、工作包与发布快照分别拥有独立的存储生命周期。
+CREATE TABLE ocean_gis.gis_vector_resource (
+    id BIGINT PRIMARY KEY,
+    data_set_id BIGINT REFERENCES ocean_gis.gis_data_set(id) ON DELETE SET NULL,
+    source_file_id BIGINT REFERENCES ocean_gis.gis_file_meta(id) ON DELETE SET NULL,
+    resource_kind VARCHAR(20) NOT NULL CHECK (resource_kind IN ('SOURCE','WORKING','PUBLICATION')),
+    storage_type VARCHAR(20) NOT NULL CHECK (storage_type IN ('GPKG','POSTGIS')),
+    storage_key VARCHAR(200),
+    status VARCHAR(20) NOT NULL CHECK (status IN ('READY','RETIRED')),
+    data_version BIGINT NOT NULL DEFAULT 1,
+    size_bytes BIGINT NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
+    checksum VARCHAR(64),
+    definition JSONB NOT NULL DEFAULT '{}'::jsonb,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (status='RETIRED' OR storage_type = 'POSTGIS' OR (storage_key IS NOT NULL AND checksum IS NOT NULL))
+);
+CREATE UNIQUE INDEX uk_vector_source_snapshot ON ocean_gis.gis_vector_resource(source_file_id)
+    WHERE resource_kind='SOURCE' AND status='READY';
+CREATE INDEX idx_vector_resource_dataset ON ocean_gis.gis_vector_resource(data_set_id,resource_kind,status);
+
+CREATE TABLE ocean_gis.gis_vector_source_layer (
+    id BIGINT PRIMARY KEY,
+    resource_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_resource(id),
+    layer_key VARCHAR(255) NOT NULL,
+    layer_name TEXT NOT NULL,
+    table_name VARCHAR(100) NOT NULL,
+    feature_count BIGINT NOT NULL CHECK (feature_count >= 0),
+    source_crs TEXT,
+    schema_definition JSONB NOT NULL,
+    UNIQUE(resource_id,layer_key)
+);
+
+CREATE TABLE ocean_gis.gis_vector_style_scheme (
+    id BIGINT PRIMARY KEY,
+    data_set_id BIGINT NOT NULL REFERENCES ocean_gis.gis_data_set(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    version BIGINT NOT NULL DEFAULT 1,
+    definition JSONB NOT NULL CHECK (jsonb_typeof(definition)='object'),
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(data_set_id,name)
+);
+
 CREATE TABLE ocean_gis.gis_vector_layer (
     id BIGINT PRIMARY KEY,
     data_set_id BIGINT NOT NULL REFERENCES ocean_gis.gis_data_set(id) ON DELETE CASCADE,
     source_file_id BIGINT REFERENCES ocean_gis.gis_file_meta(id),
+    resource_id BIGINT REFERENCES ocean_gis.gis_vector_resource(id),
+    source_layer_id BIGINT REFERENCES ocean_gis.gis_vector_source_layer(id),
     group_id BIGINT NOT NULL,
     original_group_id BIGINT NOT NULL,
     geometry_type VARCHAR(10) NOT NULL CHECK (geometry_type IN ('POINT','LINE','POLYGON')),
@@ -375,6 +420,7 @@ CREATE INDEX idx_gis_vector_layer_group ON ocean_gis.gis_vector_layer(data_set_i
 CREATE TABLE ocean_gis.gis_vector_feature (
     id BIGINT PRIMARY KEY,
     layer_id BIGINT NOT NULL REFERENCES ocean_gis.gis_vector_layer(id) ON DELETE CASCADE,
+    source_layer_id BIGINT REFERENCES ocean_gis.gis_vector_source_layer(id),
     geom public.geometry NOT NULL,
     display_geom public.geometry(Geometry,3857) GENERATED ALWAYS AS (
         public.ST_Transform(public.ST_Force2D(CASE
@@ -391,7 +437,7 @@ CREATE TABLE ocean_gis.gis_vector_feature (
     create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0,1)),
-    UNIQUE (layer_id, source_feature_index, source_geometry_path),
+    UNIQUE (layer_id, source_layer_id, source_feature_index, source_geometry_path),
     CHECK ((source_feature_index IS NULL AND source_geometry_path IS NULL)
         OR (source_feature_index IS NOT NULL AND source_geometry_path IS NOT NULL AND source_geometry_path LIKE '/geometry%')),
     CHECK (public.ST_SRID(geom) = 4326 AND public.ST_NDims(geom) IN (2,3)
@@ -816,7 +862,9 @@ CREATE TABLE ocean_gis.gis_publication (
     id                  BIGINT       PRIMARY KEY,
     service_code        VARCHAR(64)  NOT NULL,
     service_name        VARCHAR(200) NOT NULL,
-    tile_set_id         BIGINT       NOT NULL,
+    tile_set_id         BIGINT,
+    vector_resource_id  BIGINT REFERENCES ocean_gis.gis_vector_resource(id),
+    vector_definition   TEXT,
     data_set_id         BIGINT,
     status              VARCHAR(20)  NOT NULL DEFAULT 'PUBLISHED',
     publish_time        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -830,11 +878,12 @@ CREATE TABLE ocean_gis.gis_publication (
         FOREIGN KEY (data_set_id) REFERENCES ocean_gis.gis_data_set (id) ON DELETE SET NULL,
     CONSTRAINT ck_gis_publication_status
         CHECK (status IN ('PUBLISHED', 'DISABLED')),
+    CONSTRAINT ck_gis_publication_source CHECK ((tile_set_id IS NOT NULL) <> (vector_resource_id IS NOT NULL)),
     CONSTRAINT ck_gis_publication_deleted
         CHECK (deleted IN (0, 1))
 );
 
-COMMENT ON TABLE ocean_gis.gis_publication IS '静态瓦片集的公开发布记录';
+COMMENT ON TABLE ocean_gis.gis_publication IS '静态瓦片集或固定矢量资源与样式组合的公开发布记录';
 COMMENT ON COLUMN ocean_gis.gis_publication.service_name IS '可重命名的服务名称';
 COMMENT ON COLUMN ocean_gis.gis_publication.service_code IS '公开服务 URL 中使用的稳定编码';
 COMMENT ON COLUMN ocean_gis.gis_publication.tile_set_id IS '被发布的静态瓦片集 ID';
@@ -842,3 +891,12 @@ COMMENT ON COLUMN ocean_gis.gis_publication.tile_set_id IS '被发布的静态�
 CREATE INDEX idx_gis_publication_status
     ON ocean_gis.gis_publication (status, publish_time DESC)
     WHERE deleted = 0;
+
+CREATE TABLE ocean_gis.gis_vector_publication_revision (
+    publication_id BIGINT NOT NULL REFERENCES ocean_gis.gis_publication(id) ON DELETE CASCADE,
+    release_version VARCHAR(64) NOT NULL,
+    definition JSONB NOT NULL,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(publication_id,release_version)
+);
+COMMENT ON TABLE ocean_gis.gis_vector_publication_revision IS '已发布样式组合的不可变版本；共享发布记录的固定瓦片源';

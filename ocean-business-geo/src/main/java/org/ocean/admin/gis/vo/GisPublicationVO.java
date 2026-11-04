@@ -48,6 +48,12 @@ public class GisPublicationVO {
     @Schema(description = "瓦片访问模板；不适用的发布类型为空")
     private String tileUrlTemplate;
 
+    @Schema(description = "动态矢量发布的固定数据资源ID")
+    private String vectorResourceId;
+    private String releaseVersion;
+    private String defaultStyleId;
+    private tools.jackson.databind.JsonNode styles;
+
     private LocalDateTime publishTime;
     private LocalDateTime updateTime;
 }

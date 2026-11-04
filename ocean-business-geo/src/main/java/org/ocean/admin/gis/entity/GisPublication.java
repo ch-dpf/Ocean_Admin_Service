@@ -18,6 +18,8 @@ public class GisPublication {
     private String serviceCode;
     private String serviceName;
     private Long tileSetId;
+    private Long vectorResourceId;
+    private String vectorDefinition;
     private Long dataSetId;
     private String status;
     private LocalDateTime publishTime;

@@ -6,6 +6,8 @@ import java.time.LocalDateTime;
 /** 图层元信息及当前可编辑要素的汇总投影。 */
 @Data
 public class GisVectorLayer {
+    private Long resourceId;
+    private Long sourceLayerId;
     private Long id;
     private Long dataSetId;
     private Long sourceFileId;

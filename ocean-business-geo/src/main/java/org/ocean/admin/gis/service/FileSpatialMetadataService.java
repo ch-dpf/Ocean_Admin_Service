@@ -1,4 +1,5 @@
 package org.ocean.admin.gis.service;
+import java.io.IOException;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
@@ -43,6 +44,7 @@ import java.util.function.Consumer;
 @Slf4j
 @RequiredArgsConstructor
 public class FileSpatialMetadataService {
+    private final VectorResourceService vectorResources;
     private static final GeometryFactory GEOMETRIES = new GeometryFactory(new PrecisionModel(), 4326);
     private final GisFileSpatialMetadataMapper spatialMapper;
     private final RasterSpatialMetadataExtractor rasterExtractor;
@@ -110,7 +112,7 @@ public class FileSpatialMetadataService {
         VectorLayerService.VectorExtraction vectorResult = null;
         String errorCode = null;
         String errorMessage = null;
-        try (var context = datasetReader.prepare(group, members, heartbeat, progress)) {
+        try (var context = prepareWithSnapshot(claim, group, members, claimGuard, heartbeat, progress)) {
             progress.accept(ProgressStage.determinate("METADATA_READING", "读取文件组空间信息", 0, 1, ProgressUnit.OPERATION));
             List<VectorLayerService.ImportLayer> vectorInputs = new ArrayList<>();
             for (var source : context.vectors()) {
@@ -200,6 +202,13 @@ public class FileSpatialMetadataService {
         });
         progress.accept(code == null ? ProgressStage.determinate("COMMITTING", "文件组导入完成", 1, 1, ProgressUnit.OPERATION)
                 : ProgressStage.indeterminate("FAILED", message));
+    }
+
+    private GdalDatasetReader.ReadContext prepareWithSnapshot(GisFileMeta claim, GisFileGroup group,
+            List<GisFileMeta> members, Runnable guard, Runnable heartbeat, Consumer<ProgressStage> progress) throws IOException {
+        if (org.ocean.admin.gis.entity.GisFileFormat.valueOf(group.getFormat()).isVector())
+            vectorResources.capture(claim, group, members, guard, heartbeat, progress);
+        return datasetReader.prepare(group, members, heartbeat, progress);
     }
 
     private GisFileSpatialMetadata newMetadata(GisFileMeta source, String key, String name) {

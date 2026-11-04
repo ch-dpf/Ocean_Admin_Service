@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="org.ocean.admin.gis.mapper.GisVectorMapper">
     <sql id="layerColumns">
-        l.id, l.data_set_id, l.source_file_id, l.layer_key, l.layer_name,
+        l.id, l.data_set_id, l.source_file_id, l.resource_id, l.source_layer_id, l.layer_key, l.layer_name,
         l.group_id, l.original_group_id, l.geometry_type, l.assignment_mode, l.enabled,
         l.style_mode, l.presentation_version,
         l.layer_status, l.feature_count, l.geometry_types::text AS geometry_types,
@@ -10,16 +10,16 @@
         l.data_version, l.deleted, l.create_time, l.update_time
     </sql>
     <sql id="featureColumns">
-        f.id, f.layer_id, ST_AsGeoJSON(ST_ForcePolygonCCW(f.geom), 15, 0) AS geometry_json,
+        f.id, f.layer_id, f.source_layer_id, ST_AsGeoJSON(ST_ForcePolygonCCW(f.geom), 15, 0) AS geometry_json,
         f.properties::text AS properties_json, f.source_feature_id::text AS source_feature_id,
         f.source_feature_index, f.source_geometry_path, f.classification_rule_key,
         f.version, f.create_time, f.update_time
     </sql>
     <insert id="insertLayer">
         INSERT INTO ocean_gis.gis_vector_layer
-            (id, data_set_id, source_file_id, layer_key, layer_name, group_id, original_group_id,
+            (id, data_set_id, source_file_id, resource_id, source_layer_id, layer_key, layer_name, group_id, original_group_id,
              geometry_type, assignment_mode, enabled, style_mode)
-        VALUES (#{l.id}, #{l.dataSetId}, #{l.sourceFileId}, #{l.layerKey}, #{l.layerName}, #{l.groupId},
+        VALUES (#{l.id}, #{l.dataSetId}, #{l.sourceFileId}, #{l.resourceId}, #{l.sourceLayerId}, #{l.layerKey}, #{l.layerName}, #{l.groupId},
             #{l.originalGroupId}, #{l.geometryType}, #{l.assignmentMode}, #{l.enabled}, #{l.styleMode})
     </insert>
     <delete id="deleteExtractingLayersBySource">
@@ -79,18 +79,19 @@
     </select>
     <insert id="insertFeatures">
         INSERT INTO ocean_gis.gis_vector_feature
-            (id, layer_id, geom, properties, source_feature_id, source_feature_index, source_geometry_path, classification_rule_key)
+            (id, layer_id, source_layer_id, geom, properties, source_feature_id, source_feature_index, source_geometry_path, classification_rule_key, version, create_time, update_time)
         VALUES
         <foreach collection="items" item="f" separator=",">
-            (#{f.id}, #{f.layerId}, ST_GeomFromGeoJSON(#{f.geometryJson}),
+            (#{f.id}, #{f.layerId}, #{f.sourceLayerId}, ST_GeomFromGeoJSON(#{f.geometryJson}),
              CAST(#{f.propertiesJson} AS jsonb), CAST(#{f.sourceFeatureId,jdbcType=VARCHAR} AS jsonb),
              #{f.sourceFeatureIndex,jdbcType=BIGINT}, #{f.sourceGeometryPath,jdbcType=VARCHAR},
-             #{f.classificationRuleKey,jdbcType=VARCHAR})
+             #{f.classificationRuleKey,jdbcType=VARCHAR}, COALESCE(#{f.version,jdbcType=BIGINT},1),
+             COALESCE(#{f.createTime,jdbcType=TIMESTAMP},CURRENT_TIMESTAMP), COALESCE(#{f.updateTime,jdbcType=TIMESTAMP},CURRENT_TIMESTAMP))
         </foreach>
     </insert>
     <select id="features" resultType="org.ocean.admin.gis.entity.GisVectorFeature">
         WITH candidates AS (
-        SELECT f.id,f.layer_id,NULL::text AS geometry_json,f.properties::text AS properties_json,
+        SELECT f.id,f.layer_id,f.source_layer_id,NULL::text AS geometry_json,f.properties::text AS properties_json,
             f.version,f.source_feature_id::text AS source_feature_id,f.source_feature_index,f.source_geometry_path,f.classification_rule_key
         FROM ocean_gis.gis_vector_feature f
         WHERE f.layer_id = #{layerId} AND f.deleted = 0 AND f.id &gt; #{afterId}

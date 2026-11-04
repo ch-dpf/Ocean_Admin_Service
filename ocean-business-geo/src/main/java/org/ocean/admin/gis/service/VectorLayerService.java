@@ -52,6 +52,7 @@ public class VectorLayerService {
     private final VectorTemplateRules templateRules;
     private final VectorDataSetStyleService dataSetStyles;
     private final TransactionTemplate transactions;
+    private final VectorResourceService resources;
 
     /** 一个源图层对应一份已转换为 WGS84 的标准 GeoJSON，源键须在同一主入口内唯一且稳定。 */
     public record ImportLayer(String sourceLayerKey, String sourceLayerName, Path geoJsonPath, long featureCount) {
@@ -126,6 +127,9 @@ public class VectorLayerService {
         long sourceFeatures = 0;
         for (ImportLayer input : inputs) {
             String layerName = importLayerName(source, input);
+            Long sourceLayerId = resources.sourceLayers(source.getId()).stream()
+                    .filter(layer -> input.sourceLayerKey().equals(layer.getLayerKey())).map(layer -> layer.getId())
+                    .findFirst().orElseThrow(() -> new IllegalStateException("原始集合身份缺失"));
             sourceFeatures += reader.read(input.geoJsonPath(), parsed -> {
                 JsonNode properties = json.readTree(parsed.properties());
                 for (var part : templateRules.parts(json.readTree(parsed.geometry()))) {
@@ -137,6 +141,7 @@ public class VectorLayerService {
                     if (layer == null) {
                         layer = new GisVectorLayer();
                         layer.setId(IdWorker.getId()); layer.setDataSetId(source.getDataSetId()); layer.setSourceFileId(source.getId());
+                        layer.setSourceLayerId(sourceLayerId);
                         layer.setGroupId(group.getId()); layer.setOriginalGroupId(group.getId()); layer.setGeometryType(part.kind());
                         layer.setAssignmentMode("AUTO");
                         boolean unknown = "UNKNOWN_CLASSIFICATION".equals(group.getNodeType());
@@ -152,6 +157,7 @@ public class VectorLayerService {
                     }
                     GisVectorFeature feature = new GisVectorFeature();
                     feature.setId(IdWorker.getId()); feature.setLayerId(layer.getId());
+                    feature.setSourceLayerId(sourceLayerId);
                     feature.setGeometryJson(json.writeValueAsString(part.geometry())); feature.setPropertiesJson(parsed.properties());
                     feature.setSourceFeatureId(parsed.sourceId()); feature.setSourceFeatureIndex(parsed.index());
                     feature.setSourceGeometryPath(part.path()); feature.setClassificationRuleKey(match.ruleKey());
@@ -239,7 +245,10 @@ public class VectorLayerService {
         Double[] box = parseBox(bbox);
         String queryKey = Arrays.toString(box);
         long after = decodeCursor(cursor, layer, queryKey);
-        List<GisVectorFeature> rows = mapper.features(layerId, after, limit + 1, box[0], box[1], box[2], box[3]);
+        List<GisVectorFeature> rows;
+        try {
+            rows = resources.features(layer, after, limit + 1, new double[]{box[0], box[1], box[2], box[3]}, null);
+        } catch (IOException ex) { throw new IllegalStateException("工作要素读取失败", ex); }
         List<GisVectorVO.Feature> features = new ArrayList<>();
         long bytes = 0;
         boolean more = false;
@@ -265,6 +274,7 @@ public class VectorLayerService {
     @Transactional(rollbackFor = Exception.class)
     public GisVectorVO.Feature createFeature(Long layerId, JsonNode body) {
         GisVectorLayer layer = ready(layerId, true);
+        resources.requireEditable(layer);
         GisVectorFeature feature = parsedFeature(layerId, body);
         requireKind(layer, body);
         feature.setId(IdWorker.getId());
@@ -279,6 +289,7 @@ public class VectorLayerService {
     @Transactional(rollbackFor = Exception.class)
     public GisVectorVO.Feature updateFeature(Long layerId, Long id, String ifMatch, JsonNode body) {
         GisVectorLayer layer = ready(layerId, true);
+        resources.requireEditable(layer);
         GisVectorFeature existing = requireFeature(layerId, id);
         requireMatch(ifMatch, featureEtag(id, existing.getVersion()));
         if (body != null && body.has("id") && !id.toString().equals(body.get("id").asText())) throw badRequest("Feature.id 与路径不一致");
@@ -299,6 +310,7 @@ public class VectorLayerService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteFeature(Long layerId, Long id, String ifMatch) {
         GisVectorLayer layer = ready(layerId, true);
+        resources.requireEditable(layer);
         GisVectorFeature existing = requireFeature(layerId, id);
         requireMatch(ifMatch, featureEtag(id, existing.getVersion()));
         if (mapper.deleteFeature(layerId, id, existing.getVersion()) != 1) throw preconditionFailed();
@@ -312,16 +324,20 @@ public class VectorLayerService {
         if ("IMPORTING".equals(layer.getLayerStatus())) throw new ResponseStatusException(HttpStatus.CONFLICT, "正在导入的图层不能删除");
         requireMatch(ifMatch, layerEtag(id, layer.getDataVersion(), layer.getPresentationVersion()));
         mapper.deleteLayer(id);
+        mapper.purgeLayerFeatures(id);
         mapper.bumpDataSetRevision(layer.getDataSetId(), true, true);
     }
 
     public GisVectorVO.Layer toVO(GisVectorLayer layer) {
+        String storageType = layer.getResourceId() == null ? "POSTGIS" : resources.require(layer.getResourceId()).getStorageType();
         return new GisVectorVO.Layer(layer.getId().toString(), layer.getDataSetId().toString(),
                 layer.getSourceFileId() == null ? null : layer.getSourceFileId().toString(),
                 layer.getLayerKey(), layer.getLayerName(), layer.getLayerStatus(), layer.getFeatureCount(),
                 tree(layer.getGeographicExtent()), tree(layer.getGeometryTypes()), layer.getDataVersion(), layer.getCreateTime(), layer.getUpdateTime(),
                 layer.getGroupId().toString(), layer.getOriginalGroupId().toString(), layer.getGeometryType(), layer.getAssignmentMode(),
-                Boolean.TRUE.equals(layer.getEnabled()), layer.getStyleMode(), layer.getPresentationVersion());
+                Boolean.TRUE.equals(layer.getEnabled()), layer.getStyleMode(), layer.getPresentationVersion(),
+                layer.getSourceLayerId() == null ? null : layer.getSourceLayerId().toString(),
+                layer.getResourceId() == null ? null : layer.getResourceId().toString(), storageType, "GPKG".equals(storageType));
     }
 
     public static String featureEtag(Long id, long version) { return "\"feature-" + id + "-v" + version + "\""; }
@@ -364,6 +380,7 @@ public class VectorLayerService {
                 target = new GisVectorLayer();
                 target.setId(IdWorker.getId()); target.setDataSetId(source.getDataSetId());
                 target.setSourceFileId(source.getSourceFileId()); target.setGroupId(group.getId());
+                target.setResourceId(source.getResourceId()); target.setSourceLayerId(source.getSourceLayerId());
                 target.setOriginalGroupId(group.getId()); target.setGeometryType(source.getGeometryType());
                 target.setAssignmentMode("AUTO"); target.setLayerKey("edited-" + target.getId());
                 target.setLayerName(source.getLayerName());
@@ -391,7 +408,9 @@ public class VectorLayerService {
 
     private GisVectorFeature requireFeature(Long layerId, Long id) {
         if (id == null || id < 1) throw badRequest("要素ID须大于0");
-        GisVectorFeature feature = mapper.feature(layerId, id);
+        GisVectorFeature feature;
+        try { feature = resources.features(ready(layerId, false), 0, 1, null, id).stream().findFirst().orElse(null); }
+        catch (IOException ex) { throw new IllegalStateException("工作要素读取失败", ex); }
         if (feature == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "图层内不存在该要素");
         return feature;
     }
@@ -416,7 +435,8 @@ public class VectorLayerService {
         return new GisVectorVO.Feature("Feature", feature.getId().toString(), tree(feature.getGeometryJson()),
                 tree(feature.getPropertiesJson()), feature.getVersion(), feature.getLayerId().toString(),
                 feature.getSourceFeatureIndex() == null ? null : new GisVectorVO.SourceReference(feature.getSourceFeatureIndex(),
-                        tree(feature.getSourceFeatureId()), feature.getSourceGeometryPath(), feature.getClassificationRuleKey()));
+                        tree(feature.getSourceFeatureId()), feature.getSourceGeometryPath(), feature.getClassificationRuleKey(),
+                        feature.getSourceLayerId() == null ? null : feature.getSourceLayerId().toString()));
     }
 
     private JsonNode tree(String value) { return value == null ? null : json.readTree(value); }

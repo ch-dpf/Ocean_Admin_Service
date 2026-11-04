@@ -35,6 +35,22 @@ import java.util.List;
 public class PublicationController {
 
     private final PublicationService publicationService;
+    private final org.ocean.admin.gis.service.VectorPublicationService vectors;
+
+    @PostMapping("/VECTOR/publish")
+    @Operation(summary="发布动态矢量瓦片及所选多套样式")
+    @OperationLog(module="GIS_PUBLICATION",type=OperationType.SUBMIT,description="发布动态矢量服务")
+    public ResponseResult<?> publishVector(@Valid @RequestBody org.ocean.admin.gis.dto.GisVectorRequests.Publish request) throws java.io.IOException {
+        return ResponseResult.success(vectors.publish(request));
+    }
+
+    @PutMapping("/VECTOR/{serviceCode}/styles")
+    @Operation(summary="更新发布样式组合，复用原瓦片版本")
+    public ResponseResult<?> updateVectorStyles(@PathVariable String serviceCode,
+            @org.springframework.web.bind.annotation.RequestHeader(value="If-Match",required=false) String ifMatch,
+            @Valid @RequestBody org.ocean.admin.gis.dto.GisVectorRequests.Publish request) {
+        return ResponseResult.success(vectors.updateStyles(serviceCode,request,ifMatch));
+    }
 
     /** 发布和重命名共用的服务名称请求。 */
     public record ServiceNameRequest(@NotBlank @Size(max = 200) String serviceName) {

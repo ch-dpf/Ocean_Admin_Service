@@ -38,6 +38,63 @@ public class VectorController {
     private final VectorStyleService styles;
     private final VectorTileService tiles;
     private final VectorDataSetStyleService dataSetStyles;
+    private final org.ocean.admin.gis.service.VectorResourceService resources;
+
+    @DeleteMapping("/resources/{id}")
+    @Operation(summary="删除无工作图层或发布引用的矢量存储版本")
+    public ResponseResult<?> retireResource(@PathVariable Long id) {
+        resources.retire(id);resources.cleanupRetired();return ResponseResult.success("资源已进入清理流程");
+    }
+
+    @GetMapping("/datasets/{dataSetId}/style-schemes")
+    public ResponseResult<?> schemes(@PathVariable Long dataSetId) { return ResponseResult.success(styles.schemes(dataSetId)); }
+
+    @GetMapping("/datasets/{dataSetId}/style-schemes/{id}")
+    public ResponseEntity<?> scheme(@PathVariable Long dataSetId,@PathVariable Long id) {
+        var value=styles.scheme(dataSetId,id);
+        return ResponseEntity.ok().eTag(VectorStyleService.schemeEtag(id,value.version())).body(ResponseResult.success(value));
+    }
+
+    @PostMapping("/datasets/{dataSetId}/style-schemes")
+    @Operation(summary="创建独立样式方案；省略definition时复制当前制图配置")
+    public ResponseResult<?> createScheme(@PathVariable Long dataSetId,@Valid @RequestBody GisVectorRequests.Scheme request) {
+        return ResponseResult.success(styles.saveScheme(dataSetId,null,null,request));
+    }
+
+    @PutMapping("/datasets/{dataSetId}/style-schemes/{id}")
+    public ResponseResult<?> updateScheme(@PathVariable Long dataSetId,@PathVariable Long id,
+            @RequestHeader(value="If-Match",required=false) String ifMatch,@Valid @RequestBody GisVectorRequests.Scheme request) {
+        return ResponseResult.success(styles.saveScheme(dataSetId,id,ifMatch,request));
+    }
+
+    @DeleteMapping("/datasets/{dataSetId}/style-schemes/{id}")
+    public ResponseResult<?> deleteScheme(@PathVariable Long dataSetId,@PathVariable Long id,
+            @RequestHeader(value="If-Match",required=false) String ifMatch) {
+        styles.deleteScheme(dataSetId,id,ifMatch);return ResponseResult.success("样式方案已删除，已发布快照保持不变");
+    }
+
+    @GetMapping("/source-layers/{id}/features")
+    @Operation(summary = "分页浏览只读原始要素，坐标保持源坐标系")
+    public ResponseResult<?> sourceFeatures(@PathVariable Long id, @RequestParam(defaultValue = "0") long after,
+            @RequestParam(defaultValue = "100") int limit, @RequestParam(required = false) Long featureId) throws java.io.IOException {
+        return ResponseResult.success(resources.sourceFeatures(id, after, limit, featureId));
+    }
+
+    @GetMapping("/datasets/{dataSetId}/resources")
+    @Operation(summary = "查看原始快照、工作存储及发布版本")
+    public ResponseEntity<?> resources(@PathVariable Long dataSetId) {
+        var state = dataSetStyles.require(dataSetId, false);
+        return ResponseEntity.ok().eTag("\"storage-" + dataSetId + "-" + state.getDataRevision() + "\"")
+                .body(ResponseResult.success(resources.list(dataSetId)));
+    }
+
+    @PostMapping("/datasets/{dataSetId}/storage")
+    @Operation(summary = "显式转换工作数据存储：GPKG只读或POSTGIS编辑")
+    @OperationLog(module = "GIS_VECTOR", type = OperationType.UPDATE, description = "转换矢量工作存储")
+    public ResponseResult<?> convertStorage(@PathVariable Long dataSetId, @RequestParam String target,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch) throws java.io.IOException {
+        return ResponseResult.success(resources.convert(dataSetId, target, ifMatch));
+    }
 
     @GetMapping("/datasets/{dataSetId}/style")
     @Operation(summary = "查询数据集样式快照与默认规则", description = "仅配置，不含要素几何")

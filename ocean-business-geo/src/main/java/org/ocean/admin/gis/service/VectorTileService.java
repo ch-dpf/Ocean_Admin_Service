@@ -56,6 +56,7 @@ public class VectorTileService {
     private final Semaphore queries;
     private final Semaphore admissions;
     private final TransactionTemplate reads;
+    private final VectorResourceService resources;
     private final ConcurrentHashMap<String, CompletableFuture<byte[]>> inFlight = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, TileContract> contracts = new ConcurrentHashMap<>();
     private final LinkedHashMap<String, LocalTile> localTiles = new LinkedHashMap<>(64, .75f, true);
@@ -65,13 +66,14 @@ public class VectorTileService {
     private record TileContract(GisVectorVO.MapDefinition definition, String policy) { }
 
     public VectorTileService(GisVectorMapper mapper, VectorDataSetStyleService snapshots, VectorRenderPlanner planner, VectorTileProperties properties,
-            StringRedisTemplate redis, ObjectMapper json, PlatformTransactionManager transactions) {
+            StringRedisTemplate redis, ObjectMapper json, PlatformTransactionManager transactions, VectorResourceService resources) {
         this.mapper = mapper;
         this.snapshots = snapshots;
         this.planner = planner;
         this.properties = properties;
         this.redis = redis;
         this.json = json;
+        this.resources = resources;
         this.queries = new Semaphore(properties.getMaxConcurrentQueries(), true);
         this.admissions = new Semaphore(properties.getMaxConcurrentQueries() + properties.getMaxQueuedQueries(), true);
         this.reads = new TransactionTemplate(transactions);
@@ -109,8 +111,13 @@ public class VectorTileService {
                 if (!contract.definition().tileVersion().equals(tileVersion))
                     throw new ResponseStatusException(HttpStatus.GONE, "瓦片版本已过期，请重新读取地图定义");
                 mapper.setTileQueryTimeout(properties.getQueryTimeoutMs());
-                var payload = mapper.dataSetTile(dataSetId, contract.policy(),
-                        z, x, y, properties.getMaxDecodedTileBytes());
+                GisVectorVO.TilePayload payload;
+                if (mapper.hasPackageLayers(dataSetId)) {
+                    try {
+                        byte[] encoded=resources.tile(dataSetId,null,z,x,y,properties.getMaxDecodedTileBytes());
+                        payload=new GisVectorVO.TilePayload(encoded,encoded.length);
+                    } catch (IOException ex) { throw unavailable("读取矢量文件失败"); }
+                } else payload=mapper.dataSetTile(dataSetId, contract.policy(),z,x,y,properties.getMaxDecodedTileBytes());
                 if (payload == null) throw unavailable("瓦片编码未返回结果，请稍后重试");
                 if (payload.byteSize() > properties.getMaxDecodedTileBytes())
                     throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "当前瓦片超过解码体积上限；未截断要素");

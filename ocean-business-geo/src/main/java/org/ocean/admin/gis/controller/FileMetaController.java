@@ -32,6 +32,34 @@ public class FileMetaController {
 
     private final FileMetaService fileMetaService;
 
+    @GetMapping("/{id}/source-layers")
+    @Operation(summary = "查看导入时原始要素集合，包含空集合")
+    public ResponseResult<?> sourceLayers(@PathVariable Long id) {
+        return ResponseResult.success(fileMetaService.sourceLayers(id));
+    }
+
+    @PostMapping("/{id}/source-snapshot")
+    @Operation(summary = "生成原始集合快照，保留现有工作图层编辑结果")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.SUBMIT, description = "生成原始集合快照")
+    public ResponseResult<?> snapshotSource(@PathVariable Long id) throws java.io.IOException {
+        return ResponseResult.success(fileMetaService.snapshotSource(id));
+    }
+
+    @GetMapping("/{id}/release-preview")
+    @Operation(summary = "检查原始文件组释放影响与阻塞原因")
+    public ResponseResult<?> releasePreview(@PathVariable Long id) {
+        return ResponseResult.success(fileMetaService.releasePreview(id));
+    }
+
+    @PostMapping("/{id}/release")
+    @Operation(summary = "释放原始物理文件，保留来源记录、要素快照与导入图层")
+    @OperationLog(module = "GIS_FILE_META", type = OperationType.DELETE, description = "释放原始文件组")
+    public ResponseResult<?> release(@PathVariable Long id) {
+        var result = fileMetaService.releaseRawFiles(id);
+        fileMetaService.cleanupReleasedRawFiles();
+        return ResponseResult.success(result);
+    }
+
     @PostMapping("/workspace-files")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(summary = "服务器工作区接入数据")

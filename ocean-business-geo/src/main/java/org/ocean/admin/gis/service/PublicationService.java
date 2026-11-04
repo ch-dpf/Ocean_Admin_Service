@@ -25,16 +25,18 @@ public class PublicationService {
     private final PublicationRecordService recordService;
     private final ProcessingTaskRecordService taskService;
     private final GisDataSetMapper dataSetMapper;
+    private final VectorPublicationService vectors;
     private final Map<GisProcessingType, PublicationProtocol> protocols;
 
     public PublicationService(
             PublicationRecordService recordService,
             ProcessingTaskRecordService taskService,
             List<PublicationProtocol> protocolList,
-            GisDataSetMapper dataSetMapper) {
+            GisDataSetMapper dataSetMapper, VectorPublicationService vectors) {
         this.recordService = recordService;
         this.taskService = taskService;
         this.dataSetMapper = dataSetMapper;
+        this.vectors = vectors;
         EnumMap<GisProcessingType, PublicationProtocol> protocolMap =
                 new EnumMap<>(GisProcessingType.class);
         for (PublicationProtocol protocol : protocolList) {
@@ -78,18 +80,21 @@ public class PublicationService {
     }
 
     public GisPublicationVO get(GisProcessingType processingType, String serviceCode) {
+        if(processingType==GisProcessingType.VECTOR) return vectors.toVO(vectors.get(serviceCode,false));
         PublicationProtocol protocol = requireProtocol(processingType);
         return toVO(recordService.getRequired(
                 processingType, protocol.normalizeServiceCode(serviceCode)));
     }
 
     public GisPublicationVO rename(GisProcessingType processingType, String serviceCode, String serviceName) {
+        if(processingType==GisProcessingType.VECTOR) return vectors.rename(serviceCode,serviceName);
         PublicationProtocol protocol = requireProtocol(processingType);
         return toVO(recordService.rename(processingType,
                 protocol.normalizeServiceCode(serviceCode), serviceName));
     }
 
     public GisPublicationVO disable(GisProcessingType processingType, String serviceCode) {
+        if(processingType==GisProcessingType.VECTOR) return vectors.disable(serviceCode);
         PublicationProtocol protocol = requireProtocol(processingType);
         String normalizedCode = protocol.normalizeServiceCode(serviceCode);
         GisPublication publication = recordService.disable(
@@ -106,6 +111,7 @@ public class PublicationService {
     }
 
     private GisPublicationVO toVO(GisPublication publication) {
+        if(publication.getVectorResourceId()!=null) return vectors.toVO(publication);
         GisTileSet tileSet = recordService.getPublicationTileSet(publication);
         GisDataSet dataSet = null;
         if (publication.getDataSetId() != null) {

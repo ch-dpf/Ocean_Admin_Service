@@ -67,6 +67,8 @@ public class GisFileMeta {
 
     /** PENDING、READY、FAILED */
     private String fileStatus;
+    /** 原文件释放不删除来源记录或已生成的数据资源。 */
+    private String rawRetention = "RETAINED";
 
     /** NOT_REQUIRED、PENDING、COMPLETED、FAILED */
     private String cleanupStatus;
