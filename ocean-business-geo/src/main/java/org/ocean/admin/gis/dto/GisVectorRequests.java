@@ -9,6 +9,9 @@ import java.util.List;
 
 /** 矢量管理请求契约。 */
 public final class GisVectorRequests {
+    public record Scheme(@NotBlank @Size(max=100) String name, JsonNode definition) { }
+    public record Publish(@NotNull @Positive Long dataSetId, @NotBlank @Size(max=200) String serviceName,
+            @NotNull @Size(min=1,max=100) List<@NotNull @Positive Long> styleSchemeIds, @NotNull @Positive Long defaultStyleSchemeId) { }
     private GisVectorRequests() { }
 
     public record Style(@NotBlank @Size(max = 100) String name, @NotNull JsonNode definition) { }

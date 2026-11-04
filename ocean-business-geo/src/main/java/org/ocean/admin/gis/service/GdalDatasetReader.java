@@ -64,10 +64,22 @@ public class GdalDatasetReader {
     /** 原文件始终只读；临时文件随上下文关闭删除，提交前须再次核验所有源。 */
     public ReadContext prepare(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
                                Consumer<ProgressStage> progress) {
+        return prepare(group, members, heartbeat, progress, false);
+    }
+
+    /** 原始快照与制图转换独立执行，空层或无效制图数据也可留存供检查。 */
+    public ReadContext prepareSnapshot(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
+                                       Consumer<ProgressStage> progress) {
+        return prepare(group, members, heartbeat, progress, true);
+    }
+
+    private ReadContext prepare(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
+                                Consumer<ProgressStage> progress, boolean snapshotOnly) {
         if (group == null || members == null || members.isEmpty()) throw failure("MISSING_GROUP", "文件组没有可读取成员");
         GisFileFormat format;
         try { format = GisFileFormat.valueOf(group.getFormat()); }
         catch (RuntimeException ex) { throw failure("UNSUPPORTED_FORMAT", "文件组格式未被支持"); }
+        if (snapshotOnly && !format.isVector()) throw failure("UNSUPPORTED_FORMAT", "原始要素快照只支持矢量文件组");
         ReadContext context = new ReadContext(heartbeat);
         try {
             JsonNode options = readOptions(group.getReadOptionsJson());
@@ -91,7 +103,7 @@ public class GdalDatasetReader {
             if (!zeroColumnMif && !extensions.containsAll(format.requiredExtensions())) throw failure("MISSING_REQUIRED_MEMBERS", "文件组缺少必要配套文件: " + format.requiredExtensions());
             context.verifySources();
             Path entryPath;
-            if (format == GisFileFormat.GEOJSON && members.size() == 1) {
+            if (!snapshotOnly && format == GisFileFormat.GEOJSON && members.size() == 1) {
                 entryPath = context.snapshots.getFirst().path();
             } else {
                 Path staged = context.directory().resolve("source");
@@ -129,7 +141,12 @@ public class GdalDatasetReader {
                 }
             }
             context.verifySources();
-            if (format == GisFileFormat.GEOJSON) {
+            if (snapshotOnly) {
+                ObjectNode request = json.createObjectNode().put("packageOperation", "SNAPSHOT")
+                        .put("input", entryPath.toString()).put("format", format.name());
+                request.set("options", options);
+                context.packageResult = executePackage(context, request, progress);
+            } else if (format == GisFileFormat.GEOJSON) {
                 context.vectors.add(new VectorSource("default", entry.getOriginalName(), entryPath, "EPSG:4326", null, null));
             } else if (format == GisFileFormat.GEOTIFF && !options.has("sourceCrs")) {
                 context.rasters.add(new RasterSource("default", entry.getOriginalName(), entryPath, null, null, null));
@@ -148,6 +165,32 @@ public class GdalDatasetReader {
             catch (RuntimeException cleanup) { ex.addSuppressed(cleanup); }
             throw failure("SOURCE_READ_FAILED", "无法准备原始数据源: " + ex.getMessage());
         }
+    }
+
+    /** 复用受限工作进程执行托管包操作，JNI 不进入服务 JVM。 */
+    public JsonNode executePackage(ObjectNode request, Runnable heartbeat) {
+        try (var context = new ReadContext(heartbeat)) {
+            return executePackage(context, request, stage -> { });
+        } catch (IOException ex) { throw failure("PACKAGE_IO", "矢量包操作失败: " + ex.getMessage()); }
+    }
+
+    private JsonNode executePackage(ReadContext context, ObjectNode request, Consumer<ProgressStage> progress) throws IOException {
+        try {
+            request.put("version", properties.getGdalVersion());
+            request.put("maxMetadataBytes", Math.max(properties.getGdalMaxMetadataBytes(), 16 * 1024 * 1024));
+            if (Set.of("QUERY","TILE").contains(request.path("packageOperation").asText())) context.timeout=Duration.ofSeconds(30);
+            if (request.hasNonNull("output")) context.packageOutput = Path.of(request.path("output").asText());
+            Path requestFile = context.directory().resolve("request.json");
+            json.writeValue(requestFile.toFile(), request);
+            run(context, workerCommand(requestFile), progress);
+            Path resultFile = context.directory().resolve("result.json");
+            if (!Files.isRegularFile(resultFile) || Files.size(resultFile) > 16 * 1024 * 1024)
+                throw failure("PACKAGE_IO", "矢量包结果缺失或超过限额");
+            JsonNode result = json.readTree(resultFile.toFile());
+            if (result.has("error")) throw failure("PACKAGE_IO", result.path("error").path("message").asText());
+            return result;
+        } catch (IOException ex) { throw ex; }
+        catch (Exception ex) { throw failure("PACKAGE_IO", ex.getMessage()); }
     }
 
     /** 主进程只传递受控文件组参数，不在服务 JVM 中加载 JNI。 */
@@ -309,7 +352,7 @@ public class GdalDatasetReader {
 
     /** 主服务监控 Java 工作进程；原生调用卡死或崩溃不会进入服务 JVM。 */
     private void run(ReadContext context, List<String> command, Consumer<ProgressStage> progress) throws Exception {
-        Duration timeout = properties.getGdalProcessTimeout();
+        Duration timeout = context.timeout == null ? properties.getGdalProcessTimeout() : context.timeout;
         if (timeout == null || timeout.isNegative() || timeout.isZero()) throw failure("INVALID_GDAL_CONFIG", "GDAL 进程超时配置必须大于零");
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(context.directory().toFile());
@@ -416,10 +459,15 @@ public class GdalDatasetReader {
         private final List<RasterSource> rasters = new ArrayList<>();
         private final List<SourceSnapshot> snapshots = new ArrayList<>();
         private Path directory;
+        private JsonNode packageResult;
+        private Duration timeout;
+        private Path packageOutput;
 
         private ReadContext(Runnable heartbeat) { this.heartbeat = heartbeat; }
         public List<VectorSource> vectors() { return List.copyOf(vectors); }
         public List<RasterSource> rasters() { return List.copyOf(rasters); }
+        public JsonNode packageResult() { return packageResult; }
+        public Path snapshotPath() throws IOException { return directory().resolve("snapshot.gpkg"); }
 
         private Path directory() throws IOException {
             if (directory == null) {
@@ -432,15 +480,24 @@ public class GdalDatasetReader {
 
         private long outputBytes() throws IOException {
             if (directory == null) return 0;
-            try (var entries = Files.walk(directory)) {
-                long total = 0;
-                for (Path path : entries.filter(Files::isRegularFile).toList()) {
-                    long size = Files.size(path);
-                    if (Long.MAX_VALUE - total < size) return Long.MAX_VALUE;
-                    total += size;
+            long[] total = {0};
+            Files.walkFileTree(directory, new java.nio.file.SimpleFileVisitor<>() {
+                @Override public java.nio.file.FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                    long size = attributes.size();
+                    total[0] = Long.MAX_VALUE - total[0] < size ? Long.MAX_VALUE : total[0] + size;
+                    return java.nio.file.FileVisitResult.CONTINUE;
                 }
-                return total;
+                @Override public java.nio.file.FileVisitResult visitFileFailed(Path file, IOException error) throws IOException {
+                    // SQLite提交会移除journal；目录扫描不能把正常提交误报为读取失败。
+                    if (error instanceof java.nio.file.NoSuchFileException) return java.nio.file.FileVisitResult.CONTINUE;
+                    throw error;
+                }
+            });
+            if (packageOutput != null && Files.isRegularFile(packageOutput)) {
+                long size = Files.size(packageOutput);
+                total[0] = Long.MAX_VALUE - total[0] < size ? Long.MAX_VALUE : total[0] + size;
             }
+            return total[0];
         }
 
         public void verifySources() {
@@ -574,12 +631,16 @@ public class GdalDatasetReader {
             ObjectNode response;
             try {
                 if (!requestFile.getFileName().toString().equals("request.json") || Files.isSymbolicLink(requestFile)
-                        || Files.size(requestFile) > 131072) throw failure("INVALID_READ_OPTIONS", "工作进程请求文件无效");
+                        || Files.size(requestFile) > 16 * 1024 * 1024) throw failure("INVALID_READ_OPTIONS", "工作进程请求文件无效");
                 JsonNode request = mapper.readTree(requestFile.toFile());
                 int limit = request.path("maxMetadataBytes").asInt();
                 if (limit < 1024) throw failure("INVALID_GDAL_CONFIG", "GDAL 元数据限额无效");
                 Worker worker = new Worker(directory, limit);
                 initialize(request.path("version").asString());
+                if (request.has("packageOperation")) {
+                    worker.writeResult(GeoPackageStore.executeNative(request, directory, mapper));
+                    return;
+                }
                 GisFileFormat format = GisFileFormat.valueOf(request.path("format").asString());
                 Path input = Path.of(request.path("input").asString()).toAbsolutePath().normalize();
                 if (!input.startsWith(directory.resolve("source")) || !Files.isRegularFile(input, LinkOption.NOFOLLOW_LINKS))

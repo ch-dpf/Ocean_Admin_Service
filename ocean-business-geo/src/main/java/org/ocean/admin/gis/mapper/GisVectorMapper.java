@@ -8,6 +8,13 @@ import org.ocean.admin.gis.entity.GisVectorLayer;
 import org.ocean.admin.gis.entity.GisVectorStyle;
 import org.ocean.admin.gis.entity.GisVectorDataSetStyle;
 import org.ocean.admin.gis.entity.GisVectorGroup;
+import org.ocean.admin.gis.entity.GisVectorResource;
+import org.ocean.admin.gis.entity.GisVectorSourceLayer;
+import org.ocean.admin.gis.entity.GisVectorStyleScheme;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Insert;
+import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Delete;
 import org.ocean.admin.gis.vo.GisVectorVO;
 
 import java.util.List;
@@ -15,6 +22,84 @@ import java.util.List;
 /** 矢量图层、要素与样式的 PostGIS 持久化操作。 */
 @Mapper
 public interface GisVectorMapper {
+    @Select("SELECT *,definition::text AS definition_json FROM ocean_gis.gis_vector_resource WHERE id=#{id} AND status='READY'")
+    GisVectorResource resource(Long id);
+
+    @Select("SELECT *,definition::text AS definition_json FROM ocean_gis.gis_vector_resource WHERE source_file_id=#{fileId} AND resource_kind='SOURCE' AND status='READY'")
+    GisVectorResource sourceResource(Long fileId);
+
+    @Select("SELECT *,definition::text AS definition_json FROM ocean_gis.gis_vector_resource WHERE data_set_id=#{dataSetId} AND status='READY' ORDER BY id")
+    List<GisVectorResource> resources(Long dataSetId);
+
+    @Insert("""
+        INSERT INTO ocean_gis.gis_vector_resource(id,data_set_id,source_file_id,resource_kind,storage_type,storage_key,status,data_version,size_bytes,checksum,definition)
+        VALUES(#{id},#{dataSetId},#{sourceFileId},#{resourceKind},#{storageType},#{storageKey},'READY',#{dataVersion},#{sizeBytes},#{checksum},CAST(#{definitionJson} AS jsonb))
+        """)
+    int insertResource(GisVectorResource resource);
+
+    @Update("UPDATE ocean_gis.gis_vector_resource SET status='RETIRED' WHERE id=#{id}")
+    int retireResource(Long id);
+
+    @Update("UPDATE ocean_gis.gis_vector_resource r SET status='RETIRED' WHERE data_set_id=#{id} AND NOT EXISTS(SELECT 1 FROM ocean_gis.gis_publication p WHERE p.vector_resource_id=r.id AND p.deleted=0)")
+    int retireDataSetResources(Long id);
+
+    @Select("SELECT (SELECT count(*) FROM ocean_gis.gis_vector_layer WHERE resource_id=#{id} AND deleted=0)+(SELECT count(*) FROM ocean_gis.gis_publication WHERE vector_resource_id=#{id} AND deleted=0)")
+    long resourceReferences(Long id);
+
+    @Select("SELECT *,definition::text AS definition_json FROM ocean_gis.gis_vector_resource WHERE status='RETIRED' AND storage_key IS NOT NULL LIMIT 100")
+    List<GisVectorResource> retiredResources();
+
+    @Update("UPDATE ocean_gis.gis_vector_resource SET storage_key=NULL,size_bytes=0 WHERE id=#{id} AND status='RETIRED'")
+    int markResourceCleaned(Long id);
+
+    @Select("SELECT *,schema_definition::text AS schema_json FROM ocean_gis.gis_vector_source_layer WHERE resource_id=#{resourceId} ORDER BY id")
+    List<GisVectorSourceLayer> sourceLayers(Long resourceId);
+
+    @Select("SELECT *,schema_definition::text AS schema_json FROM ocean_gis.gis_vector_source_layer WHERE id=#{id}")
+    GisVectorSourceLayer sourceLayer(Long id);
+
+    @Insert("""
+        INSERT INTO ocean_gis.gis_vector_source_layer(id,resource_id,layer_key,layer_name,table_name,feature_count,source_crs,schema_definition)
+        VALUES(#{id},#{resourceId},#{layerKey},#{layerName},#{tableName},#{featureCount},#{sourceCrs},CAST(#{schemaJson} AS jsonb))
+        """)
+    int insertSourceLayer(GisVectorSourceLayer layer);
+
+    @Update("UPDATE ocean_gis.gis_vector_layer SET resource_id=#{resourceId},data_version=data_version+1 WHERE id=#{layerId} AND deleted=0")
+    int assignResource(@Param("layerId") Long layerId, @Param("resourceId") Long resourceId);
+
+    @Delete("DELETE FROM ocean_gis.gis_vector_feature WHERE layer_id=#{layerId}")
+    int purgeLayerFeatures(Long layerId);
+
+    @Select("SELECT id,data_set_id,source_file_id,resource_id,source_layer_id,layer_key,layer_name,group_id,original_group_id,geometry_type,assignment_mode,enabled,style_mode,presentation_version,layer_status,feature_count,data_version FROM ocean_gis.gis_vector_layer WHERE data_set_id=#{id} AND deleted=0 AND layer_status='READY' ORDER BY id")
+    List<GisVectorLayer> dataSetLayers(Long id);
+
+    @Select("SELECT id,layer_id,source_layer_id,ST_AsGeoJSON(geom,15,0) AS geometry_json,properties::text AS properties_json,source_feature_id::text AS source_feature_id,source_feature_index,source_geometry_path,classification_rule_key,version,create_time,update_time FROM ocean_gis.gis_vector_feature WHERE layer_id=#{layerId} AND deleted=0 AND id>#{after} ORDER BY id LIMIT #{limit}")
+    List<GisVectorFeature> exportFeatures(@Param("layerId") Long layerId,@Param("after") long after,@Param("limit") int limit);
+
+    @Select("SELECT id,layer_id,source_layer_id,ST_AsGeoJSON(geom,15,0) AS geometry_json,properties::text AS properties_json,source_feature_id::text AS source_feature_id,source_feature_index,source_geometry_path,classification_rule_key,version FROM ocean_gis.gis_vector_feature WHERE layer_id=#{layerId} AND deleted=0 AND id>#{after} AND ST_Intersects(geom,ST_MakeEnvelope(#{b[0]},#{b[1]},#{b[2]},#{b[3]},4326)) ORDER BY id LIMIT 100")
+    List<GisVectorFeature> tileFeatures(@Param("layerId") Long layerId,@Param("after") long after,@Param("b") double[] bbox);
+
+    @Select("SELECT EXISTS(SELECT 1 FROM ocean_gis.gis_vector_layer l JOIN ocean_gis.gis_vector_resource r ON r.id=l.resource_id WHERE l.data_set_id=#{id} AND l.deleted=0 AND r.storage_type='GPKG')")
+    boolean hasPackageLayers(Long id);
+
+    @Select("SELECT *,definition::text AS definition_json FROM ocean_gis.gis_vector_style_scheme WHERE data_set_id=#{id} ORDER BY id")
+    List<GisVectorStyleScheme> schemes(Long id);
+
+    @Select("SELECT *,definition::text AS definition_json FROM ocean_gis.gis_vector_style_scheme WHERE id=#{id}")
+    GisVectorStyleScheme scheme(Long id);
+
+    @Insert("INSERT INTO ocean_gis.gis_vector_style_scheme(id,data_set_id,name,definition) VALUES(#{id},#{dataSetId},#{name},CAST(#{definitionJson} AS jsonb))")
+    int insertScheme(GisVectorStyleScheme scheme);
+
+    @Update("UPDATE ocean_gis.gis_vector_style_scheme SET name=#{name},definition=CAST(#{definitionJson} AS jsonb),version=version+1,update_time=CURRENT_TIMESTAMP WHERE id=#{id} AND version=#{version}")
+    int updateScheme(GisVectorStyleScheme scheme);
+
+    @Delete("DELETE FROM ocean_gis.gis_vector_style_scheme WHERE id=#{id} AND version=#{version}")
+    int deleteScheme(@Param("id") Long id,@Param("version") long version);
+
+    @Select("SELECT COALESCE(jsonb_object_agg(s.feature_id::text,s.definition),'{}'::jsonb)::text FROM ocean_gis.gis_vector_style s JOIN ocean_gis.gis_vector_feature f ON f.id=s.feature_id JOIN ocean_gis.gis_vector_layer l ON l.id=f.layer_id WHERE l.data_set_id=#{id} AND l.deleted=0 AND f.deleted=0 AND s.scope='FEATURE'")
+    String allFeatureCartography(Long id);
+
     int insertLayer(@Param("l") GisVectorLayer layer);
     int deleteExtractingLayersBySource(@Param("fileId") Long fileId);
     List<GisVectorLayer> layersBySource(@Param("fileId") Long fileId);

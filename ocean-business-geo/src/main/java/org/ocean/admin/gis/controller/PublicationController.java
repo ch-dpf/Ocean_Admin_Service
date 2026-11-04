@@ -4,6 +4,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.service.PublicationService;
 import org.ocean.admin.gis.vo.GisPublicationVO;
@@ -31,6 +35,41 @@ import java.util.List;
 public class PublicationController {
 
     private final PublicationService publicationService;
+    private final org.ocean.admin.gis.service.VectorPublicationService vectors;
+
+    @PostMapping("/VECTOR/publish")
+    @Operation(summary="发布动态矢量瓦片及所选多套样式")
+    @OperationLog(module="GIS_PUBLICATION",type=OperationType.SUBMIT,description="发布动态矢量服务")
+    public ResponseResult<?> publishVector(@Valid @RequestBody org.ocean.admin.gis.dto.GisVectorRequests.Publish request) throws java.io.IOException {
+        return ResponseResult.success(vectors.publish(request));
+    }
+
+    @PutMapping("/VECTOR/{serviceCode}/styles")
+    @Operation(summary="更新发布样式组合，复用原瓦片版本")
+    public ResponseResult<?> updateVectorStyles(@PathVariable String serviceCode,
+            @org.springframework.web.bind.annotation.RequestHeader(value="If-Match",required=false) String ifMatch,
+            @Valid @RequestBody org.ocean.admin.gis.dto.GisVectorRequests.Publish request) {
+        return ResponseResult.success(vectors.updateStyles(serviceCode,request,ifMatch));
+    }
+
+    /** 发布和重命名共用的服务名称请求。 */
+    public record ServiceNameRequest(@NotBlank @Size(max = 200) String serviceName) {
+        public ServiceNameRequest {
+            if (serviceName != null) serviceName = serviceName.strip();
+        }
+    }
+
+    @PutMapping("/{processingType}/{serviceCode}/name")
+    @Operation(summary = "重命名GIS服务")
+    @OperationLog(module = "GIS_PUBLICATION", type = OperationType.UPDATE,
+            description = "重命名GIS服务", recordResponse = true)
+    public ResponseResult<GisPublicationVO> rename(
+            @PathVariable GisProcessingType processingType,
+            @PathVariable String serviceCode,
+            @Valid @RequestBody ServiceNameRequest request) {
+        return ResponseResult.success("服务名称已更新",
+                publicationService.rename(processingType, serviceCode, request.serviceName()));
+    }
 
     @GetMapping("/page")
     @Operation(summary = "分页查询GIS发布记录")
@@ -63,9 +102,10 @@ public class PublicationController {
     public ResponseResult<GisPublicationVO> publish(
             @Parameter(description = "发布类型：TERRAIN 或 IMAGERY")
             @PathVariable GisProcessingType processingType,
-            @PathVariable Long sourceTaskId) {
+            @PathVariable Long sourceTaskId,
+            @Valid @RequestBody ServiceNameRequest request) {
         return ResponseResult.success("GIS服务发布成功",
-                publicationService.publish(processingType, sourceTaskId));
+                publicationService.publish(processingType, sourceTaskId, request.serviceName()));
     }
 
     @GetMapping("/{processingType}/{serviceCode}")

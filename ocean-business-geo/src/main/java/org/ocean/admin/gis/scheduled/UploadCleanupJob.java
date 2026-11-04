@@ -13,12 +13,16 @@ import org.springframework.stereotype.Component;
 public class UploadCleanupJob {
 
     private final FileUploadService fileUploadService;
+    private final org.ocean.admin.gis.service.FileMetaService fileMetaService;
+    private final org.ocean.admin.gis.service.VectorResourceService vectorResources;
 
     @Scheduled(
             fixedDelayString = "#{@fileUploadConfig.cleanupInterval.toMillis()}",
             initialDelayString = "#{@fileUploadConfig.cleanupInterval.toMillis()}")
     public void execute() {
         try {
+            fileMetaService.cleanupReleasedRawFiles();
+            vectorResources.cleanupRetired();
             int cleanedCount = fileUploadService.cleanupExpiredBatches();
             if (cleanedCount > 0) {
                 log.info("GIS上传暂存资源定时清理完成: cleanedCount={}", cleanedCount);

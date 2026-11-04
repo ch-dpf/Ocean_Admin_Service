@@ -14,6 +14,8 @@ import tools.jackson.databind.JsonNode;
 /** GIS 文件元数据查询响应对象；嵌套类型用于工作区接入请求及结果。 */
 @Data
 public class GisFileMetaVO {
+    @Schema(description = "原文件保留状态：RETAINED、RELEASE_PENDING、RELEASED")
+    private String rawRetention;
 
     @Schema(description = "文件元数据 ID", accessMode = Schema.AccessMode.READ_ONLY)
     private Long id;

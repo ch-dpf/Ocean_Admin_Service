@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 public class GisPublicationVO {
     private Long id;
     private String serviceCode;
+    private String serviceName;
 
     @Schema(description = "发布类型：TERRAIN、IMAGERY、VECTOR")
     private GisProcessingType processingType;
@@ -24,6 +25,9 @@ public class GisPublicationVO {
     private String taskName;
 
     private Long dataSetId;
+
+    @Schema(description = "通过数据集 ID 查询的当前名称；未关联或数据集已删除时为空")
+    private String dataSetName;
 
     @Schema(description = "发布状态：PUBLISHED、DISABLED")
     private String status;
@@ -43,6 +47,12 @@ public class GisPublicationVO {
 
     @Schema(description = "瓦片访问模板；不适用的发布类型为空")
     private String tileUrlTemplate;
+
+    @Schema(description = "动态矢量发布的固定数据资源ID")
+    private String vectorResourceId;
+    private String releaseVersion;
+    private String defaultStyleId;
+    private tools.jackson.databind.JsonNode styles;
 
     private LocalDateTime publishTime;
     private LocalDateTime updateTime;

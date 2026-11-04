@@ -87,3 +87,26 @@ QUEUED、RUNNING 处理任务保护整个来源组及所有配件，任务提交
 升级在单事务中提交；提交前比较了影像、地形及其任务、成果、归档、发布等10类非矢量数据的行数与内容哈希，均保持不变。仅清理数据库记录，历史上传副本和 `E:\data\vector\国内POI数据` 原始采集目录未物理删除。联调用临时数据集、测试上传副本和测试渲染上下文在验证后清理。
 
 清理前 GIS Schema 的 PostgreSQL custom-format 备份存于 `deploy/docker/backups/ocean-gis-before-vector-upgrade-20261022.dump`（被 Git 忽略），可供恢复评估。备份校验 SHA-256 为 `009A41EC386AD0C50147763887C91D8878AC1D6B0E2C734B35CE721A6BE9F6F1`，大小74600515字节；不要将备份当作初始化 SQL 或在当前库直接无条件整库还原。过渡 SQL 仅临时执行，最终结构统一维护于 `db/migration/V2__init_ocean_gis.sql`。
+
+## 2026-11-03 矢量资源与多样式发布
+
+最终结构仍统一维护于 `V2__init_ocean_gis.sql`。本次已对本地开发库执行事务性结构调整；更新前后文件2921条、工作图层784条、PostGIS要素1963416条、发布记录15条，行数保持不变。未批量转换现有数据、删除原文件或重导图层。`mvn flyway:repair` 与 `mvn flyway:validate` 已通过。
+
+| 对象 | 职责及约束 |
+| --- | --- |
+| `gis_vector_resource` | SOURCE原始快照、WORKING当前存储、PUBLICATION固定数据版本；GPKG或POSTGIS；保存托管键、SHA-256、大小、数据契约及READY/RETIRED状态。每个来源文件最多一个READY原始快照 |
+| `gis_vector_source_layer` | 原始集合名、稳定来源键、源CRS、字段结构、数量及包内表名；包含空集合 |
+| `gis_vector_style_scheme` | 数据集内独立命名样式方案，名称唯一，JSON内容和乐观版本；草稿可修改，与固定发布内容分开 |
+| `gis_vector_publication_revision` | publication_id/release_version组成主键，保留每次发布的多样式内容与默认项 |
+| `gis_vector_layer.resource_id/source_layer_id` | 当前工作存储及原始集合身份；未显式转换的PostGIS图层无resource_id |
+| `gis_vector_feature.source_layer_id` | 原始集合身份，与source_feature_index/source_geometry_path一起追溯源记录 |
+| `gis_file_meta.raw_retention` | RETAINED、RELEASE_PENDING、RELEASED，与文件接收/解析状态独立；释放不删除来源元数据 |
+| `gis_publication.vector_resource_id/vector_definition` | 固定矢量数据源与当前发布样式组合；与tile_set_id二选一 |
+
+数据库保留目录、权限依赖、样式及发布绑定；只读要素放在托管GPKG文件内，每个原始集合或工作图层单独建表并建立RTree。`feature_json` 保存完整原始Feature或工作要素记录，`geom` 用于空间索引；原始快照不做业务分类和坐标转换，工作包使用4326。GPKG切换成功后删除对应PostGIS工作行，回切时保留ID、版本、创建/更新时间与来源身份。空间候选用RTree筛选后做精确相交，支持跨日期变更线的查询。
+
+释放原文件检查完整原始快照校验和及活动任务，先提交RELEASE_PENDING，再删除托管文件；失败重试。工作区文件只解除接入。现有文件需显式调用source-snapshot生成快照，已有工作要素不会被覆盖。原始快照是要素级保存，不替代原格式字节归档。
+
+资源文件登记与工作切换受事务保护；失败的新文件清理，已替换且无引用的工作资源标记RETIRED，由定时任务回收。数据集删除时，未发布资源转入回收，发布引用的资源独立保留且data_set_id置空；样式草稿随数据集级联删除。发布记录固定数据源与样式内容，因此可以继续提供公开瓦片和历史样式。
+
+开发库升级没有为历史图层猜测source_layer_id，也没有把所有数据自动搬到GPKG。应用通过明确的工作存储转换接口选择后端。备份时必须将数据库与 `gis.processing.basePath/vector-resources` 一并纳入；只备份PostgreSQL不能恢复包内要素。
