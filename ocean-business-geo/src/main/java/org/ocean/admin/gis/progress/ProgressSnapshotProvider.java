@@ -12,10 +12,13 @@ import org.ocean.admin.gis.mapper.GisProcessingTaskMapper;
 import org.ocean.admin.gis.mapper.GisTileSetArchiveMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.ocean.admin.gis.progress.ProgressSnapshot.*;
 
@@ -72,8 +75,7 @@ public class ProgressSnapshotProvider {
     public GisFileMeta ingestionFile(Long id) { return files.selectById(id); }
 
     public boolean isExtracting(String id) {
-        GisFileMeta file = files.selectById(Long.valueOf(id));
-        return file != null && "RUNNING".equals(file.getMetadataStatus());
+        return files.isIngestionFileExtracting(Long.valueOf(id));
     }
 
     public List<String> ingestionIds(List<Long> ids) {
@@ -83,12 +85,37 @@ public class ProgressSnapshotProvider {
     }
 
     public ProgressSummary ingestionSummary(String id, ProgressSnapshot snapshot) {
+        return ingestionProgress(id, snapshot).summary();
+    }
+
+    /** 在同一数据库快照中读取文件结果和去重后的组指标，供 Redis 一次发布。 */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public IngestionProgress ingestionProgress(String id, ProgressSnapshot snapshot) {
         var counts = files.ingestionCounts(id);
+        var groups = files.ingestionGroupCounts(id);
         long registrationFailed = snapshot.metrics().stream().filter(metric -> "REGISTRATION_FAILED".equals(metric.code()))
                 .mapToLong(Metric::value).findFirst().orElse(0);
-        return new ProgressSummary(snapshot.summary().total(), counts.succeeded(), counts.failed() + registrationFailed,
-                snapshot.summary().skipped(), ProgressUnit.FILE);
+        long externalSkipped = snapshot.metrics().stream()
+                .filter(metric -> "DUPLICATE_FILES".equals(metric.code()) || "UNSUPPORTED_FILES".equals(metric.code()))
+                .mapToLong(Metric::value).sum();
+        // 工作区扫描可能跳过未新增记录的文件；仅补足非持久记录的空位，刷新时不累加旧 skipped。
+        long unregisteredSlots = Math.max(0, snapshot.summary().total() - counts.total() - registrationFailed);
+        externalSkipped = Math.min(externalSkipped, unregisteredSlots);
+        ProgressSummary summary = new ProgressSummary(snapshot.summary().total(), counts.succeeded(),
+                counts.failed() + registrationFailed, counts.skipped() + externalSkipped, ProgressUnit.FILE);
+        Map<String, Metric> metrics = new LinkedHashMap<>();
+        snapshot.metrics().forEach(metric -> metrics.put(metric.code(), metric));
+        metrics.put("RECEIVED_UNPARSED_FILES", new Metric("RECEIVED_UNPARSED_FILES", "已接收未解析文件", counts.parked(), counts.total(), ProgressUnit.FILE));
+        metrics.put("DUPLICATE_INPUT_FILES", new Metric("DUPLICATE_INPUT_FILES", "重复输入文件", counts.duplicate(), counts.total(), ProgressUnit.FILE));
+        metrics.put("FILE_GROUPS", new Metric("FILE_GROUPS", "本批关联文件组", groups.total(), null, ProgressUnit.FILE_GROUP));
+        metrics.put("COMPLETED_FILE_GROUPS", new Metric("COMPLETED_FILE_GROUPS", "解析完成文件组", groups.completed(), groups.total(), ProgressUnit.FILE_GROUP));
+        metrics.put("FAILED_FILE_GROUPS", new Metric("FAILED_FILE_GROUPS", "解析失败文件组", groups.failed(), groups.total(), ProgressUnit.FILE_GROUP));
+        metrics.put("DUPLICATE_FILE_GROUPS", new Metric("DUPLICATE_FILE_GROUPS", "重复文件组", groups.duplicate(), groups.total(), ProgressUnit.FILE_GROUP));
+        metrics.put("PARKED_FILE_GROUPS", new Metric("PARKED_FILE_GROUPS", "已接收未解析文件组", groups.parked(), groups.total(), ProgressUnit.FILE_GROUP));
+        return new IngestionProgress(summary, List.copyOf(metrics.values()));
     }
+
+    public record IngestionProgress(ProgressSummary summary, List<Metric> metrics) { }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void failWaitingIngestion(String id) {

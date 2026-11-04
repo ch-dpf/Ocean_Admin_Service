@@ -7,18 +7,20 @@ import tools.jackson.databind.JsonNode;
 
 /** 矢量响应；GeoJSON 属性保持原始 JSON 类型，系统 ID 显式以字符串输出。 */
 public final class GisVectorVO {
+    public record Scheme(String id,String dataSetId,String name,long version,JsonNode definition) { }
     private GisVectorVO() { }
 
     public record Layer(String layerId, String dataSetId, String sourceFileId, String layerKey,
             String layerName, String status, long featureCount, JsonNode extent,
             JsonNode geometryTypes, long dataVersion, LocalDateTime createTime, LocalDateTime updateTime,
             String groupId, String originalGroupId, String geometryType, String assignmentMode,
-            boolean enabled, String styleMode, long presentationVersion) { }
+            boolean enabled, String styleMode, long presentationVersion,
+            String sourceLayerId, String resourceId, String storageType, boolean readOnly) { }
 
     public record Feature(String type, String id, JsonNode geometry, JsonNode properties,
             long version, String layerId, SourceReference source) { }
 
-    public record SourceReference(Long featureIndex, JsonNode featureId, String geometryPath, String classificationRuleKey) { }
+    public record SourceReference(Long featureIndex, JsonNode featureId, String geometryPath, String classificationRuleKey, String sourceLayerId) { }
 
     public record FeatureCollection(String type, List<Feature> features, int numberReturned,
             boolean hasMore, String nextCursor, long dataVersion) { }

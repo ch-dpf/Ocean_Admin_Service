@@ -45,12 +45,32 @@
             <artifactId>gt-geotiff</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.gdal</groupId>
+            <artifactId>gdal</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.geotools</groupId>
             <artifactId>gt-epsg-hsql</artifactId>
         </dependency>
         <dependency>
             <groupId>org.geotools</groupId>
             <artifactId>gt-render</artifactId>
+        </dependency>
+        <!-- ImageIO 的 GDAL 元数据解析使用 javax JAXB；Boot 的 Jakarta 实现不能提供该运行时。 -->
+        <dependency>
+            <groupId>com.sun.xml.bind</groupId>
+            <artifactId>jaxb-impl</artifactId>
+            <scope>runtime</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>jakarta.xml.bind</groupId>
+                    <artifactId>jakarta.xml.bind-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.sun.activation</groupId>
+                    <artifactId>jakarta.activation</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.eclipse.imagen</groupId>

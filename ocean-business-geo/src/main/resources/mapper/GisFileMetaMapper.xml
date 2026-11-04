@@ -7,7 +7,7 @@
     <select id="selectDataSetFileSummaries" resultType="org.ocean.admin.gis.vo.GisDataSetVO$FileSummary">
         SELECT fm.data_set_id, COUNT(*) AS managed_file_count,
                COUNT(*) FILTER (WHERE fm.metadata_status = 'COMPLETED') AS footprint_file_count,
-               COUNT(*) FILTER (WHERE fm.metadata_status IN ('WAITING', 'QUEUED', 'RUNNING')) AS pending_metadata_file_count,
+               COUNT(*) FILTER (WHERE fm.metadata_status IN ('WAITING', 'PARKED', 'QUEUED', 'RUNNING')) AS pending_metadata_file_count,
                COUNT(*) FILTER (WHERE fm.metadata_status = 'FAILED') AS failed_metadata_file_count,
                COUNT(*) FILTER (WHERE fm.metadata_status = 'NOT_APPLICABLE') AS not_applicable_file_count
         FROM ocean_gis.gis_file_meta fm
@@ -44,6 +44,7 @@
           AND ds.deleted = 0
         <if test="q.metadataStatus != null">AND fm.metadata_status = #{q.metadataStatus}</if>
         <if test="q.dataSetId != null">AND fm.data_set_id = #{q.dataSetId}</if>
+        <if test="q.fileGroupId != null">AND fm.file_group_id = #{q.fileGroupId}</if>
         <if test="q.categoryId != null">AND ds.category_id = #{q.categoryId}</if>
         <if test="q.sourceType != null">AND fm.source_type = #{q.sourceType}</if>
         <if test="q.originalName != null">AND fm.original_name LIKE CONCAT('%', #{q.originalName}, '%')</if>

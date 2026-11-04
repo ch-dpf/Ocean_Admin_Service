@@ -82,6 +82,7 @@ public class ControlledWorkspaceResolver {
 
     /** 所有已登记文件的读取共用来源判别；工作区文件必须仍与登记快照一致。 */
     public Path resolveFile(GisFileMeta file) {
+        if (!"RETAINED".equals(file.getRawRetention())) throw new IllegalArgumentException("原始文件已释放，请使用独立数据资源");
         if ("WORKSPACE".equals(file.getSourceType())) {
             try {
                 Path path = resolve(file.getWorkspaceCode(), file.getRelativePath());

@@ -6,9 +6,13 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
+import org.ocean.admin.gis.entity.GisDataSetCategory;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import org.ocean.admin.gis.mapper.GisFileGroupMapper;
+import org.ocean.admin.gis.entity.GisFileGroup;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
@@ -24,6 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -42,13 +47,32 @@ import java.util.stream.Collectors;
 public class DataSetService {
 
     private final VectorDataSetStyleService vectorDataSetStyles;
+    private final org.ocean.admin.gis.mapper.GisVectorMapper vectorMapper;
     private final GisDataSetMapper gisDataSetMapper;
     private final GisFileMetaMapper gisFileMetaMapper;
+    private final GisFileGroupMapper fileGroupMapper;
     private final GisProcessingInputMapper processingInputMapper;
     private final GisFileSpatialMetadataMapper spatialMetadataMapper;
     private final FileUploadUtil fileUploadUtil;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher events;
+
+    /** 按固定分类返回全部未删除数据集数量，空分类补零。 */
+    @Transactional(readOnly = true)
+    public GisDataSetVO.CategorySummary getDataSetCategories() {
+        Map<Long, Long> counts = gisDataSetMapper.selectCategoryCounts().stream()
+                .collect(Collectors.toMap(GisDataSetMapper.CategoryCount::categoryId,
+                        GisDataSetMapper.CategoryCount::dataSetCount));
+        List<GisDataSetVO.CategoryStatistics> categories = new ArrayList<>();
+        long totalCount = 0;
+        for (GisDataSetCategory category : GisDataSetCategory.values()) {
+            long dataSetCount = counts.getOrDefault(category.categoryId(), 0L);
+            categories.add(new GisDataSetVO.CategoryStatistics(
+                    category.categoryId(), category.categoryName(), dataSetCount));
+            totalCount += dataSetCount;
+        }
+        return new GisDataSetVO.CategorySummary(totalCount, categories);
+    }
 
     /** 调用方必须在文件写入事务内提供变更前后快照；文件数与大小均只统计未删除的 READY 文件。 */
     @Transactional(propagation = Propagation.MANDATORY)
@@ -71,7 +95,7 @@ public class DataSetService {
     }
 
     private boolean contributesToStatistics(GisFileMeta file) {
-        return Integer.valueOf(0).equals(file.getDeleted()) && "READY".equals(file.getFileStatus());
+        return Integer.valueOf(0).equals(file.getDeleted()) && "READY".equals(file.getFileStatus()) && "RETAINED".equals(file.getRawRetention());
     }
 
     private record FileStatisticsDelta(int count, long sizeBytes) {
@@ -194,6 +218,9 @@ public class DataSetService {
             throw new IllegalStateException("数据集文件正在被处理任务使用，请等待任务结束后重试: "
                     + task.taskName() + " (" + task.taskNo() + ", " + task.taskStatus() + ")");
         }
+        List<GisFileGroup> groups = fileGroupMapper.lockByDataSet(id);
+        if (groups.stream().anyMatch(group -> java.util.Set.of("QUEUED", "RUNNING").contains(group.getParseStatus())))
+            throw new IllegalStateException("数据集仍有文件组正在解析，请等待结束");
         List<GisFileMeta> files = gisFileMetaMapper.selectAllByDataSetIdForUpdate(id);
         if (files.stream().anyMatch(file -> java.util.Set.of("WAITING", "QUEUED", "RUNNING").contains(file.getMetadataStatus()))) {
             throw new IllegalStateException("数据集仍有文件正在提取空间元数据，请等待处理结束后重试");
@@ -215,6 +242,8 @@ public class DataSetService {
                 .filter(key -> !key.isBlank())
                 .toList());
         processingInputMapper.detachTerminalByDataSetId(id);
+        // 发布快照独立保留，其余文件资源先登记回收意图，提交后由清理任务释放。
+        vectorMapper.retireDataSetResources(id);
         if (gisDataSetMapper.physicallyDeleteById(id) != 1) {
             throw new IllegalStateException("数据集删除失败: " + id);
         }
@@ -263,6 +292,12 @@ public class DataSetService {
     private void populateFileInformation(List<GisDataSetVO> records, boolean includeFootprints, double tolerance) {
         if (records.isEmpty()) return;
         List<Long> ids = records.stream().map(GisDataSetVO::getId).toList();
+        Map<Long, Long> groupCounts = new TreeMap<>();
+        for (Map<String, Object> row : fileGroupMapper.selectMaps(new QueryWrapper<GisFileGroup>()
+                .select("data_set_id", "COUNT(*) AS group_count").in("data_set_id", ids)
+                .ne("assembly_status", "DUPLICATE").groupBy("data_set_id"))) {
+            groupCounts.put(((Number) row.get("data_set_id")).longValue(), ((Number) row.get("group_count")).longValue());
+        }
         Map<Long, GisDataSetVO.FileSummary> summaries = gisFileMetaMapper.selectDataSetFileSummaries(ids).stream()
                 .collect(Collectors.toMap(GisDataSetVO.FileSummary::getDataSetId, item -> item));
         Map<Long, List<GisDataSetVO.FootprintRow>> footprints = includeFootprints
@@ -276,6 +311,7 @@ public class DataSetService {
                 summary.setDataSetId(record.getId());
             }
             record.setFileSummary(summary);
+            record.setFileGroupCount(groupCounts.getOrDefault(record.getId(), 0L));
             if (includeFootprints) {
                 List<GisDataSetVO.FootprintFeature> features = footprints.getOrDefault(record.getId(), List.of()).stream()
                         .map(row -> new GisDataSetVO.FootprintFeature("Feature", row.getId().toString(),
@@ -320,7 +356,7 @@ public class DataSetService {
         if (reqVO.getCategoryId() == null) {
             throw new IllegalArgumentException("数据类别不能为空");
         }
-        if (reqVO.getCategoryId() < 0 || reqVO.getCategoryId() > 2) {
+        if (!GisDataSetCategory.isValid(reqVO.getCategoryId())) {
             throw new IllegalArgumentException("数据类别只能为0-影像数据、1-地形数据、2-矢量数据");
         }
     }

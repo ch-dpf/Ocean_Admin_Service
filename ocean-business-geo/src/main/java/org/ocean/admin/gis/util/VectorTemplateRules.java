@@ -97,45 +97,88 @@ public class VectorTemplateRules {
     }
 
     public Classification classify(Compiled template, JsonNode properties, String kind, boolean forceUnknown) {
-        JsonNode classification = template.definition().path("classification"), selected = null;
-        if (!forceUnknown) for (JsonNode rule : classification.path("rules")) {
-            if (kind.equals(rule.path("geometryType").asText()) && matches(rule.path("filter"), properties)) { selected = rule; break; }
+        JsonNode classification = template.definition().path("classification");
+        JsonNode selected = null;
+        if (!forceUnknown) {
+            for (JsonNode rule : classification.path("rules")) {
+                if (kind.equals(rule.path("geometryType").asText()) && matches(rule.path("filter"), properties)) {
+                    selected = rule;
+                    break;
+                }
+            }
         }
-        if (selected == null) return new Classification(classification.path("fallbackGroupByGeometry").path(kind).asText(), null, false);
+        if (selected == null) {
+            return new Classification(classification.path("fallbackGroupByGeometry").path(kind).asText(), null, false);
+        }
         boolean warning = false;
-        JsonNode fc = normalized("fclass", property(properties, "fclass")), code = normalized("code", property(properties, "code"));
-        if (fc != null && code != null) {
-            boolean knownCode = false, pair = false;
-            for (JsonNode rule : classification.path("rules")) if (kind.equals(rule.path("geometryType").asText())) {
+        JsonNode featureClass = normalized("fclass", property(properties, "fclass"));
+        JsonNode code = normalized("code", property(properties, "code"));
+        if (featureClass != null && code != null) {
+            boolean knownCode = false;
+            boolean matchingPair = false;
+            for (JsonNode rule : classification.path("rules")) {
+                if (!kind.equals(rule.path("geometryType").asText())) {
+                    continue;
+                }
                 for (JsonNode source : rule.path("sourceClasses")) {
                     if (equal(code, normalized("code", source.get("code")))) {
                         knownCode = true;
-                        if (equal(fc, normalized("fclass", source.get("fclass")))) pair = true;
+                        if (equal(featureClass, normalized("fclass", source.get("fclass")))) {
+                            matchingPair = true;
+                        }
                     }
                 }
             }
-            warning = knownCode && !pair;
+            warning = knownCode && !matchingPair;
         }
         return new Classification(selected.path("groupId").asText(), selected.path("id").asText(), warning);
     }
 
     public boolean matches(JsonNode filter, JsonNode properties) {
-        if (filter == null || filter.isNull() || filter.isMissingNode()) return true;
-        String op = filter.path("op").asText();
-        if ("and".equals(op)) { for (JsonNode c : filter.path("conditions")) if (!matches(c, properties)) return false; return true; }
-        if ("or".equals(op)) { for (JsonNode c : filter.path("conditions")) if (matches(c, properties)) return true; return false; }
-        if ("not".equals(op)) return !matches(filter.path("condition"), properties);
+        if (filter == null || filter.isNull() || filter.isMissingNode()) {
+            return true;
+        }
+        String operator = filter.path("op").asText();
+        if ("and".equals(operator)) {
+            for (JsonNode condition : filter.path("conditions")) {
+                if (!matches(condition, properties)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if ("or".equals(operator)) {
+            for (JsonNode condition : filter.path("conditions")) {
+                if (matches(condition, properties)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if ("not".equals(operator)) {
+            return !matches(filter.path("condition"), properties);
+        }
         String field = filter.path("field").asText();
         JsonNode raw = property(properties, field);
-        if ("missingOrEmpty".equals(op)) return empty(raw);
-        JsonNode actual = normalized(field, raw), expected = normalized(field, filter.get("value"));
-        if (actual == null) return false;
-        return switch (op) {
+        if ("missingOrEmpty".equals(operator)) {
+            return empty(raw);
+        }
+        JsonNode actual = normalized(field, raw);
+        JsonNode expected = normalized(field, filter.get("value"));
+        if (actual == null) {
+            return false;
+        }
+        return switch (operator) {
             case "eq" -> equal(actual, expected);
             case "ne" -> !equal(actual, expected);
             case "in" -> {
                 boolean found = false;
-                for (JsonNode value : filter.path("value")) if (equal(actual, normalized(field, value))) { found = true; break; }
+                for (JsonNode value : filter.path("value")) {
+                    if (equal(actual, normalized(field, value))) {
+                        found = true;
+                        break;
+                    }
+                }
                 yield found;
             }
             case "regex" -> Pattern.matches(filter.path("value").asText(), actual.asText());
@@ -144,25 +187,57 @@ public class VectorTemplateRules {
     }
 
     private JsonNode normalized(String field, JsonNode value) {
-        if (empty(value)) return null;
-        if ("fclass".equals(field)) return value.isString() ? json.valueToTree(value.asText().trim().toLowerCase(Locale.ROOT)) : null;
-        if ("id".equals(field)) return value.isString() ? json.valueToTree(value.asText().trim())
-                : value.isNumber() && value.decimalValue().stripTrailingZeros().scale() <= 0
-                    ? json.valueToTree(value.decimalValue().toBigInteger().toString()) : null;
+        if (empty(value)) {
+            return null;
+        }
+        if ("fclass".equals(field)) {
+            if (value.isString()) {
+                return json.valueToTree(value.asText().trim().toLowerCase(Locale.ROOT));
+            }
+            return null;
+        }
+        if ("id".equals(field)) {
+            if (value.isString()) {
+                return json.valueToTree(value.asText().trim());
+            }
+            if (value.isNumber() && value.decimalValue().stripTrailingZeros().scale() <= 0) {
+                return json.valueToTree(value.decimalValue().toBigInteger().toString());
+            }
+            return null;
+        }
         if ("code".equals(field)) {
-            if (value.isNumber() && value.decimalValue().stripTrailingZeros().scale() <= 0) return value;
-            if (value.isString() && value.asText().trim().matches("[+-]?[0-9]+")) return json.valueToTree(new BigDecimal(value.asText().trim()));
+            if (value.isNumber() && value.decimalValue().stripTrailingZeros().scale() <= 0) {
+                return value;
+            }
+            if (value.isString() && value.asText().trim().matches("[+-]?[0-9]+")) {
+                return json.valueToTree(new BigDecimal(value.asText().trim()));
+            }
             return null;
         }
         return value;
     }
 
-    private boolean equal(JsonNode a, JsonNode b) {
-        if (a == null || b == null) return false;
-        return a.isNumber() && b.isNumber() ? a.decimalValue().compareTo(b.decimalValue()) == 0 : a.equals(b);
+    private boolean equal(JsonNode actual, JsonNode expected) {
+        if (actual == null || expected == null) {
+            return false;
+        }
+        if (actual.isNumber() && expected.isNumber()) {
+            return actual.decimalValue().compareTo(expected.decimalValue()) == 0;
+        }
+        return actual.equals(expected);
     }
-    private JsonNode property(JsonNode p, String field) { return p != null && p.isObject() ? p.get(field) : null; }
-    private boolean empty(JsonNode n) { return n == null || n.isNull() || n.isMissingNode() || n.isString() && n.asText().trim().isEmpty(); }
+
+    private JsonNode property(JsonNode properties, String field) {
+        if (properties != null && properties.isObject()) {
+            return properties.get(field);
+        }
+        return null;
+    }
+
+    private boolean empty(JsonNode value) {
+        return value == null || value.isNull() || value.isMissingNode()
+                || value.isString() && value.asText().trim().isEmpty();
+    }
 
     private void filter(JsonNode f, int depth) {
         if (depth > 16 || f == null || !f.isObject()) throw bad("属性条件无效或嵌套过深");

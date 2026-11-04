@@ -36,6 +36,26 @@ public class PublishedResourceController {
             MediaType.parseMediaType("application/vnd.quantized-mesh");
 
     private final PublicationService publicationService;
+    private final org.ocean.admin.gis.service.VectorPublicationService vectors;
+
+    @GetMapping({"/VECTOR/{serviceCode}","/VECTOR/{serviceCode}/manifest.json"})
+    public ResponseEntity<?> vectorManifest(@PathVariable String serviceCode) {
+        var result=vectors.descriptor(serviceCode);
+        return ResponseEntity.ok().cacheControl(CacheControl.noCache()).eTag("\"release-"+result.path("releaseVersion").asText()+"\"").body(result);
+    }
+
+    @GetMapping("/VECTOR/{serviceCode}/styles/{releaseVersion}/{schemeId}.json")
+    public ResponseEntity<?> vectorStyle(@PathVariable String serviceCode,@PathVariable String releaseVersion,@PathVariable String schemeId) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noCache()).body(vectors.style(serviceCode,releaseVersion,schemeId));
+    }
+
+    @GetMapping(value="/VECTOR/{serviceCode}/tiles/{resourceId}/{z}/{x}/{y}.mvt",produces="application/vnd.mapbox-vector-tile")
+    public ResponseEntity<byte[]> vectorTile(@PathVariable String serviceCode,@PathVariable Long resourceId,
+            @PathVariable int z,@PathVariable int x,@PathVariable int y) throws IOException {
+        byte[] body=vectors.tile(serviceCode,resourceId,z,x,y);
+        return ResponseEntity.ok().cacheControl(CacheControl.noCache()).header("Vary","Accept-Encoding")
+                .eTag("W/\""+org.ocean.admin.gis.service.VectorRenderPlanner.digest(body)+"\"").body(body);
+    }
 
     @GetMapping({"/{processingType}/{serviceCode}",
             "/{processingType}/{serviceCode}/",

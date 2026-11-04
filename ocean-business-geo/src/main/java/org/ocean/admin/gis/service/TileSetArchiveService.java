@@ -60,7 +60,7 @@ public class TileSetArchiveService {
             throw new IllegalArgumentException("处理任务ID不能为空");
         }
         log.info("收到静态瓦片集归档请求: processingTaskId={}", request.processingTaskId());
-        GisProcessingTask task = taskService.getRequired(request.processingTaskId());
+        GisProcessingTask task = taskService.getRequiredForUpdate(request.processingTaskId());
         GisTileSet tileSet = requireArchivableTileSet(task);
         GisTileSetArchive existing = findByTileSetId(tileSet.getId());
         if (existing != null) {
@@ -141,7 +141,9 @@ public class TileSetArchiveService {
         if (archive.getArchiveStatus() != TaskStatus.FAILED) {
             throw new IllegalStateException("只有 FAILED 状态的归档可以重试");
         }
-        GisProcessingTask task = taskService.getRequired(archive.getProcessingTaskId());
+        GisProcessingTask task = taskService.getRequiredForUpdate(archive.getProcessingTaskId());
+        // 等待任务锁期间归档可能已被删除，必须重新读取。
+        archive = getRequiredByNo(archiveNo);
         GisTileSet tileSet = requireArchivableTileSet(task);
         if (!tileSet.getId().equals(archive.getTileSetId())) {
             throw new IllegalStateException("归档关联的静态瓦片集已发生变化");

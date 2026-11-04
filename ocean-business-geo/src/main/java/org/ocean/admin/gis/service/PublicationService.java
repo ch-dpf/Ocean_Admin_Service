@@ -3,12 +3,15 @@ package org.ocean.admin.gis.service;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisPublication;
 import org.ocean.admin.gis.entity.GisTileSet;
+import org.ocean.admin.gis.entity.GisDataSet;
+import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.ogc.PublishedImageryCatalog;
 import org.ocean.admin.gis.ogc.TileMatrixSetDefinition;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.vo.GisPublicationVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -25,16 +28,21 @@ public class PublicationService {
     private final PublicationRecordService recordService;
     private final ProcessingTaskRecordService taskService;
     private final PublishedImageryCatalog imageryCatalog;
+    private final GisDataSetMapper dataSetMapper;
+    private final VectorPublicationService vectors;
     private final Map<GisProcessingType, PublicationProtocol> protocols;
 
     public PublicationService(
             PublicationRecordService recordService,
             ProcessingTaskRecordService taskService,
             PublishedImageryCatalog imageryCatalog,
-            List<PublicationProtocol> protocolList) {
+            List<PublicationProtocol> protocolList,
+            GisDataSetMapper dataSetMapper, VectorPublicationService vectors) {
         this.recordService = recordService;
         this.taskService = taskService;
         this.imageryCatalog = imageryCatalog;
+        this.dataSetMapper = dataSetMapper;
+        this.vectors = vectors;
         EnumMap<GisProcessingType, PublicationProtocol> protocolMap =
                 new EnumMap<>(GisProcessingType.class);
         for (PublicationProtocol protocol : protocolList) {
@@ -59,9 +67,10 @@ public class PublicationService {
                 page.getRecords().stream().map(this::toVO).toList());
     }
 
-    public GisPublicationVO publish(GisProcessingType processingType, Long sourceTaskId) {
+    @Transactional(rollbackFor = Exception.class)
+    public GisPublicationVO publish(GisProcessingType processingType, Long sourceTaskId, String serviceName) {
         PublicationProtocol protocol = requireProtocol(processingType);
-        GisProcessingTask task = taskService.getRequired(sourceTaskId);
+        GisProcessingTask task = taskService.getRequiredForUpdate(sourceTaskId);
         GisTileSet tileSet = recordService.getRequiredTileSet(sourceTaskId, processingType);
         PublicationProtocol.PublishedArtifact artifact =
                 protocol.validateForPublish(task, tileSet);
@@ -71,18 +80,27 @@ public class PublicationService {
                 ? protocol.generateServiceCode()
                 : existing.getServiceCode();
         GisPublication publication = recordService.publish(
-                tileSet, serviceCode, protocol.displayName());
+                tileSet, serviceCode, protocol.displayName(), serviceName);
         protocol.activate(publication.getServiceCode(), artifact);
         return toVO(publication);
     }
 
     public GisPublicationVO get(GisProcessingType processingType, String serviceCode) {
+        if(processingType==GisProcessingType.VECTOR) return vectors.toVO(vectors.get(serviceCode,false));
         PublicationProtocol protocol = requireProtocol(processingType);
         return toVO(recordService.getRequired(
                 processingType, protocol.normalizeServiceCode(serviceCode)));
     }
 
+    public GisPublicationVO rename(GisProcessingType processingType, String serviceCode, String serviceName) {
+        if(processingType==GisProcessingType.VECTOR) return vectors.rename(serviceCode,serviceName);
+        PublicationProtocol protocol = requireProtocol(processingType);
+        return toVO(recordService.rename(processingType,
+                protocol.normalizeServiceCode(serviceCode), serviceName));
+    }
+
     public GisPublicationVO disable(GisProcessingType processingType, String serviceCode) {
+        if(processingType==GisProcessingType.VECTOR) return vectors.disable(serviceCode);
         PublicationProtocol protocol = requireProtocol(processingType);
         String normalizedCode = protocol.normalizeServiceCode(serviceCode);
         GisPublication publication = recordService.disable(
@@ -99,7 +117,12 @@ public class PublicationService {
     }
 
     private GisPublicationVO toVO(GisPublication publication) {
+        if(publication.getVectorResourceId()!=null) return vectors.toVO(publication);
         GisTileSet tileSet = recordService.getPublicationTileSet(publication);
+        GisDataSet dataSet = null;
+        if (publication.getDataSetId() != null) {
+            dataSet = dataSetMapper.selectById(publication.getDataSetId());
+        }
         PublicationProtocol protocol = protocols.get(tileSet.getTileType());
         PublicationProtocol.PublicationAccess access = protocol == null
                 ? new PublicationProtocol.PublicationAccess(
@@ -110,10 +133,13 @@ public class PublicationService {
         GisPublicationVO.GisPublicationVOBuilder builder = GisPublicationVO.builder()
                 .id(publication.getId())
                 .serviceCode(publication.getServiceCode())
+                .serviceName(publication.getServiceName())
                 .processingType(tileSet.getTileType())
                 .tileSetId(tileSet.getId())
                 .sourceTaskId(tileSet.getTaskId())
+                .taskName(taskService.getRequired(tileSet.getTaskId()).getTaskName())
                 .dataSetId(publication.getDataSetId())
+                .dataSetName(dataSet == null ? null : dataSet.getDataSetName())
                 .status(publication.getStatus())
                 .outputKey(tileSet.getOutputKey())
                 .targetCrs(tileSet.getTargetCrs())

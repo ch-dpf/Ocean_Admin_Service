@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 /** 应用与 PostGIS 之间通过 GeoJSON 几何片段及 JSON 属性传递要素。 */
 @Data
 public class GisVectorFeature {
+    private Long sourceLayerId;
     private Long id;
     private Long layerId;
     private String geometryJson;

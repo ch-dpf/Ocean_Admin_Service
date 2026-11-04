@@ -16,6 +16,9 @@ import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
 import org.ocean.admin.gis.mapper.GisProcessingTaskMapper;
 import org.ocean.admin.gis.mapper.GisTileSetMapper;
 import org.ocean.admin.gis.mapper.GisTileSetArchiveMapper;
+import org.ocean.admin.gis.mapper.GisPublicationMapper;
+import org.ocean.admin.gis.entity.GisPublication;
+import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisInputSourceType;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.vo.GisProcessingTaskDetailVO;
@@ -45,6 +48,63 @@ public class ProcessingTaskRecordService {
     private final GisTileSetMapper tileSetMapper;
     private final GisTileSetArchiveMapper archiveMapper;
     private final ObjectMapper objectMapper;
+    private final GisPublicationMapper publicationMapper;
+    private final GisProcessingStorageService storageService;
+
+    /** 发布、归档和删除共用任务行锁，事务调用方持有锁直到完成操作。 */
+    public GisProcessingTask getRequiredForUpdate(Long taskId) {
+        if (taskMapper.lockActiveTask(taskId) == null) {
+            throw new IllegalArgumentException("GIS处理任务不存在或已删除: " + taskId);
+        }
+        return getRequired(taskId);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void renameTask(Long taskId, String taskName) {
+        String name = trimToNull(taskName);
+        if (name == null || name.length() > 200) {
+            throw new IllegalArgumentException("任务名称去除首尾空白后必须为1到200个字符");
+        }
+        getRequiredForUpdate(taskId);
+        int updated = taskMapper.update(null, new LambdaUpdateWrapper<GisProcessingTask>()
+                .eq(GisProcessingTask::getId, taskId)
+                .set(GisProcessingTask::getTaskName, name)
+                .set(GisProcessingTask::getUpdateTime, LocalDateTime.now()));
+        if (updated != 1) {
+            throw new IllegalStateException("任务重命名失败");
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteTask(Long taskId) {
+        GisProcessingTask task = getRequiredForUpdate(taskId);
+        if (!task.getTaskStatus().isTerminal()) {
+            throw new IllegalStateException("排队中或处理中的静态瓦片生成任务不能删除");
+        }
+        GisTileSet tileSet = tileSetMapper.selectByTaskId(taskId);
+        if (tileSet == null) {
+            throw new IllegalStateException("处理任务关联的瓦片集不存在");
+        }
+        if (publicationMapper.selectCount(new LambdaQueryWrapper<GisPublication>()
+                .eq(GisPublication::getTileSetId, tileSet.getId())
+                .eq(GisPublication::getStatus, PublicationRecordService.PUBLISHED)) > 0) {
+            throw new IllegalStateException("任务存在已发布服务，请先停用服务后再删除");
+        }
+        List<GisTileSetArchive> archives = archiveMapper.selectAllByTaskId(taskId);
+        if (archives.stream().anyMatch(archive -> !archive.getArchiveStatus().isTerminal())) {
+            throw new IllegalStateException("任务正在归档，请等待归档结束后再删除");
+        }
+        // 文件系统不参与数据库事务；清理失败保留记录并返回错误，允许再次清理。
+        storageService.deleteTaskArtifacts(task, tileSet, archives);
+        archiveMapper.deleteByTaskPermanently(taskId);
+        publicationMapper.deleteByTileSetPermanently(tileSet.getId());
+        inputMapper.delete(new LambdaQueryWrapper<GisProcessingInput>()
+                .eq(GisProcessingInput::getTaskId, taskId));
+        if (tileSetMapper.deleteById(tileSet.getId()) != 1
+                || taskMapper.deletePermanently(taskId) != 1) {
+            throw new IllegalStateException("任务及瓦片集删除失败");
+        }
+    }
 
     public PageResult<List<GisProcessingTaskSummaryVO>> getTaskPage(
             Integer current, Integer size, String taskNo, String taskName,
@@ -387,6 +447,7 @@ public class ProcessingTaskRecordService {
         return new GisProcessingTaskDetailVO.InputVO(
                 input.getId(), input.getSequenceNo(), input.getInputKind(),
                 input.getInputStatus(), input.getFileMetaId(), input.getSourceFileMetaId(),
+                input.getSourceFileGroupId(), input.getSourceGroupRevision(),
                 input.getSourceDataSetId(), input.getSourceDataSetName(),
                 input.getSourceStorageType(), input.getSourceStorageKey(), input.getSourceLocatorType(),
                 input.getSourceModifiedAt(), input.getWorkspaceCode(),

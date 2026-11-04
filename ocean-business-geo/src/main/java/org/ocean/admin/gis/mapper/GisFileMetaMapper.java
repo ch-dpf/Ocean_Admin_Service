@@ -19,14 +19,67 @@ import java.util.List;
 public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
 
     @org.apache.ibatis.annotations.Select("""
+            WITH outcomes AS (
+                SELECT CASE
+                    WHEN g.parse_status = 'FAILED' THEN 'FAILED'
+                    WHEN g.parse_status IN ('QUEUED','RUNNING') THEN 'PENDING'
+                    WHEN g.assembly_status = 'DUPLICATE' OR f.ingest_outcome = 'DUPLICATE' THEN 'DUPLICATE'
+                    WHEN g.parse_status = 'COMPLETED' THEN 'COMPLETED'
+                    WHEN g.id IS NOT NULL THEN 'PARKED'
+                    WHEN f.metadata_status = 'FAILED' THEN 'FAILED'
+                    ELSE 'PARKED' END AS outcome
+                FROM ocean_gis.gis_file_meta f
+                LEFT JOIN ocean_gis.gis_file_group g ON g.id = f.file_group_id AND g.deleted = 0
+                WHERE f.deleted = 0 AND f.ingest_progress_id = #{progressId}
+            )
             SELECT count(*) AS total,
-                   count(*) FILTER (WHERE metadata_status IN ('COMPLETED','NOT_APPLICABLE')) AS succeeded,
-                   count(*) FILTER (WHERE metadata_status = 'FAILED') AS failed
-            FROM ocean_gis.gis_file_meta WHERE deleted = 0 AND ingest_progress_id = #{progressId}
+                   count(*) FILTER (WHERE outcome = 'COMPLETED') AS succeeded,
+                   count(*) FILTER (WHERE outcome = 'FAILED') AS failed,
+                   count(*) FILTER (WHERE outcome IN ('DUPLICATE','PARKED')) AS skipped,
+                   count(*) FILTER (WHERE outcome = 'DUPLICATE') AS duplicate,
+                   count(*) FILTER (WHERE outcome = 'PARKED') AS parked
+            FROM outcomes
             """)
     IngestionCounts ingestionCounts(@Param("progressId") String progressId);
 
-    record IngestionCounts(long total, long succeeded, long failed) { }
+    /** 真实文件按所属组的解析结果计数，配套文件不独立计为解析成功。 */
+    record IngestionCounts(long total, long succeeded, long failed, long skipped, long duplicate, long parked) { }
+
+    @org.apache.ibatis.annotations.Select("""
+            WITH batch_groups AS (
+                SELECT DISTINCT g.id, g.assembly_status, g.parse_status
+                FROM ocean_gis.gis_file_meta f
+                JOIN ocean_gis.gis_file_group g ON g.id = f.file_group_id AND g.deleted = 0
+                WHERE f.deleted = 0 AND f.ingest_progress_id = #{progressId}
+            ), outcomes AS (
+                SELECT CASE
+                    WHEN parse_status = 'FAILED' THEN 'FAILED'
+                    WHEN parse_status IN ('QUEUED','RUNNING') THEN 'PENDING'
+                    WHEN assembly_status = 'DUPLICATE' THEN 'DUPLICATE'
+                    WHEN parse_status = 'COMPLETED' THEN 'COMPLETED'
+                    ELSE 'PARKED' END AS outcome
+                FROM batch_groups
+            )
+            SELECT count(*) AS total,
+                   count(*) FILTER (WHERE outcome = 'COMPLETED') AS completed,
+                   count(*) FILTER (WHERE outcome = 'FAILED') AS failed,
+                   count(*) FILTER (WHERE outcome = 'DUPLICATE') AS duplicate,
+                   count(*) FILTER (WHERE outcome = 'PARKED') AS parked
+            FROM outcomes
+            """)
+    IngestionGroupCounts ingestionGroupCounts(@Param("progressId") String progressId);
+
+    record IngestionGroupCounts(long total, long completed, long failed, long duplicate, long parked) { }
+
+    @org.apache.ibatis.annotations.Select("""
+            SELECT EXISTS (
+                SELECT 1 FROM ocean_gis.gis_file_meta f
+                JOIN ocean_gis.gis_file_group g ON g.id = f.file_group_id AND g.deleted = 0
+                WHERE f.id = #{fileId} AND f.deleted = 0 AND g.entry_file_id = f.id
+                    AND g.parse_status = 'RUNNING' AND f.metadata_status = 'RUNNING'
+            )
+            """)
+    boolean isIngestionFileExtracting(@Param("fileId") Long fileId);
 
     List<GisDataSetVO.FileSummary> selectDataSetFileSummaries(@Param("ids") List<Long> ids);
 

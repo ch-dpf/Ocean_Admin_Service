@@ -1,4 +1,5 @@
 package org.ocean.admin.gis.service;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 
 import org.ocean.admin.gis.progress.RealtimeProgressService;
 
@@ -11,6 +12,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
+import org.ocean.admin.gis.entity.GisFileFormat;
+import org.ocean.admin.gis.entity.GisFileGroup;
+import org.ocean.admin.gis.mapper.GisFileGroupMapper;
 import org.ocean.admin.gis.dto.GisFileQuery;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
@@ -68,6 +72,8 @@ import org.ocean.admin.gis.dto.TaskStatus;
 public class FileMetaService {
 
     private final GisFileMetaMapper gisFileMetaMapper;
+    private final GisFileGroupMapper fileGroupMapper;
+    private final FileGroupService fileGroups;
     private final GisProcessingInputMapper processingInputMapper;
     private final GisDataSetMapper gisDataSetMapper;
     private final DataSetService dataSetService;
@@ -75,6 +81,7 @@ public class FileMetaService {
     private final FileUploadUtil fileUploadUtil;
     private final FileSpatialMetadataService spatialMetadataService;
     private final GisVectorMapper vectorMapper;
+    private final VectorResourceService vectorResources;
     private final VectorDataSetStyleService vectorDataSetStyles;
     private final ControlledWorkspaceResolver workspaceResolver;
     private final GisProcessingProperties processingProperties;
@@ -309,18 +316,8 @@ public class FileMetaService {
     }
 
     private boolean supportsWorkspaceFile(Long categoryId, Path path) {
-        try {
-            String extension = FileUploadUtil.extensionOf(path.getFileName().toString());
-            return switch (categoryId.intValue()) {
-                case 0, 1 -> Set.of("tif", "tiff").contains(extension);
-                case 2 -> Set.of("geojson", "json").contains(extension);
-                default -> throw new IllegalArgumentException("未知GIS数据类别");
-            };
-        } catch (IllegalArgumentException ex) {
-            return false;
-        }
+        return GisFileFormat.accepts(categoryId, path.getFileName().toString());
     }
-
     /** 边遍历边登记，不收集目录路径或文件清单，文件结果通过进度标识回报。 */
     private void scanWorkspace(Path entry, WorkspaceRun run) {
         try {
@@ -427,6 +424,17 @@ public class FileMetaService {
 
     @Transactional(rollbackFor = Exception.class)
     public void deleteFileMeta(Long id) {
+        GisFileMeta located = getRequired(id);
+        if (gisDataSetMapper.selectActiveByIdForUpdate(located.getDataSetId()) == null)
+            throw new IllegalArgumentException("数据集不存在或已删除");
+        located = getRequired(id);
+        GisFileGroup group = located.getFileGroupId() == null ? null : fileGroupMapper.lock(located.getFileGroupId());
+        if (group != null && Set.of("QUEUED", "RUNNING").contains(group.getParseStatus()))
+            throw new IllegalStateException("文件组正在解析，不能删除成员");
+        if (group != null && group.getEntryFileId() != null) {
+            ensureVectorSourceUnreferenced(group.getEntryFileId());
+            ensureNoActiveProcessingTask(group.getEntryFileId());
+        }
         GisFileMeta existing = getRequiredForUpdate(id);
         ensureMutable(existing);
         ensureVectorSourceUnreferenced(id);
@@ -440,10 +448,96 @@ public class FileMetaService {
         if (gisFileMetaMapper.physicallyDeleteActiveById(id) != 1) {
             throw new IllegalStateException("文件物理删除失败: " + id);
         }
+        if (existing.getFileGroupId() != null) fileGroups.invalidateMember(existing.getFileGroupId(), id);
         dataSetService.updateFileStatistics(existing, null);
         fileUploadUtil.deleteEmptyDataSetDirectory(existing.getDataSetId());
         events.publishEvent(new FileSpatialMetadataService.MetadataProgress(List.of(id), false));
         log.info("永久删除 GIS 文件成功: id={}, storageKey={}", id, storageKey);
+    }
+
+    /** 显式生成原始集合快照，不重新导入或覆盖已编辑的工作图层。 */
+    @Transactional(rollbackFor = Exception.class)
+    public List<org.ocean.admin.gis.entity.GisVectorSourceLayer> snapshotSource(Long id) throws IOException {
+        GisFileMeta file = getRequired(id);
+        if (gisDataSetMapper.selectActiveByIdForUpdate(file.getDataSetId()) == null)
+            throw new IllegalArgumentException("数据集不存在");
+        GisFileGroup group = file.getFileGroupId() == null ? null : fileGroupMapper.lock(file.getFileGroupId());
+        if (group == null || group.getEntryFileId() == null) throw new IllegalStateException("请先完成文件组组装");
+        if (Set.of("QUEUED", "RUNNING").contains(group.getParseStatus())) throw new IllegalStateException("文件组仍在解析");
+        GisFileMeta entry = getRequired(group.getEntryFileId());
+        if (vectorMapper.sourceResource(entry.getId()) != null) return vectorResources.sourceLayers(entry.getId());
+        var members = fileGroups.members(group.getId());
+        for (var member : members) {
+            if (!"RETAINED".equals(member.getRawRetention())) throw new IllegalStateException("原始文件已释放");
+            ensureNoActiveProcessingTask(member.getId());
+        }
+        vectorResources.capture(entry, group, members, () -> { }, () -> { }, stage -> { });
+        return vectorResources.sourceLayers(entry.getId());
+    }
+
+    public List<org.ocean.admin.gis.entity.GisVectorSourceLayer> sourceLayers(Long id) {
+        var file = getRequired(id);
+        var group = file.getFileGroupId() == null ? null : fileGroupMapper.selectById(file.getFileGroupId());
+        return vectorResources.sourceLayers(group == null ? id : group.getEntryFileId());
+    }
+
+    /** 返回完整文件组的释放影响，来源关系不作为物理文件依赖。 */
+    public Map<String, Object> releasePreview(Long id) {
+        GisFileMeta file = getRequired(id);
+        GisFileGroup group = file.getFileGroupId() == null ? null : fileGroupMapper.selectById(file.getFileGroupId());
+        Long entryId = group == null ? id : group.getEntryFileId();
+        var snapshot = entryId == null ? null : vectorMapper.sourceResource(entryId);
+        List<GisFileMeta> members = group == null ? List.of(file) : fileGroups.members(group.getId());
+        var blockers = new ArrayList<String>();
+        if (snapshot == null) blockers.add("尚无完整的原始要素快照");
+        if (group != null && Set.of("QUEUED", "RUNNING").contains(group.getParseStatus())) blockers.add("文件组仍在解析");
+        for (var member : members) {
+            if (Set.of("WAITING", "QUEUED", "RUNNING").contains(member.getMetadataStatus())) blockers.add("文件仍在导入: " + member.getOriginalName());
+            if (!processingInputMapper.selectActiveByFileMetaId(member.getId()).isEmpty()) blockers.add("处理任务仍在使用: " + member.getOriginalName());
+        }
+        return Map.of("fileIds", members.stream().map(member -> member.getId().toString()).toList(),
+                "files", members.stream().map(member -> member.getOriginalName()).toList(),
+                "reclaimBytes", members.stream().filter(member -> "UPLOAD".equals(member.getSourceType()) && "RETAINED".equals(member.getRawRetention()))
+                        .mapToLong(GisFileMeta::getSizeBytes).sum(), "blockers", blockers,
+                "sourceLayerCount", snapshot == null ? 0 : vectorMapper.sourceLayers(snapshot.getId()).size(),
+                "preservesImportedData", true, "workspaceFilesDeleted", false);
+    }
+
+    /** 先持久化释放意图，再由可重试清理任务删除文件，进程中断不会丢失清理记录。 */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> releaseRawFiles(Long id) {
+        GisFileMeta located = getRequired(id);
+        if (gisDataSetMapper.selectActiveByIdForUpdate(located.getDataSetId()) == null) throw new IllegalArgumentException("数据集不存在");
+        var group = located.getFileGroupId() == null ? null : fileGroupMapper.lock(located.getFileGroupId());
+        Map<String, Object> preview = releasePreview(id);
+        if (!((List<?>) preview.get("blockers")).isEmpty()) throw new IllegalStateException(preview.get("blockers").toString());
+        try {vectorResources.verifySourceSnapshot(group==null?id:group.getEntryFileId());}
+        catch(IOException ex) {throw new IllegalStateException("原始快照不可读取，禁止释放原文件",ex);}
+        for (Object fileId : (List<?>) preview.get("fileIds")) {
+            GisFileMeta file = getRequiredForUpdate(Long.valueOf(fileId.toString()));
+            if (!"RETAINED".equals(file.getRawRetention())) continue;
+            ensureNoActiveProcessingTask(file.getId()); validatePermanentDeleteStorage(file);
+            // 工作区文件只解除物理接入，外部文件不归平台清理。
+            String state = "WORKSPACE".equals(file.getSourceType()) ? "RELEASED" : "RELEASE_PENDING";
+            gisFileMetaMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>().eq(GisFileMeta::getId, file.getId())
+                    .set(GisFileMeta::getRawRetention, state).set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
+            GisFileMeta after = new GisFileMeta();
+            org.springframework.beans.BeanUtils.copyProperties(file, after); after.setRawRetention(state);
+            dataSetService.updateFileStatistics(file, after);
+        }
+        return preview;
+    }
+
+    public void cleanupReleasedRawFiles() {
+        var files = gisFileMetaMapper.selectList(new LambdaQueryWrapper<GisFileMeta>()
+                .eq(GisFileMeta::getRawRetention, "RELEASE_PENDING").last("LIMIT 100"));
+        for (var file : files) {
+            try {
+                fileUploadUtil.deleteStored(file.getStorageKey());
+                gisFileMetaMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>().eq(GisFileMeta::getId, file.getId())
+                        .eq(GisFileMeta::getRawRetention, "RELEASE_PENDING").set(GisFileMeta::getRawRetention, "RELEASED"));
+            } catch (RuntimeException ex) { log.warn("原文件释放待重试: id={}", file.getId(), ex); }
+        }
     }
 
     private void ensureNoActiveProcessingTask(Long id) {
@@ -487,6 +581,7 @@ public class FileMetaService {
 
     /** 下载及已管理文件处理统一验证工作区快照，发现变化后立即退出空间检索。 */
     public Path resolveSourcePath(GisFileMeta meta) {
+        if (!"RETAINED".equals(meta.getRawRetention())) throw new IllegalArgumentException("原始文件已释放，请使用导入快照");
         try {
             return workspaceResolver.resolveFile(meta);
         } catch (ControlledWorkspaceResolver.SourceException ex) {
@@ -537,6 +632,7 @@ public class FileMetaService {
 
     /** 只有已入库且落在本地存储的文件才能直接下载。 */
     private void ensureDownloadable(GisFileMeta meta) {
+        if (!"RETAINED".equals(meta.getRawRetention())) throw new IllegalArgumentException("原始文件已释放，不能下载原文件");
         if (!"READY".equals(normalizeUpper(meta.getFileStatus()))) {
             throw new IllegalArgumentException("文件尚未入库，不能下载: " + meta.getId());
         }
@@ -575,9 +671,13 @@ public class FileMetaService {
         result.setSha256(meta.getSha256());
         result.setCreatedBy(meta.getCreatedBy());
         result.setFileStatus(meta.getFileStatus());
+        result.setRawRetention(meta.getRawRetention());
         result.setCleanupStatus(meta.getCleanupStatus());
         result.setErrorMessage(meta.getErrorMessage());
         result.setMetadataStatus(meta.getMetadataStatus());
+        result.setFileGroupId(meta.getFileGroupId());
+        result.setMemberPath(meta.getMemberPath());
+        result.setIngestOutcome(meta.getIngestOutcome());
         result.setMetadataVersion(meta.getMetadataVersion());
         result.setMetadataErrorCode(meta.getMetadataErrorCode());
         result.setMetadataErrorMessage(meta.getMetadataErrorMessage());

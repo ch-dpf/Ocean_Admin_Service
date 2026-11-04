@@ -14,13 +14,21 @@ import java.util.List;
 public class GisPublicationVO {
     private Long id;
     private String serviceCode;
+    private String serviceName;
 
     @Schema(description = "发布类型：TERRAIN、IMAGERY、VECTOR")
     private GisProcessingType processingType;
 
     private Long tileSetId;
     private Long sourceTaskId;
+
+    @Schema(description = "通过任务 ID 查询的当前任务名称，不保存名称快照")
+    private String taskName;
+
     private Long dataSetId;
+
+    @Schema(description = "通过数据集 ID 查询的当前名称；未关联或数据集已删除时为空")
+    private String dataSetName;
 
     @Schema(description = "发布状态：PUBLISHED、DISABLED")
     private String status;
@@ -32,7 +40,7 @@ public class GisPublicationVO {
     private Integer minZoom;
     private Integer maxZoom;
 
-    @Schema(description = "已发布服务的访问根地址")
+    @Schema(description = "服务访问地址：地形为以 / 结尾的根地址，影像为包含 {z}/{x}/{y} 和格式后缀的瓦片模板")
     private String serviceUrl;
 
     @Schema(description = "服务描述文件地址，影像为 tilejson.json，地形为 layer.json")
@@ -40,6 +48,12 @@ public class GisPublicationVO {
 
     @Schema(description = "瓦片访问模板；不适用的发布类型为空")
     private String tileUrlTemplate;
+
+    @Schema(description = "动态矢量发布的固定数据资源ID")
+    private String vectorResourceId;
+    private String releaseVersion;
+    private String defaultStyleId;
+    private tools.jackson.databind.JsonNode styles;
 
     @Schema(description = "WMTS 能力文档地址；非 WMTS 支持的发布类型为空")
     private String wmtsCapabilitiesUrl;

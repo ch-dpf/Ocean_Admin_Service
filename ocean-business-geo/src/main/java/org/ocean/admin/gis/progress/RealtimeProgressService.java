@@ -52,7 +52,10 @@ public class RealtimeProgressService {
     public RealtimeProgressService(ProgressSnapshotProvider provider,
             @Qualifier("gisRealtimeSsePublisher") RealtimeEventPublisher publisher,
             StringRedisTemplate redis, ObjectMapper json) {
-        this.provider = provider; this.publisher = publisher; this.redis = redis; this.json = json;
+        this.provider = provider;
+        this.publisher = publisher;
+        this.redis = redis;
+        this.json = json;
     }
 
     public Handle create(String id, String correlation, String title, long total, String type, ProgressUnit unit) {
@@ -114,12 +117,18 @@ public class RealtimeProgressService {
 
     /** 请求与过期清理共享执行锁，分块文件仍以实际落盘偏移为准。 */
     public <T> T withExecutionLock(String id, Supplier<T> action) {
-        String key = PREFIX + "execution:" + id, token = UUID.randomUUID().toString();
-        if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, token, Duration.ofSeconds(60))))
+        String key = PREFIX + "execution:" + id;
+        String token = UUID.randomUUID().toString();
+        if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, token, Duration.ofSeconds(60)))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "接入正在处理，请稍后重试");
+        }
         executions.put(id, token);
-        try { return action.get(); }
-        finally { executions.remove(id, token); redis.execute(UNLOCK, List.of(key), token); }
+        try {
+            return action.get();
+        } finally {
+            executions.remove(id, token);
+            redis.execute(UNLOCK, List.of(key), token);
+        }
     }
 
     public void checkExecutionLease(String id) {
@@ -205,21 +214,37 @@ public class RealtimeProgressService {
         if (id == null) return;
         ProgressSnapshot result = change(id, old -> {
             if (old.status().isTerminal() || !"EXTRACTING_METADATA".equals(old.stage().code())) return old;
-            ProgressSummary summary = provider.ingestionSummary(id, old);
+            var ingestion = provider.ingestionProgress(id, old);
+            ProgressSummary summary = ingestion.summary();
             long registrationFailed = old.metrics().stream().filter(metric -> "REGISTRATION_FAILED".equals(metric.code()))
                     .mapToLong(Metric::value).findFirst().orElse(0);
             long total = summary.total() - summary.skipped() - registrationFailed;
             long processed = summary.succeeded() + summary.failed() - registrationFailed;
             boolean done = summary.processed() == summary.total();
-            TaskStatus status = !done ? TaskStatus.RUNNING : summary.failed() == 0 ? TaskStatus.COMPLETED
-                    : summary.succeeded() + summary.skipped() == 0 ? TaskStatus.FAILED : TaskStatus.PARTIAL_FAILED;
-            String message = (done ? "接入结束" : "空间元数据解析中") + "，成功" + summary.succeeded()
-                    + "个，失败" + summary.failed() + "个，跳过" + summary.skipped() + "个";
-            ProgressStage stage = done || total == 0 ? ProgressStage.indeterminate(status.name(), message)
+            TaskStatus status;
+            if (!done) {
+                status = TaskStatus.RUNNING;
+            } else if (summary.failed() == 0) {
+                status = TaskStatus.COMPLETED;
+            } else if (summary.succeeded() == 0) {
+                status = TaskStatus.FAILED;
+            } else {
+                status = TaskStatus.PARTIAL_FAILED;
+            }
+            String message = (done ? "接入结束" : "空间元数据解析中") + "，空间解析成功" + summary.succeeded()
+                    + "个，受影响失败" + summary.failed() + "个，跳过解析" + summary.skipped() + "个";
+            ProgressStage stage = done ? ProgressStage.indeterminate(status.name(), message)
+                    : total == 0 ? ProgressStage.indeterminate("EXTRACTING_METADATA", message)
                     : ProgressStage.determinate("EXTRACTING_METADATA", message, processed, total, ProgressUnit.FILE);
             List<FileWork> active = old.activeFiles().stream().filter(work -> provider.isExtracting(work.fileId())).toList();
+            Integer percent;
+            if (total == 0) {
+                percent = done ? 100 : null;
+            } else {
+                percent = (int) (processed * 100 / total);
+            }
             return new ProgressSnapshot(old.progressId(), old.correlationId(), old.type(), old.category(), old.title(), status,
-                    Overall.of(total == 0 ? (done ? 100 : null) : (int)(processed * 100 / total)), stage, old.metrics(),
+                    Overall.of(percent), stage, ingestion.metrics(),
                     done ? List.of() : active, summary, old.resource(),
                     done && summary.failed() > 0 ? new ErrorInfo("INGESTION_FAILED", message) : null,
                     old.startedAt(), done ? LocalDateTime.now() : null, nextRevision(old));
@@ -256,7 +281,7 @@ public class RealtimeProgressService {
     public void onMetadataWork(FileSpatialMetadataService.MetadataWork event) {
         GisFileMeta file = provider.ingestionFile(event.fileId());
         if (file == null || file.getIngestProgressId() == null || !"RUNNING".equals(file.getMetadataStatus())
-                || !Objects.equals(event.version(), file.getMetadataVersion())) return;
+                || !Objects.equals(event.version(), file.getMetadataVersion()) || !provider.isExtracting(file.getId().toString())) return;
         change(file.getIngestProgressId(), old -> {
             if (old.status().isTerminal() || !"EXTRACTING_METADATA".equals(old.stage().code())) return old;
             List<FileWork> active = new ArrayList<>(old.activeFiles());
@@ -268,6 +293,11 @@ public class RealtimeProgressService {
                     old.overall(), old.stage(), old.metrics(), active, old.summary(), old.resource(), old.error(),
                     old.startedAt(), old.finishedAt(), nextRevision(old));
         });
+    }
+
+    private ProgressStage normalizeStage(ProgressStage stage) {
+        return new ProgressStage(stage.code().toUpperCase(Locale.ROOT), stage.message(),
+                stage.completed(), stage.total(), stage.unit());
     }
 
     private Revision nextRevision(ProgressSnapshot snapshot) { return new Revision(snapshot.revision().epoch(), snapshot.revision().sequence() + 1); }

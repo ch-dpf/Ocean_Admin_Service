@@ -15,7 +15,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.function.Consumer;
 
-/** 将通用单文件任务适配为 mago 地形切片请求。 */
+/** 将文件列表或目录输入适配为 mago 地形切片请求。 */
 public class TerrainFileProcessingEngine implements GisFileProcessingEngine {
 
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("tif", "tiff");

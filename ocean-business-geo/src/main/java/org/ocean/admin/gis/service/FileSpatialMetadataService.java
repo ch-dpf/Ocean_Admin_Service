@@ -1,4 +1,5 @@
 package org.ocean.admin.gis.service;
+import java.io.IOException;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
@@ -8,18 +9,17 @@ import org.geotools.referencing.CRS;
 import org.locationtech.jts.geom.*;
 import org.locationtech.jts.io.WKTWriter;
 import org.ocean.admin.gis.entity.GisFileMeta;
+import org.ocean.admin.gis.entity.GisFileGroup;
+import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileSpatialMetadata;
-import org.ocean.admin.gis.entity.GisVectorFeature;
-import org.ocean.admin.gis.entity.GisVectorLayer;
-import org.ocean.admin.gis.entity.GisVectorGroup;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import org.ocean.admin.gis.mapper.GisFileGroupMapper;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.processing.input.ControlledWorkspaceResolver;
 import org.ocean.admin.gis.util.GeoJsonFeatureReader;
 import org.ocean.admin.gis.util.RasterFootprintBuilder;
-import org.ocean.admin.gis.util.VectorTemplateRules;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.gis.progress.ProgressStage;
 import org.ocean.admin.gis.progress.ProgressUnit;
@@ -44,17 +44,20 @@ import java.util.function.Consumer;
 @Slf4j
 @RequiredArgsConstructor
 public class FileSpatialMetadataService {
+    private final VectorResourceService vectorResources;
     private static final GeometryFactory GEOMETRIES = new GeometryFactory(new PrecisionModel(), 4326);
-    private static final Set<String> ATTACHMENTS = Set.of("prj", "tfw", "aux", "xml", "shx", "dbf", "cpg", "sbn", "sbx");
     private final GisFileSpatialMetadataMapper spatialMapper;
     private final RasterSpatialMetadataExtractor rasterExtractor;
+    private final FileGroupService fileGroups;
+    private final GdalDatasetReader datasetReader;
+    private final VectorLayerService vectorLayers;
     private final GeoJsonFeatureReader geoJsonReader;
     private final GisFileMetaMapper fileMapper;
+    private final GisFileGroupMapper groupMapper;
     private final GisDataSetMapper dataSetMapper;
     private final ControlledWorkspaceResolver sources;
     private final GisVectorMapper vectorMapper;
     private final VectorDataSetStyleService vectorDataSetStyles;
-    private final VectorTemplateRules templateRules;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactions;
     private final ApplicationEventPublisher events;
@@ -72,10 +75,9 @@ public class FileSpatialMetadataService {
 
     /** 扫描结束后一次放行；过期或已被删除的等待文件不再获得执行资格。 */
     public void releaseIngestion(String progressId) {
-        transactions.executeWithoutResult(status -> {
-            List<Long> released = spatialMapper.releaseIngestion(progressId);
-            if (!released.isEmpty()) events.publishEvent(new MetadataReady(released));
-        });
+        List<Long> released = fileGroups.assembleIngestion(progressId);
+        if (!released.isEmpty()) events.publishEvent(new MetadataReady(released));
+
     }
 
     public void renewIngestionWaiting(String progressId) {
@@ -93,73 +95,97 @@ public class FileSpatialMetadataService {
     public void extract(Long fileId) {
         GisFileMeta claim = transactions.execute(status -> spatialMapper.claim(fileId, LocalDateTime.now().plusMinutes(15)));
         if (claim == null) return;
-        events.publishEvent(new MetadataProgress(List.of(fileId), null));
+        GisFileGroup group = fileGroups.startExtraction(claim);
+        if (group == null) return;
+        List<GisFileMeta> members = fileGroups.members(group.getId());
+        List<Long> memberIds = members.stream().map(GisFileMeta::getId).toList();
+        events.publishEvent(new MetadataProgress(memberIds, null));
         Consumer<ProgressStage> progress = metadataProgress(claim);
-        GisFileSpatialMetadata metadata = null;
-        VectorExtraction vectorResult = null;
+        Runnable heartbeat = leaseHeartbeat(claim);
+        Runnable claimGuard = () -> {
+            // 与删除和任务提交保持同一锁顺序，避免建层外键回锁数据集时形成环路。
+            if (dataSetMapper.selectActiveByIdForUpdate(claim.getDataSetId()) == null
+                    || !fileGroups.lockCurrent(group) || spatialMapper.lockClaim(fileId, claim.getMetadataVersion()) == null)
+                throw new MetadataException("LEASE_LOST", "文件组输入版本或解析租约已失效");
+        };
+        List<GisFileSpatialMetadata> metadata = new ArrayList<>();
+        VectorLayerService.VectorExtraction vectorResult = null;
         String errorCode = null;
         String errorMessage = null;
-        boolean notApplicable = ATTACHMENTS.contains(claim.getExtension());
-        try {
-            progress.accept(ProgressStage.determinate("METADATA_READING", "读取空间参考信息", 0, 1, ProgressUnit.OPERATION));
-            if (!notApplicable) {
-                Runnable heartbeat = leaseHeartbeat(claim);
-                metadata = read(claim, heartbeat, progress);
-                if ("VECTOR".equals(metadata.getDataKind())) {
-                    var extra = (tools.jackson.databind.node.ObjectNode) objectMapper.readTree(metadata.getExtraMetadata());
-                    vectorResult = extractVector(claim, heartbeat, progress, Math.max(1, extra.path("featureCount").asLong()));
+        try (var context = prepareWithSnapshot(claim, group, members, claimGuard, heartbeat, progress)) {
+            progress.accept(ProgressStage.determinate("METADATA_READING", "读取文件组空间信息", 0, 1, ProgressUnit.OPERATION));
+            List<VectorLayerService.ImportLayer> vectorInputs = new ArrayList<>();
+            for (var source : context.vectors()) {
+                heartbeat.run();
+                GisFileSpatialMetadata item = newMetadata(claim, source.key(), source.name());
+                vector(source.geoJsonPath(), item, heartbeat, progress);
+                preserveSource(item, source.sourceCrs(), source.sourceExtent(), source.metadata(), group.getFormat());
+                metadata.add(item);
+                long count = objectMapper.readTree(item.getExtraMetadata()).path("featureCount").asLong();
+                vectorInputs.add(new VectorLayerService.ImportLayer(source.key(), source.name(), source.geoJsonPath(), count));
+            }
+            if (!vectorInputs.isEmpty()) {
+                vectorResult = vectorLayers.importSource(claim, vectorInputs, claimGuard, heartbeat, progress);
+                for (GisFileSpatialMetadata item : metadata) {
+                    var extra = (tools.jackson.databind.node.ObjectNode) objectMapper.readTree(item.getExtraMetadata());
                     extra.set("vectorImport", objectMapper.valueToTree(vectorResult));
                     extra.put("vectorPlacement", claim.getVectorPlacement());
                     extra.put("vectorDatasetStyleId", claim.getVectorDatasetStyleId().toString());
-                    metadata.setExtraMetadata(objectMapper.writeValueAsString(extra));
+                    item.setExtraMetadata(objectMapper.writeValueAsString(extra));
                 }
-                sources.resolveFile(claim);
             }
+            GisDataSet dataSet = dataSetMapper.selectById(claim.getDataSetId());
+            if (dataSet == null) throw new MetadataException("MISSING_DATASET", "文件所属数据集不存在");
+            for (var source : context.rasters()) {
+                heartbeat.run();
+                GisFileSpatialMetadata item = newMetadata(claim, source.key(), source.name());
+                rasterExtractor.extract(source.geoTiffPath(), item, Long.valueOf(1).equals(dataSet.getCategoryId()), heartbeat, progress);
+                preserveSource(item, source.sourceCrs(), source.sourceExtent(), source.metadata(), group.getFormat());
+                metadata.add(item);
+            }
+            if (metadata.isEmpty()) throw new MetadataException("EMPTY_DATASET", "文件组中没有可定位的空间图层");
+            context.verifySources();
         } catch (ControlledWorkspaceResolver.SourceException ex) {
-            errorCode = ex.code();
-            errorMessage = ex.getMessage();
+            errorCode = ex.code(); errorMessage = ex.getMessage();
+        } catch (GdalDatasetReader.ReaderException ex) {
+            errorCode = ex.code(); errorMessage = ex.getMessage();
+        } catch (VectorLayerService.ImportException ex) {
+            errorCode = ex.code(); errorMessage = ex.getMessage();
         } catch (MetadataException ex) {
             if ("LEASE_LOST".equals(ex.code)) return;
-            errorCode = ex.code;
-            errorMessage = ex.getMessage();
+            errorCode = ex.code; errorMessage = ex.getMessage();
         } catch (RasterSpatialMetadataExtractor.ExtractionException ex) {
-            errorCode = ex.code();
-            errorMessage = ex.getMessage();
+            errorCode = ex.code(); errorMessage = ex.getMessage();
         } catch (RasterFootprintBuilder.FootprintException ex) {
-            errorCode = ex.code();
-            errorMessage = ex.getMessage();
+            errorCode = ex.code(); errorMessage = ex.getMessage();
         } catch (Exception ex) {
-            errorCode = "EXTRACTION_FAILED";
-            errorMessage = ex.getMessage();
-            log.warn("空间元数据提取失败: fileId={}", fileId, ex);
+            errorCode = "EXTRACTION_FAILED"; errorMessage = ex.getMessage();
+            log.warn("文件组空间元数据提取失败: groupId={}, fileId={}", group.getId(), fileId, ex);
         }
-        GisFileSpatialMetadata extracted = errorCode == null ? metadata : null;
-        VectorExtraction extractedVector = errorCode == null ? vectorResult : null;
+        List<GisFileSpatialMetadata> extracted = errorCode == null ? List.copyOf(metadata) : List.of();
+        VectorLayerService.VectorExtraction extractedVector = errorCode == null ? vectorResult : null;
         String code = errorCode;
         String message = errorMessage;
-        if (code == null) progress.accept(ProgressStage.determinate("COMMITTING", "提交空间元数据与导入结果", 0, 1, ProgressUnit.OPERATION));
+        if (code == null) progress.accept(ProgressStage.determinate("COMMITTING", "提交文件组空间信息与导入结果", 0, 1, ProgressUnit.OPERATION));
         transactions.executeWithoutResult(status -> {
-            // 超时重新领取、文件变更或删除都会使本次结果失效。
+            if (dataSetMapper.selectActiveByIdForUpdate(claim.getDataSetId()) == null || !fileGroups.lockCurrent(group)) return;
             GisFileMeta locked = spatialMapper.lockClaim(fileId, claim.getMetadataVersion());
             if (locked == null) return;
             if (code != null) vectorMapper.deleteExtractingLayersBySource(fileId);
             spatialMapper.deleteByFileId(fileId);
-            if (extracted != null) spatialMapper.insert(extracted);
-            GisFileMeta point = extracted == null ? null : spatialMapper.selectRepresentativePoint(fileId);
-            if (extracted != null && point == null) {
-                throw new IllegalStateException("空间元数据缺少可定位的代表点: " + fileId);
-            }
+            for (GisFileSpatialMetadata item : extracted) spatialMapper.insert(item);
+            GisFileMeta point = extracted.isEmpty() ? null : spatialMapper.selectRepresentativePoint(fileId);
+            if (!extracted.isEmpty() && point == null) throw new IllegalStateException("空间元数据缺少代表点: " + fileId);
             if (extractedVector != null) {
                 vectorDataSetStyles.require(claim.getDataSetId(), true);
                 for (Long layerId : extractedVector.layerIds()) {
-                    if (vectorMapper.refreshLayer(layerId) != 1 || vectorMapper.setLayerStatus(layerId, "READY") != 1) {
+                    if (vectorMapper.refreshLayer(layerId) != 1 || vectorMapper.setLayerStatus(layerId, "READY") != 1)
                         throw new IllegalStateException("矢量图层提取结果提交失败: " + fileId);
-                    }
                 }
                 vectorMapper.bumpDataSetRevision(claim.getDataSetId(), true, true);
             }
-            String result = code != null ? "FAILED" : notApplicable ? "NOT_APPLICABLE" : "COMPLETED";
-            int updated = fileMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()
+            String result = code == null ? "COMPLETED" : "FAILED";
+            fileMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()
                     .eq(GisFileMeta::getId, fileId)
                     .set(GisFileMeta::getMetadataStatus, result)
                     .set(GisFileMeta::getMetadataLeaseExpiresAt, null)
@@ -171,24 +197,71 @@ public class FileSpatialMetadataService {
                     .set(GisFileMeta::getRepresentativeLayerKey, point == null ? null : point.getRepresentativeLayerKey())
                     .set(GisFileMeta::getRepresentativeExtentKind, point == null ? null : point.getRepresentativeExtentKind())
                     .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
-            if (updated != 1) throw new IllegalStateException("空间元数据结果提交失败: " + fileId);
-            locked.setMetadataStatus(result);
-            locked.setMetadataErrorMessage(abbreviate(message));
-            events.publishEvent(new MetadataProgress(List.of(fileId), code == null));
-
+            fileGroups.finishExtraction(group, result, code, message);
+            events.publishEvent(new MetadataProgress(memberIds, code == null));
         });
-        progress.accept(code == null
-                ? ProgressStage.determinate("COMMITTING", "空间元数据与导入结果已提交", 1, 1, ProgressUnit.OPERATION)
+        progress.accept(code == null ? ProgressStage.determinate("COMMITTING", "文件组导入完成", 1, 1, ProgressUnit.OPERATION)
                 : ProgressStage.indeterminate("FAILED", message));
     }
 
+    private GdalDatasetReader.ReadContext prepareWithSnapshot(GisFileMeta claim, GisFileGroup group,
+            List<GisFileMeta> members, Runnable guard, Runnable heartbeat, Consumer<ProgressStage> progress) throws IOException {
+        if (org.ocean.admin.gis.entity.GisFileFormat.valueOf(group.getFormat()).isVector())
+            vectorResources.capture(claim, group, members, guard, heartbeat, progress);
+        return datasetReader.prepare(group, members, heartbeat, progress);
+    }
+
+    private GisFileSpatialMetadata newMetadata(GisFileMeta source, String key, String name) {
+        GisFileSpatialMetadata result = new GisFileSpatialMetadata();
+        result.setId(IdWorker.getId()); result.setFileMetaId(source.getId());
+        result.setLayerKey(key); result.setLayerName(name);
+        result.setCalculationDetails("{}"); result.setExtraMetadata("{}");
+        return result;
+    }
+
+    /** 标准化输入仅用于执行，来源坐标与原始描述必须单独保留。 */
+    private void preserveSource(GisFileSpatialMetadata metadata, String sourceCrs,
+            JsonNode sourceExtent, JsonNode sourceDetails, String format) throws Exception {
+        if (sourceDetails == null || sourceDetails.isNull()) return;
+        if (sourceCrs != null && !sourceCrs.isBlank()) {
+            var crs = sourceCrs.startsWith("EPSG:") || sourceCrs.startsWith("OGC:")
+                    ? CRS.decode(sourceCrs, true) : CRS.parseWKT(sourceCrs);
+            metadata.setSourceCrsWkt(crs.toWKT());
+            try { metadata.setSourceCrsCode(CRS.lookupIdentifier(crs, true)); }
+            catch (Exception ignored) { metadata.setSourceCrsCode(null); }
+            metadata.setSourceUnit(crs.getCoordinateSystem().getAxis(0).getUnit().toString());
+        }
+        // 未知源范围用 JSON null 表示，不能保留标准化数据的经纬度范围并标成源投影。
+        metadata.setSourceExtent(sourceExtent == null ? "null" : objectMapper.writeValueAsString(sourceExtent));
+        var extra = (tools.jackson.databind.node.ObjectNode) objectMapper.readTree(metadata.getExtraMetadata());
+        extra.put("sourceFormat", format);
+        extra.set("sourceMetadata", sourceDetails);
+        metadata.setExtraMetadata(objectMapper.writeValueAsString(extra));
+    }
     /** 按文件来源发现不可用时立即使空间查询失效，同时撤销旧提取任务的提交资格。 */
     public void markSourceUnavailable(Long fileId, String code, String message) {
         transactions.executeWithoutResult(status -> {
-            GisFileMeta source = fileMapper.selectActiveByIdForUpdate(fileId);
-            if (source == null || !"WORKSPACE".equals(source.getSourceType())) return;
+            GisFileMeta located = fileMapper.selectById(fileId);
+            if (located == null || !"WORKSPACE".equals(located.getSourceType())) return;
+            if (dataSetMapper.selectActiveByIdForUpdate(located.getDataSetId()) == null) return;
+            located = fileMapper.selectById(fileId);
+            if (located == null) return;
+            GisFileGroup group = located.getFileGroupId() == null ? null : groupMapper.lock(located.getFileGroupId());
+            Long entryId = group == null || group.getEntryFileId() == null ? fileId : group.getEntryFileId();
+            GisFileMeta source = fileMapper.selectActiveByIdForUpdate(entryId);
+            if (source == null) return;
+            if (group != null) {
+                boolean hadSuccess = "COMPLETED".equals(group.getParseStatus())
+                        || "REIMPORT_REQUIRED".equals(group.getParseStatus()) || vectorMapper.countSourceReferences(entryId) > 0;
+                group.setInputRevision(group.getInputRevision() + 1);
+                group.setFingerprint(null);
+                group.setAssemblyStatus("BLOCKED");
+                group.setParseStatus(hadSuccess ? "REIMPORT_REQUIRED" : "PARKED");
+                group.setErrorCode(code); group.setErrorMessage(abbreviate(message));
+                groupMapper.updateState(group);
+            }
             fileMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()
-                    .eq(GisFileMeta::getId, fileId)
+                    .eq(GisFileMeta::getId, entryId)
                     .set(GisFileMeta::getMetadataStatus, "FAILED")
                     .setSql("metadata_version = metadata_version + 1")
                     .set(GisFileMeta::getMetadataLeaseExpiresAt, null)
@@ -199,10 +272,11 @@ public class FileSpatialMetadataService {
                     .set(GisFileMeta::getMetadataErrorCode, code)
                     .set(GisFileMeta::getMetadataErrorMessage, abbreviate(message))
                     .set(GisFileMeta::getUpdateTime, LocalDateTime.now()));
-            events.publishEvent(new MetadataProgress(List.of(fileId), false));
+            List<Long> affected = group == null ? List.of(fileId)
+                    : fileGroups.members(group.getId()).stream().map(GisFileMeta::getId).toList();
+            events.publishEvent(new MetadataProgress(affected, false));
         });
     }
-
     private Consumer<ProgressStage> metadataProgress(GisFileMeta claim) {
         return ProgressStage.throttled(work -> {
             try {
@@ -252,136 +326,6 @@ public class FileSpatialMetadataService {
             renewedAt[0] = now;
             events.publishEvent(new MetadataProgress(List.of(claim.getId()), null));
         };
-    }
-
-    /** 矢量文件在元数据领取周期内直接形成图层和要素，不再创建独立导入任务。 */
-    private record VectorExtraction(List<Long> layerIds, long sourceFeatures, long parts, long unknownParts,
-            long warnings, Map<String, Long> groupCounts) { }
-
-    private VectorExtraction extractVector(GisFileMeta source, Runnable heartbeat,
-            Consumer<ProgressStage> progress, long totalFeatures) throws Exception {
-        progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理与入库", 0, totalFeatures, ProgressUnit.FEATURE));
-        var snapshot = vectorDataSetStyles.require(source.getDataSetId(), false);
-        if (!Objects.equals(snapshot.getId(), source.getVectorDatasetStyleId())
-                || source.getVectorPlacement() == null || !Set.of("AUTO", "UNKNOWN").contains(source.getVectorPlacement())) {
-            throw new MetadataException("MISSING_VECTOR_IMPORT_CONFIG", "文件未固定样式与归组方式，禁止猜测或重导存量数据");
-        }
-        var template = vectorDataSetStyles.compile(snapshot);
-        Map<String, GisVectorGroup> targets = vectorMapper.groups(source.getDataSetId()).stream()
-                .collect(Collectors.toMap(GisVectorGroup::getGroupKey, g -> g));
-        transactions.executeWithoutResult(status -> {
-            requireClaim(source);
-            if (vectorMapper.layersBySource(source.getId()).stream().anyMatch(l -> "READY".equals(l.getLayerStatus())))
-                throw new MetadataException("VECTOR_ALREADY_EXTRACTED", "已完成图层不可被元数据重试覆盖");
-            vectorMapper.deleteExtractingLayersBySource(source.getId());
-        });
-        Map<String, GisVectorLayer> layers = new LinkedHashMap<>();
-        Map<String, Long> counts = new LinkedHashMap<>();
-        List<GisVectorFeature> batch = new ArrayList<>();
-        long[] statistics = {0, 0, 0, 0};
-        long[] committedParts = {0};
-        long[] processedFeatures = {0};
-        long count = geoJsonReader.read(sources.resolveFile(source), parsed -> {
-            JsonNode properties = objectMapper.readTree(parsed.properties());
-            for (var part : templateRules.parts(objectMapper.readTree(parsed.geometry()))) {
-                var match = templateRules.classify(template, properties, part.kind(), "UNKNOWN".equals(source.getVectorPlacement()));
-                var group = targets.get(match.groupKey());
-                String layerKey = match.groupKey() + ":" + part.kind();
-                GisVectorLayer layer = layers.get(layerKey);
-                if (layer == null) {
-                    layer = new GisVectorLayer();
-                    layer.setId(IdWorker.getId()); layer.setDataSetId(source.getDataSetId()); layer.setSourceFileId(source.getId());
-                    layer.setGroupId(group.getId()); layer.setOriginalGroupId(group.getId()); layer.setGeometryType(part.kind());
-                    layer.setAssignmentMode("AUTO");
-                    boolean unknown = "UNKNOWN_CLASSIFICATION".equals(group.getNodeType());
-                    layer.setEnabled(!unknown && template.groups().get(match.groupKey()).path("defaultLayerEnabled").asBoolean());
-                    layer.setStyleMode(unknown ? "UNCONFIGURED" : "INHERIT_TARGET_GROUP");
-                    layer.setLayerKey(layerKey); layer.setLayerName(vectorLayerName(source.getOriginalName()));
-                    GisVectorLayer created = layer;
-                    transactions.executeWithoutResult(status -> {
-                        requireClaim(source);
-                        if (vectorMapper.insertLayer(created) != 1) throw new IllegalStateException("分类图层创建失败");
-                    });
-                    layers.put(layerKey, layer);
-                }
-                GisVectorFeature feature = new GisVectorFeature();
-                feature.setId(IdWorker.getId()); feature.setLayerId(layer.getId());
-                feature.setGeometryJson(objectMapper.writeValueAsString(part.geometry())); feature.setPropertiesJson(parsed.properties());
-                feature.setSourceFeatureId(parsed.sourceId()); feature.setSourceFeatureIndex(parsed.index());
-                feature.setSourceGeometryPath(part.path()); feature.setClassificationRuleKey(match.ruleKey());
-                batch.add(feature);
-                statistics[0] += feature.getGeometryJson().length() + parsed.properties().length();
-                statistics[1]++;
-                if ("UNKNOWN_CLASSIFICATION".equals(group.getNodeType())) statistics[2]++;
-                if (match.warning()) statistics[3]++;
-                counts.merge(match.groupKey(), 1L, Long::sum);
-                if (batch.size() >= 100 || statistics[0] >= 2 * 1024 * 1024) {
-                    committedParts[0] += flushVectorBatch(source, batch); statistics[0] = 0;
-                }
-            }
-            processedFeatures[0]++;
-            progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理与入库；已提交几何 " + committedParts[0] + " 个",
-                    processedFeatures[0], totalFeatures, ProgressUnit.FEATURE));
-        }, heartbeat);
-        committedParts[0] += flushVectorBatch(source, batch);
-        progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理结束；已提交几何 " + committedParts[0] + " 个",
-                count, totalFeatures, ProgressUnit.FEATURE));
-        if (count == 0 || layers.isEmpty()) throw new MetadataException("EMPTY_GEOMETRY", "GeoJSON不包含可制图要素");
-        return new VectorExtraction(layers.values().stream().map(GisVectorLayer::getId).toList(),
-                count, statistics[1], statistics[2], statistics[3], Map.copyOf(counts));
-    }
-
-    private int flushVectorBatch(GisFileMeta claim, List<GisVectorFeature> batch) {
-        if (batch.isEmpty()) return 0;
-        int size = batch.size();
-        transactions.executeWithoutResult(status -> {
-            requireClaim(claim);
-            var error = vectorMapper.firstGeometryError(batch);
-            if (error != null) {
-                throw new GeoJsonFeatureReader.FeatureReadException(error.featureIndex(), error.reason());
-            }
-            if (vectorMapper.insertFeatures(batch) != batch.size()) {
-                throw new IllegalStateException("矢量要素批量写入数量不一致");
-            }
-        });
-        batch.clear();
-        return size;
-    }
-
-    private void requireClaim(GisFileMeta claim) {
-        if (spatialMapper.lockClaim(claim.getId(), claim.getMetadataVersion()) == null) {
-            throw new MetadataException("LEASE_LOST", "解析任务租约已失效");
-        }
-    }
-
-    private String vectorLayerName(String originalName) {
-        String name = originalName;
-        int suffix = name.lastIndexOf('.');
-        if (suffix > 0) name = name.substring(0, suffix);
-        name = name.trim();
-        if (name.isBlank()) name = "矢量图层";
-        return name.substring(0, name.offsetByCodePoints(0, Math.min(100, name.codePointCount(0, name.length()))));
-    }
-
-    private GisFileSpatialMetadata read(GisFileMeta file, Runnable heartbeat, Consumer<ProgressStage> progress) throws Exception {
-        Path path = sources.resolveFile(file);
-        GisFileSpatialMetadata metadata = new GisFileSpatialMetadata();
-        metadata.setId(IdWorker.getId());
-        metadata.setFileMetaId(file.getId());
-        metadata.setLayerKey("default");
-        metadata.setLayerName(file.getOriginalName());
-        metadata.setCalculationDetails("{}");
-        metadata.setExtraMetadata("{}");
-        switch (file.getExtension()) {
-            case "tif", "tiff" -> {
-                var dataSet = dataSetMapper.selectById(file.getDataSetId());
-                if (dataSet == null) throw new MetadataException("MISSING_DATASET", "文件所属数据集不存在");
-                rasterExtractor.extract(path, metadata, Long.valueOf(1).equals(dataSet.getCategoryId()), heartbeat, progress);
-            }
-            case "geojson", "json" -> vector(path, metadata, heartbeat, progress);
-            default -> throw new MetadataException("UNSUPPORTED_FORMAT", "首期空间元数据提取仅支持 GeoTIFF、GeoJSON");
-        }
-        return metadata;
     }
 
     private void vector(Path path, GisFileSpatialMetadata metadata, Runnable heartbeat, Consumer<ProgressStage> progress) throws Exception {
@@ -514,7 +458,7 @@ public class FileSpatialMetadataService {
         private String declaredCrs;
     }
 
-    private static final class MetadataException extends IllegalArgumentException {
+    private static final class MetadataException extends RuntimeException {
         private final String code;
         private MetadataException(String code, String message) { super(message); this.code = code; }
     }
