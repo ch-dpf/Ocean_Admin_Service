@@ -52,7 +52,17 @@ public class VectorTemplateRules {
             if (!KINDS.contains(kind)) throw bad("样式几何类别无效");
             bounds(style.path("minZoom").asDouble(Double.NaN), style.path("maxZoom").asDouble(Double.NaN));
             symbol(kind, style.path("symbol"));
-            if (style.has("renderRules")) validateRenderRules(style.path("renderRules"), kind);
+            if (style.has("renderRules")) {
+                validateRenderRules(style.path("renderRules"), kind);
+                double min = 25, max = 0;
+                for (JsonNode rule : style.path("renderRules")) {
+                    min = Math.min(min, rule.path("minZoom").asDouble());
+                    max = Math.max(max, rule.path("maxZoom").asDouble());
+                }
+                if (Math.abs(style.path("minZoom").asDouble() - min) > 1e-10
+                        || Math.abs(style.path("maxZoom").asDouble() - max) > 1e-10)
+                    throw bad("样式显示范围须与复合规则范围一致");
+            }
             if (!style.path("overrides").isArray()) throw bad("overrides须为数组");
             for (JsonNode override : style.path("overrides")) {
                 filter(override.path("filter"), 0);
@@ -86,11 +96,16 @@ public class VectorTemplateRules {
         }
         JsonNode policy = definition.path("tilePolicy");
         if (policy.path("nativeMaxZoom").asInt() != 18 || policy.path("displayMaxZoom").asInt() != 24
-                || policy.path("tileSize").asInt() != 512 || policy.path("extent").asInt() != 8192
+                || policy.path("tileSize").asInt() != 512 || policy.path("zoomReferenceSize").asInt() != 256
+                || policy.path("extent").asInt() != 8192
                 || !policy.path("groups").isArray()) throw bad("瓦片策略无效");
         for (JsonNode item : policy.path("groups")) {
             if (!groups.containsKey(item.path("groupKey").asText())) throw bad("瓦片分类不存在");
             bounds(item.path("minZoom").asDouble(), 25);
+            JsonNode style = styles.get(groups.get(item.path("groupKey").asText()).path("defaultStyleId").asText());
+            if (style != null && style.has("renderRules")
+                    && item.path("minZoom").asDouble() != Math.floor(style.path("minZoom").asDouble()))
+                throw bad("复合规则的瓦片起始层级须由样式最早显示层级向下取整");
         }
         if (!policy.path("propertyFields").isArray() || policy.path("propertyFields").size() > TILE_FIELDS.size())
             throw bad("瓦片属性清单无效");
@@ -290,6 +305,21 @@ public class VectorTemplateRules {
         }
     }
 
+    /** 按原比例尺的小数精度识别整数层级；非整数阈值保留连续范围。 */
+    public static double scaleZoom(double scale) {
+        double worldScale = 40075016.68557849 / 256 / 0.00028;
+        double zoom = Math.log(worldScale / scale) / Math.log(2);
+        int digits = Math.max(0, BigDecimal.valueOf(scale).stripTrailingZeros().scale());
+        double nearestScale = worldScale / Math.pow(2, Math.rint(zoom));
+        return Math.abs(scale - nearestScale) <= .5 * Math.pow(10, -digits) + 1e-9 ? Math.rint(zoom) : zoom;
+    }
+
+    /** 数据筛选按业务层级执行，最高原生瓦片必须包含后续放大需要的要素。 */
+    public static double tileBusinessZoom(int nativeZoom, JsonNode policy) {
+        if (nativeZoom == policy.path("nativeMaxZoom").asInt()) return policy.path("displayMaxZoom").asDouble();
+        return nativeZoom + Math.log(policy.path("tileSize").asDouble() / 256) / Math.log(2);
+    }
+
     /** 复合配图使用全部命中规则，保持几何、文字和多重描边的绘制顺序。 */
     private void validateRenderRules(JsonNode rules, String kind) {
         if (!rules.isArray() || rules.isEmpty() || rules.size() > 128) throw bad("复合配图规则数量无效");
@@ -300,6 +330,12 @@ public class VectorTemplateRules {
             double min = rule.path("minScaleDenominator").asDouble(0);
             double max = rule.path("maxScaleDenominator").asDouble(Double.MAX_VALUE);
             if (!Double.isFinite(min) || !Double.isFinite(max) || min < 0 || min >= max) throw bad("比例尺范围无效");
+            bounds(rule.path("minZoom").asDouble(Double.NaN), rule.path("maxZoom").asDouble(Double.NaN));
+            double expectedMin = rule.has("maxScaleDenominator") ? Math.max(0, scaleZoom(max)) : 0;
+            double expectedMax = min > 0 ? Math.min(25, scaleZoom(min)) : 25;
+            if (Math.abs(rule.path("minZoom").asDouble() - expectedMin) > 1e-10
+                    || Math.abs(rule.path("maxZoom").asDouble() - expectedMax) > 1e-10)
+                throw bad("复合配图层级须由源比例尺派生");
             if (rule.has("filter")) { filter(rule.path("filter"), 0); validateRenderFields(rule.path("filter")); }
             var symbols = rule.path("symbolizers");
             if (!symbols.isArray() || symbols.isEmpty() || symbols.size() > 8) throw bad("复合符号数量无效");
@@ -417,7 +453,7 @@ public class VectorTemplateRules {
         return validated;
     }
     public void bounds(double min, double max) {
-        if (!Double.isFinite(min) || !Double.isFinite(max) || min < 0 || min > 18 || max > 25 || min >= max) throw bad("显示范围须满足0≤开始级别≤18且开始级别<结束级别≤25");
+        if (!Double.isFinite(min) || !Double.isFinite(max) || min < 0 || min > 24 || max > 25 || min >= max) throw bad("显示范围须满足0≤开始级别≤24且开始级别<结束级别≤25");
     }
     private void key(String value) { if (!KEY.matcher(value).matches()) throw bad("模板业务键无效"); }
     private IllegalArgumentException bad(String message) { return new IllegalArgumentException(message); }

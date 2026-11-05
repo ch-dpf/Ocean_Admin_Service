@@ -35,8 +35,8 @@ public class VectorFileProcessingEngine implements GisFileProcessingEngine {
     public static void validateParameters(VectorProcessingParameters p) {
         if (!"EPSG:3857".equals(p.targetCrs()) || !"XYZ".equals(p.tileProfile()) || !"MVT".equals(p.outputFormat())
                 || p.dataSetId() == null || p.dataSetId() < 1 || p.dataRevision() == null || p.dataRevision() < 0
-                || p.minZoom() == null || p.maxZoom() == null || p.minZoom() < 0 || p.maxZoom() > 18 || p.minZoom() > p.maxZoom())
-            throw new IllegalArgumentException("静态矢量瓦片须使用EPSG:3857、XYZ、MVT及0至18级范围");
+                || p.minZoom() == null || p.maxZoom() == null || p.minZoom() < 0 || p.maxZoom() > 19 || p.minZoom() > p.maxZoom())
+            throw new IllegalArgumentException("静态矢量瓦片须使用EPSG:3857、XYZ、MVT及0至19级业务层级范围");
         List<Double> b = p.bounds();
         if (b == null || b.size() != 4 || b.stream().anyMatch(n -> n == null || !Double.isFinite(n))
                 || b.get(0) < -180 || b.get(2) > 180 || b.get(1) < -85.05112878 || b.get(3) > 85.05112878
@@ -51,7 +51,7 @@ public class VectorFileProcessingEngine implements GisFileProcessingEngine {
     public static List<int[]> tileRanges(VectorProcessingParameters p) {
         validateParameters(p);
         List<int[]> ranges = new ArrayList<>();
-        for (int z = p.minZoom(); z <= p.maxZoom(); z++) {
+        for (int z = Math.max(0, p.minZoom() - 1); z <= Math.max(0, p.maxZoom() - 1); z++) {
             int n = 1 << z;
             int minX = Math.max(0, (int) Math.floor((p.bounds().get(0) + 180) / 360 * n));
             int maxX = Math.min(n - 1, (int) Math.ceil((p.bounds().get(2) + 180) / 360 * n) - 1);
@@ -73,6 +73,9 @@ public class VectorFileProcessingEngine implements GisFileProcessingEngine {
         try {
             Files.createDirectories(workspace.outputPath());
             var definition = json.readTree(inputs.getFirst().resolveSibling("source.json").toFile());
+            // 最高原生瓦片保留后续显示层级需要的要素，缩放放大时由配图规则控制显隐。
+            ((tools.jackson.databind.node.ObjectNode) definition.path("tilePolicy"))
+                    .put("nativeMaxZoom", Math.max(0, p.maxZoom() - 1));
             progress.accept(ProgressStage.indeterminate("VECTOR_TILES", "批量生成静态矢量瓦片，共" + total + "块"));
             store.staticTiles(inputs.getFirst(), definition, ranges, workspace.outputPath(), limits.getMaxDecodedTileBytes(),
                     limits.getMaxTileBytes(), () -> {
@@ -83,7 +86,8 @@ public class VectorFileProcessingEngine implements GisFileProcessingEngine {
                     .put("targetCrs", p.targetCrs()).put("tileProfile", p.tileProfile()).put("format", p.outputFormat())
                     .put("dataSetId", p.dataSetId().toString()).put("dataRevision", p.dataRevision())
                     .put("tileVersion", workspace.outputKey()).put("minZoom", p.minZoom()).put("maxZoom", p.maxZoom())
-                    .put("nativeMaxZoom", p.maxZoom()).put("displayMaxZoom", 24).put("tileSize", 512)
+                    .put("nativeMaxZoom", Math.max(0, p.maxZoom() - 1)).put("displayMaxZoom", 24).put("tileSize", 512)
+                    .put("zoomReferenceSize", 256)
                     .put("tiles", "{z}/{x}/{y}.mvt").put("style", "style.json").put("tileCount", total);
             manifest.set("bounds", json.valueToTree(p.bounds()));
             manifest.set("scheme", p.schemeSnapshot());

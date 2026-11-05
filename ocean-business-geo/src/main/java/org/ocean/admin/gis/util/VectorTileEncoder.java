@@ -56,12 +56,13 @@ public class VectorTileEncoder {
             JsonNode group = null;
             for (JsonNode candidate : policy.path("groups"))
                 if (groupKey.equals(candidate.path("groupKey").asText())) { group=candidate; break; }
-            if (group == null || z < group.path("minZoom").asInt()) return;
+            double businessZoom = VectorTemplateRules.tileBusinessZoom(z, policy);
+            if (group == null || businessZoom < group.path("minZoom").asDouble()) return;
             JsonNode properties = json.readTree(feature.getPropertiesJson() == null ? "null" : feature.getPropertiesJson());
             if ("AUTO".equals(layer.getAssignmentMode())) {
                 for (JsonNode override : group.path("overrides")) {
                     if (rules.matches(override.path("filter"), properties)) {
-                        if (z < override.path("minZoom").asInt()) return;
+                        if (businessZoom < override.path("minZoom").asDouble()) return;
                         break;
                     }
                 }

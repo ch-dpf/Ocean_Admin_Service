@@ -52,4 +52,8 @@ public class VectorTileProperties {
     /** 矢量瓦片本地缓存允许占用的最大字节数。 */
     @Positive
     private long maxLocalCacheBytes = 64L * 1024 * 1024;
+
+    /** 共享缓存只接收小瓦片；限制 Base64 编码后的实际 Redis 载荷。 */
+    @Min(1024) @Max(1048576)
+    private int maxRedisValueBytes = 256 * 1024;
 }

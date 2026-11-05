@@ -160,35 +160,37 @@ public class VectorStyleService {
             String mode = patch.path("mode").asText();
             if (!List.of("OVERALL", "SEGMENTED").contains(mode)) throw error(HttpStatus.BAD_REQUEST, "配图模式无效");
             JsonNode min = patch.path("minZoom"), max = patch.path("maxZoom");
-            if (!min.isIntegralNumber() || !max.isIntegralNumber() || min.asDouble() < 0 || min.asDouble() > 24
+            if (!min.isNumber() || !max.isNumber() || !Double.isFinite(min.asDouble()) || !Double.isFinite(max.asDouble()) || min.asDouble() < 0 || min.asDouble() > 24
                     || max.asDouble() > 25 || min.asDouble() >= max.asDouble()) throw error(HttpStatus.BAD_REQUEST, "显示层级无效");
             JsonNode segments = patch.path("segments");
             if (!segments.isArray() || segments.size() > 25) throw error(HttpStatus.BAD_REQUEST, "分段配置无效");
             if ("SEGMENTED".equals(mode)) {
-                int start = min.asInt();
+                double start = min.asDouble();
                 for (JsonNode segment : segments) {
-                    if (!segment.path("minZoom").isIntegralNumber() || !segment.path("maxZoom").isIntegralNumber()
-                            || segment.path("minZoom").asDouble() != start || segment.path("maxZoom").asDouble() <= start
+                    if (!segment.path("minZoom").isNumber() || !segment.path("maxZoom").isNumber()
+                            || segment.path("minZoom").asDouble() != start || !Double.isFinite(segment.path("maxZoom").asDouble()) || segment.path("maxZoom").asDouble() <= start
                             || segment.path("maxZoom").asDouble() > max.asDouble())
                         throw error(HttpStatus.BAD_REQUEST, "分段须连续且不能重叠");
                     validateOverride(json.createObjectNode().set("symbol", segment.path("symbol")), kind);
-                    start = segment.path("maxZoom").asInt();
+                    start = segment.path("maxZoom").asDouble();
                 }
-                if (segments.isEmpty() || start != max.asInt()) throw error(HttpStatus.BAD_REQUEST, "分段须覆盖完整显示层级");
+                if (segments.isEmpty() || start != max.asDouble()) throw error(HttpStatus.BAD_REQUEST, "分段须覆盖完整显示层级");
             }
-            JsonNode labels = patch.path("labels");
-            if (!labels.isObject() || !labels.path("enabled").isBoolean()
-                    || !labels.path("fontFamily").isString() || labels.path("fontFamily").asText().isBlank()
-                    || labels.path("fontFamily").asText().length() > 100
-                    || !List.of("normal", "bold").contains(labels.path("fontWeight").asText()))
-                throw error(HttpStatus.BAD_REQUEST, "标注配置无效");
-            for (String color : List.of("color", "strokeColor"))
-                if (!labels.path(color).asText().matches("#[0-9a-fA-F]{6}")) throw error(HttpStatus.BAD_REQUEST, "标注颜色无效");
-            double fontSize = labels.path("fontSize").asDouble(Double.NaN);
-            double strokeWidth = labels.path("strokeWidth").asDouble(Double.NaN);
-            if (!labels.path("fontSize").isNumber() || !labels.path("strokeWidth").isNumber()
-                    || !Double.isFinite(fontSize) || fontSize < 6 || fontSize > 36 || !Double.isFinite(strokeWidth) || strokeWidth < 0 || strokeWidth > 8)
-                throw error(HttpStatus.BAD_REQUEST, "标注字号或描边宽度无效");
+            if (patch.has("labels") && !patch.path("labels").isNull()) {
+                JsonNode labels = patch.path("labels");
+                if (!labels.isObject() || !labels.path("enabled").isBoolean()
+                        || !labels.path("fontFamily").isString() || labels.path("fontFamily").asText().isBlank()
+                        || labels.path("fontFamily").asText().length() > 100
+                        || !List.of("normal", "bold").contains(labels.path("fontWeight").asText()))
+                    throw error(HttpStatus.BAD_REQUEST, "标注配置无效");
+                for (String color : List.of("color", "strokeColor"))
+                    if (!labels.path(color).asText().matches("#[0-9a-fA-F]{6}")) throw error(HttpStatus.BAD_REQUEST, "标注颜色无效");
+                double fontSize = labels.path("fontSize").asDouble(Double.NaN);
+                double strokeWidth = labels.path("strokeWidth").asDouble(Double.NaN);
+                if (!labels.path("fontSize").isNumber() || !labels.path("strokeWidth").isNumber()
+                        || !Double.isFinite(fontSize) || fontSize < 6 || fontSize > 36 || !Double.isFinite(strokeWidth) || strokeWidth < 0 || strokeWidth > 8)
+                    throw error(HttpStatus.BAD_REQUEST, "标注字号或描边宽度无效");
+            }
         } else if (patch.has("minZoom") || patch.has("maxZoom") || patch.has("segments") || patch.has("labels")) {
             throw error(HttpStatus.BAD_REQUEST, "完整配图配置须提供mode");
         }

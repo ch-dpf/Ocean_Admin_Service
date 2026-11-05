@@ -2,7 +2,7 @@
   "schemaVersion": 3,
   "kind": "VECTOR_DATASET_STYLE_TEMPLATE",
   "templateId": "x-institute-light",
-  "templateVersion": 1,
+  "templateVersion": 2,
   "name": "x院业务分类－亮色",
   "description": "依据原始图层和当前亮色与暗色主题样式清单配置业务分类、比例尺与配图。",
   "provenance": {
@@ -34,7 +34,9 @@
       "font": "Microsoft YaHei UI",
       "majorCityPointStrokeWidth": 1
     },
-    "styleChecklist": "04-当前亮色与暗色主题样式清单.md"
+    "styleChecklist": "04-当前亮色与暗色主题样式清单.md",
+    "scaleConvention": "WEB_MERCATOR_256；整数边界按SLD数值精度归一化，[minZoom,maxZoom)",
+    "sldVerifiedDirectory": "E:/web service/geoserver-3.0.1-bin/configuration/ocean_basemap/styles"
   },
   "initialization": {
     "onDatasetCreate": "COPY_TEMPLATE_TO_DATASET_SNAPSHOT",
@@ -1090,7 +1092,7 @@
     "simplifyPixels": 0.25,
     "polygonMinAreaPixels": 1,
     "lineMinLengthPixels": 1,
-    "encodingVersion": 1,
+    "encodingVersion": 2,
     "groups": [
       {
         "preserveBoundary": false,
@@ -1107,216 +1109,216 @@
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 3,
+        "minZoom": 4,
         "groupKey": "x-light-china-aoi-provice"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 9,
+        "minZoom": 10,
         "groupKey": "x-light-osm-china-aoi-green"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 0,
+        "minZoom": 1,
         "groupKey": "x-light-world-aoi-lake"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 4,
+        "minZoom": 5,
         "groupKey": "x-light-world-aoi-river"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 4,
+        "minZoom": 5,
         "groupKey": "x-light-china-aoi-river"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 8,
+        "minZoom": 9,
         "groupKey": "x-light-osm-china-aoi-river"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 12,
+        "minZoom": 13,
         "groupKey": "x-light-buildings"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 4,
+        "minZoom": 5,
         "groupKey": "x-light-world-line-river"
       },
       {
         "preserveBoundary": true,
         "overrides": [],
-        "minZoom": 2,
+        "minZoom": 3,
         "groupKey": "x-light-world-line-border"
       },
       {
         "preserveBoundary": true,
         "overrides": [],
-        "minZoom": 2,
+        "minZoom": 3,
         "groupKey": "x-light-china-line-border"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 10,
+        "minZoom": 11,
         "groupKey": "x-light-china-line-chigh-ramp"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 9,
+        "minZoom": 10,
         "groupKey": "x-light-china-line-chigh"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 11,
+        "minZoom": 12,
         "groupKey": "x-light-china-line-guide"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 10,
+        "minZoom": 11,
         "groupKey": "x-light-osm-china-line-tertiary"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 9,
+        "minZoom": 10,
         "groupKey": "x-light-osm-china-line-secondary"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 8,
+        "minZoom": 9,
         "groupKey": "x-light-osm-china-line-primary"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 9,
+        "minZoom": 10,
         "groupKey": "x-light-osm-china-line-trunk-link"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 7,
+        "minZoom": 8,
         "groupKey": "x-light-osm-china-line-trunk"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 9,
+        "minZoom": 10,
         "groupKey": "x-light-osm-china-line-motorway-link"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 6,
+        "minZoom": 7,
         "groupKey": "x-light-osm-china-line-motorway"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 9,
+        "minZoom": 10,
         "groupKey": "x-light-china-line-high-ramp"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 6,
+        "minZoom": 7,
         "groupKey": "x-light-china-line-high"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 12,
+        "minZoom": 13,
         "groupKey": "x-light-osm-china-poi-village"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 10,
+        "minZoom": 11,
         "groupKey": "x-light-osm-china-poi-town"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 9,
+        "minZoom": 10,
         "groupKey": "x-light-osm-china-poi-county"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 8,
+        "minZoom": 9,
         "groupKey": "x-light-china-poi-county"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 7,
+        "minZoom": 8,
         "groupKey": "x-light-osm-china-poi-city"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 0,
+        "minZoom": 1,
         "groupKey": "x-light-world-poi-ocean"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 2,
+        "minZoom": 3,
         "groupKey": "x-light-world-poi-country"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 2,
+        "minZoom": 3,
         "groupKey": "x-light-china-poi-country"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 4,
+        "minZoom": 5,
         "groupKey": "x-light-china-poi-provice"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 3,
+        "minZoom": 4,
         "groupKey": "x-light-world-poi-captital"
       },
       {
         "preserveBoundary": false,
         "overrides": [],
-        "minZoom": 3,
+        "minZoom": 4,
         "groupKey": "x-light-china-poi-city"
       },
       {
         "groupKey": "unknown-point",
-        "minZoom": 12,
+        "minZoom": 13,
         "preserveBoundary": false,
         "overrides": []
       },
       {
         "groupKey": "unknown-line",
-        "minZoom": 14,
+        "minZoom": 15,
         "preserveBoundary": false,
         "overrides": []
       },
       {
         "groupKey": "unknown-polygon",
-        "minZoom": 14,
+        "minZoom": 15,
         "preserveBoundary": false,
         "overrides": []
       }
@@ -1336,7 +1338,8 @@
       "mj",
       "roadname",
       "roadcode"
-    ]
+    ],
+    "zoomReferenceSize": 256
   },
   "cartography": {
     "styles": [
@@ -1354,7 +1357,9 @@
               }
             ],
             "minScaleDenominator": 0,
-            "id": "rule-x-light-world-aoi-ocean-1"
+            "id": "rule-x-light-world-aoi-ocean-1",
+            "minZoom": 0,
+            "maxZoom": 25
           }
         ],
         "minZoom": 0,
@@ -1391,7 +1396,9 @@
               }
             ],
             "minScaleDenominator": 0,
-            "id": "rule-x-light-world-aoi-country-1"
+            "id": "rule-x-light-world-aoi-country-1",
+            "minZoom": 0,
+            "maxZoom": 25
           }
         ],
         "minZoom": 0,
@@ -1429,10 +1436,12 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-china-aoi-provice-1",
-            "maxScaleDenominator": 34942641.502
+            "maxScaleDenominator": 34942641.502,
+            "minZoom": 4,
+            "maxZoom": 25
           }
         ],
-        "minZoom": 0,
+        "minZoom": 4,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-china-aoi-provice",
@@ -1467,7 +1476,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-osm-china-aoi-green-1",
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -1519,17 +1530,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 17061.837
+            "maxScaleDenominator": 17061.837,
+            "minZoom": 15,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
+        "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-aoi-green",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 15,
+          "field": "name",
+          "fontSize": 10,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#365B45",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -1562,7 +1581,9 @@
               "field": "dislevel",
               "value": 99
             },
-            "maxScaleDenominator": 279541132.014
+            "maxScaleDenominator": 279541132.014,
+            "minZoom": 1,
+            "maxZoom": 5
           },
           {
             "symbolizers": [
@@ -1577,7 +1598,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-world-aoi-lake-2",
-            "maxScaleDenominator": 17471320.751
+            "maxScaleDenominator": 17471320.751,
+            "minZoom": 5,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -1629,17 +1652,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 17061.837
+            "maxScaleDenominator": 17061.837,
+            "minZoom": 15,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
+        "minZoom": 1,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-world-aoi-lake",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 15,
+          "field": "name",
+          "fontSize": 10,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#3F6F91",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -1667,7 +1698,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-world-aoi-river-1",
-            "maxScaleDenominator": 17471320.751
+            "maxScaleDenominator": 17471320.751,
+            "minZoom": 5,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -1719,17 +1752,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 17061.837
+            "maxScaleDenominator": 17061.837,
+            "minZoom": 15,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
+        "minZoom": 5,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-world-aoi-river",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 15,
+          "field": "name",
+          "fontSize": 10,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#3F6F91",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -1762,7 +1803,9 @@
               "field": "mj",
               "value": 500000
             },
-            "maxScaleDenominator": 17471320.751
+            "maxScaleDenominator": 17471320.751,
+            "minZoom": 5,
+            "maxZoom": 6
           },
           {
             "symbolizers": [
@@ -1777,7 +1820,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-china-aoi-river-2",
-            "maxScaleDenominator": 8735660.375
+            "maxScaleDenominator": 8735660.375,
+            "minZoom": 6,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -1829,17 +1874,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 17061.837
+            "maxScaleDenominator": 17061.837,
+            "minZoom": 15,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
+        "minZoom": 5,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-china-aoi-river",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 15,
+          "field": "name",
+          "fontSize": 10,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#3F6F91",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -1867,7 +1920,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-osm-china-aoi-river-1",
-            "maxScaleDenominator": 1091957.547
+            "maxScaleDenominator": 1091957.547,
+            "minZoom": 9,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -1919,17 +1974,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 17061.837
+            "maxScaleDenominator": 17061.837,
+            "minZoom": 15,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
+        "minZoom": 9,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-aoi-river",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 15,
+          "field": "name",
+          "fontSize": 10,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#3F6F91",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -1957,7 +2020,9 @@
             ],
             "minScaleDenominator": 17061.837,
             "id": "rule-x-light-buildings-1",
-            "maxScaleDenominator": 68247.347
+            "maxScaleDenominator": 68247.347,
+            "minZoom": 13,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -1972,10 +2037,12 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-buildings-2",
-            "maxScaleDenominator": 17061.837
+            "maxScaleDenominator": 17061.837,
+            "minZoom": 15,
+            "maxZoom": 25
           }
         ],
-        "minZoom": 0,
+        "minZoom": 13,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-buildings",
@@ -2008,7 +2075,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-world-line-river-1",
-            "maxScaleDenominator": 17471320.751
+            "maxScaleDenominator": 17471320.751,
+            "minZoom": 5,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -2060,17 +2129,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 17061.837
+            "maxScaleDenominator": 17061.837,
+            "minZoom": 15,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
+        "minZoom": 5,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-world-line-river",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 15,
+          "field": "name",
+          "fontSize": 10,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#3F6F91",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -2099,10 +2176,12 @@
               "field": "ctype",
               "value": 2
             },
-            "maxScaleDenominator": 69885283.003
+            "maxScaleDenominator": 69885283.004,
+            "minZoom": 3,
+            "maxZoom": 25
           }
         ],
-        "minZoom": 0,
+        "minZoom": 3,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-world-line-border",
@@ -2148,7 +2227,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 69885283.003
+            "maxScaleDenominator": 69885283.004,
+            "minZoom": 3,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -2176,10 +2257,12 @@
                 }
               ]
             },
-            "maxScaleDenominator": 34942641.502
+            "maxScaleDenominator": 34942641.502,
+            "minZoom": 4,
+            "maxZoom": 25
           }
         ],
-        "minZoom": 0,
+        "minZoom": 3,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-china-line-border",
@@ -2210,7 +2293,9 @@
             ],
             "minScaleDenominator": 136494.693,
             "id": "rule-x-light-china-line-chigh-ramp-1",
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -2223,7 +2308,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-china-line-chigh-ramp-2",
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -2275,7 +2362,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -2362,17 +2451,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 11,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-china-line-chigh-ramp",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 11,
+          "field": "roadname",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#2F4359",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 3.4
         },
         "enabled": true,
         "symbol": {
@@ -2396,7 +2493,9 @@
             ],
             "minScaleDenominator": 272989.387,
             "id": "rule-x-light-china-line-chigh-1",
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 11
           },
           {
             "symbolizers": [
@@ -2409,7 +2508,9 @@
             ],
             "minScaleDenominator": 136494.693,
             "id": "rule-x-light-china-line-chigh-2",
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -2422,7 +2523,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-china-line-chigh-3",
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -2474,7 +2577,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -2561,17 +2666,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-china-line-chigh",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 11,
+          "field": "roadname",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#2F4359",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 3.4
         },
         "enabled": true,
         "symbol": {
@@ -2595,10 +2708,12 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-china-line-guide-1",
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           }
         ],
-        "minZoom": 0,
+        "minZoom": 12,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-china-line-guide",
@@ -2640,7 +2755,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -2685,7 +2802,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -2719,7 +2838,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -2771,7 +2892,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 34123.673
+            "maxScaleDenominator": 34123.673,
+            "minZoom": 14,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -2858,17 +2981,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 34123.673
+            "maxScaleDenominator": 34123.673,
+            "minZoom": 14,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 11,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-line-tertiary",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 14,
+          "field": "name",
+          "fontSize": 9,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#64758A",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.4
         },
         "enabled": true,
         "symbol": {
@@ -2903,7 +3034,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -2948,7 +3081,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -2982,7 +3117,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3034,7 +3171,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 68247.347
+            "maxScaleDenominator": 68247.347,
+            "minZoom": 13,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -3121,17 +3260,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 68247.347
+            "maxScaleDenominator": 68247.347,
+            "minZoom": 13,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-line-secondary",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 13,
+          "field": "name",
+          "fontSize": 10,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#465A70",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -3166,7 +3313,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 1091957.547
+            "maxScaleDenominator": 1091957.547,
+            "minZoom": 9,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3211,7 +3360,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 1091957.547
+            "maxScaleDenominator": 1091957.547,
+            "minZoom": 9,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3245,7 +3396,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 1091957.547
+            "maxScaleDenominator": 1091957.547,
+            "minZoom": 9,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3297,7 +3450,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 68247.347
+            "maxScaleDenominator": 68247.347,
+            "minZoom": 13,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -3384,17 +3539,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 68247.347
+            "maxScaleDenominator": 68247.347,
+            "minZoom": 13,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 9,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-line-primary",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 13,
+          "field": "name",
+          "fontSize": 10,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#465A70",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -3429,7 +3592,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3474,7 +3639,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3508,7 +3675,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3560,7 +3729,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -3647,17 +3818,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-line-trunk-link",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 11,
+          "field": "name",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#33465C",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 3.2
         },
         "enabled": true,
         "symbol": {
@@ -3692,7 +3871,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 2183915.094
+            "maxScaleDenominator": 2183915.094,
+            "minZoom": 8,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3737,7 +3918,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 2183915.094
+            "maxScaleDenominator": 2183915.094,
+            "minZoom": 8,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3771,7 +3954,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 2183915.094
+            "maxScaleDenominator": 2183915.094,
+            "minZoom": 8,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -3823,7 +4008,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -3910,17 +4097,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 8,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-line-trunk",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 11,
+          "field": "name",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#33465C",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 3.2
         },
         "enabled": true,
         "symbol": {
@@ -3955,7 +4150,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 11
           },
           {
             "symbolizers": [
@@ -4000,7 +4197,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 11
           },
           {
             "symbolizers": [
@@ -4034,7 +4233,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 11
           },
           {
             "symbolizers": [
@@ -4058,7 +4259,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -4103,7 +4306,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -4137,7 +4342,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -4161,7 +4368,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -4206,7 +4415,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -4240,7 +4451,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -4292,7 +4505,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -4379,17 +4594,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-line-motorway-link",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 11,
+          "field": "name",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#33465C",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 3.2
         },
         "enabled": true,
         "symbol": {
@@ -4424,7 +4647,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 4367830.188
+            "maxScaleDenominator": 4367830.188,
+            "minZoom": 7,
+            "maxZoom": 8
           },
           {
             "symbolizers": [
@@ -4459,7 +4684,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 4367830.188
+            "maxScaleDenominator": 4367830.188,
+            "minZoom": 7,
+            "maxZoom": 8
           },
           {
             "symbolizers": [
@@ -4493,7 +4720,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 4367830.188
+            "maxScaleDenominator": 4367830.188,
+            "minZoom": 7,
+            "maxZoom": 8
           },
           {
             "symbolizers": [
@@ -4517,7 +4746,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 2183915.094
+            "maxScaleDenominator": 2183915.094,
+            "minZoom": 8,
+            "maxZoom": 9
           },
           {
             "symbolizers": [
@@ -4552,7 +4783,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 2183915.094
+            "maxScaleDenominator": 2183915.094,
+            "minZoom": 8,
+            "maxZoom": 9
           },
           {
             "symbolizers": [
@@ -4586,7 +4819,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 2183915.094
+            "maxScaleDenominator": 2183915.094,
+            "minZoom": 8,
+            "maxZoom": 9
           },
           {
             "symbolizers": [
@@ -4610,7 +4845,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 1091957.547
+            "maxScaleDenominator": 1091957.547,
+            "minZoom": 9,
+            "maxZoom": 10
           },
           {
             "symbolizers": [
@@ -4645,7 +4882,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 1091957.547
+            "maxScaleDenominator": 1091957.547,
+            "minZoom": 9,
+            "maxZoom": 10
           },
           {
             "symbolizers": [
@@ -4679,7 +4918,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 1091957.547
+            "maxScaleDenominator": 1091957.547,
+            "minZoom": 9,
+            "maxZoom": 10
           },
           {
             "symbolizers": [
@@ -4703,7 +4944,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 11
           },
           {
             "symbolizers": [
@@ -4748,7 +4991,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 11
           },
           {
             "symbolizers": [
@@ -4782,7 +5027,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 11
           },
           {
             "symbolizers": [
@@ -4806,7 +5053,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -4851,7 +5100,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -4885,7 +5136,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -4909,7 +5162,9 @@
               "field": "bridge",
               "value": "T"
             },
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -4954,7 +5209,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -4988,7 +5245,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -5040,7 +5299,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -5127,17 +5388,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 7,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-line-motorway",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 11,
+          "field": "name",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#33465C",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 3.2
         },
         "enabled": true,
         "symbol": {
@@ -5173,7 +5442,9 @@
             ],
             "minScaleDenominator": 272989.387,
             "id": "rule-x-light-china-line-high-ramp-1",
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 11
           },
           {
             "symbolizers": [
@@ -5198,7 +5469,9 @@
             ],
             "minScaleDenominator": 136494.693,
             "id": "rule-x-light-china-line-high-ramp-2",
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -5223,7 +5496,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-china-line-high-ramp-3",
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -5275,7 +5550,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -5362,17 +5639,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-china-line-high-ramp",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 11,
+          "field": "roadname",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#2F4359",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 3.4
         },
         "enabled": true,
         "symbol": {
@@ -5396,7 +5681,9 @@
             ],
             "minScaleDenominator": 2183915.094,
             "id": "rule-x-light-china-line-high-1",
-            "maxScaleDenominator": 4367830.188
+            "maxScaleDenominator": 4367830.188,
+            "minZoom": 7,
+            "maxZoom": 8
           },
           {
             "symbolizers": [
@@ -5409,7 +5696,9 @@
             ],
             "minScaleDenominator": 1091957.547,
             "id": "rule-x-light-china-line-high-2",
-            "maxScaleDenominator": 2183915.094
+            "maxScaleDenominator": 2183915.094,
+            "minZoom": 8,
+            "maxZoom": 9
           },
           {
             "symbolizers": [
@@ -5422,7 +5711,9 @@
             ],
             "minScaleDenominator": 545978.773,
             "id": "rule-x-light-china-line-high-3",
-            "maxScaleDenominator": 1091957.547
+            "maxScaleDenominator": 1091957.547,
+            "minZoom": 9,
+            "maxZoom": 10
           },
           {
             "symbolizers": [
@@ -5447,7 +5738,9 @@
             ],
             "minScaleDenominator": 272989.387,
             "id": "rule-x-light-china-line-high-4",
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 11
           },
           {
             "symbolizers": [
@@ -5472,7 +5765,9 @@
             ],
             "minScaleDenominator": 136494.693,
             "id": "rule-x-light-china-line-high-5",
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 12
           },
           {
             "symbolizers": [
@@ -5497,7 +5792,9 @@
             ],
             "minScaleDenominator": 0,
             "id": "rule-x-light-china-line-high-6",
-            "maxScaleDenominator": 136494.693
+            "maxScaleDenominator": 136494.693,
+            "minZoom": 12,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -5549,7 +5846,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           },
           {
             "symbolizers": [
@@ -5636,17 +5935,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 15
           }
         ],
-        "minZoom": 0,
+        "minZoom": 7,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-china-line-high",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 11,
+          "field": "roadname",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#2F4359",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 3.4
         },
         "enabled": true,
         "symbol": {
@@ -5709,17 +6016,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 68247.347
+            "maxScaleDenominator": 68247.347,
+            "minZoom": 13,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
-        "maxZoom": 25,
+        "minZoom": 13,
+        "maxZoom": 21,
         "overrides": [],
         "id": "style-x-light-osm-china-poi-village",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 13,
+          "field": "name",
+          "fontSize": 10,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#53677F",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 2.6
         },
         "enabled": true,
         "symbol": {
@@ -5784,17 +6099,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 272989.387
+            "maxScaleDenominator": 272989.387,
+            "minZoom": 11,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
-        "maxZoom": 25,
+        "minZoom": 11,
+        "maxZoom": 21,
         "overrides": [],
         "id": "style-x-light-osm-china-poi-town",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 11,
+          "field": "name",
+          "fontSize": 12,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "bold",
+          "color": "#24364B",
+          "strokeColor": "#FFFDF7",
+          "strokeWidth": 3.2
         },
         "enabled": true,
         "symbol": {
@@ -5859,17 +6182,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 545978.773
+            "maxScaleDenominator": 545978.773,
+            "minZoom": 10,
+            "maxZoom": 25
           }
         ],
-        "minZoom": 0,
+        "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-osm-china-poi-county",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 10,
+          "field": "name",
+          "fontSize": 12,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#344255",
+          "strokeColor": "#F8FAFC",
+          "strokeWidth": 2.4
         },
         "enabled": true,
         "symbol": {
@@ -5934,17 +6265,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 1091957.547
+            "maxScaleDenominator": 1091957.547,
+            "minZoom": 9,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
-        "maxZoom": 25,
+        "minZoom": 9,
+        "maxZoom": 21,
         "overrides": [],
         "id": "style-x-light-china-poi-county",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 9,
+          "field": "name",
+          "fontSize": 12,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#344255",
+          "strokeColor": "#F8FAFC",
+          "strokeWidth": 2.6
         },
         "enabled": true,
         "symbol": {
@@ -6019,17 +6358,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 2183915.094
+            "maxScaleDenominator": 2183915.094,
+            "minZoom": 8,
+            "maxZoom": 21
           }
         ],
-        "minZoom": 0,
-        "maxZoom": 25,
+        "minZoom": 8,
+        "maxZoom": 21,
         "overrides": [],
         "id": "style-x-light-osm-china-poi-city",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 8,
+          "field": "name",
+          "fontSize": 12,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#344255",
+          "strokeColor": "#F8FAFC",
+          "strokeWidth": 2.6
         },
         "enabled": true,
         "symbol": {
@@ -6072,7 +6419,9 @@
               "field": "kind",
               "value": "405003"
             },
-            "maxScaleDenominator": 279541132.014
+            "maxScaleDenominator": 279541132.014,
+            "minZoom": 1,
+            "maxZoom": 8
           },
           {
             "symbolizers": [
@@ -6102,17 +6451,25 @@
               "field": "kind",
               "value": "405004"
             },
-            "maxScaleDenominator": 34942641.502
+            "maxScaleDenominator": 34942641.502,
+            "minZoom": 4,
+            "maxZoom": 10
           }
         ],
-        "minZoom": 0,
-        "maxZoom": 25,
+        "minZoom": 1,
+        "maxZoom": 10,
         "overrides": [],
         "id": "style-x-light-world-poi-ocean",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 1,
+          "field": "name",
+          "fontSize": 16,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#496C91",
+          "strokeColor": "#E3EAF2",
+          "strokeWidth": 3.6
         },
         "enabled": true,
         "symbol": {
@@ -6187,17 +6544,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 69885283.004
+            "maxScaleDenominator": 69885283.004,
+            "minZoom": 3,
+            "maxZoom": 5
           }
         ],
-        "minZoom": 0,
-        "maxZoom": 25,
+        "minZoom": 3,
+        "maxZoom": 5,
         "overrides": [],
         "id": "style-x-light-world-poi-country",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 3,
+          "field": "name",
+          "fontSize": 12,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#344255",
+          "strokeColor": "#F8FAFC",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -6262,17 +6627,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 69885283.004
+            "maxScaleDenominator": 69885283.004,
+            "minZoom": 3,
+            "maxZoom": 5
           }
         ],
-        "minZoom": 0,
-        "maxZoom": 25,
+        "minZoom": 3,
+        "maxZoom": 5,
         "overrides": [],
         "id": "style-x-light-china-poi-country",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 3,
+          "field": "name",
+          "fontSize": 12,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#344255",
+          "strokeColor": "#F8FAFC",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -6337,17 +6710,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 17471320.751
+            "maxScaleDenominator": 17471320.751,
+            "minZoom": 5,
+            "maxZoom": 5.956991606583276
           }
         ],
-        "minZoom": 0,
-        "maxZoom": 25,
+        "minZoom": 5,
+        "maxZoom": 5.956991606583276,
         "overrides": [],
         "id": "style-x-light-china-poi-provice",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 5,
+          "field": "name",
+          "fontSize": 12,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#344255",
+          "strokeColor": "#F8FAFC",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -6422,17 +6803,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 34942641.502
+            "maxScaleDenominator": 34942641.502,
+            "minZoom": 4,
+            "maxZoom": 11
           }
         ],
-        "minZoom": 0,
-        "maxZoom": 25,
+        "minZoom": 4,
+        "maxZoom": 11,
         "overrides": [],
         "id": "style-x-light-world-poi-captital",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 4,
+          "field": "name",
+          "fontSize": 12,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "color": "#344255",
+          "strokeColor": "#F8FAFC",
+          "strokeWidth": 2.8
         },
         "enabled": true,
         "symbol": {
@@ -6485,7 +6874,9 @@
               "field": "dtype",
               "value": 1
             },
-            "maxScaleDenominator": 34942641.502
+            "maxScaleDenominator": 34942641.502,
+            "minZoom": 4,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -6535,7 +6926,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 9000001
+            "maxScaleDenominator": 9000001,
+            "minZoom": 5.956991606583276,
+            "maxZoom": 25
           },
           {
             "symbolizers": [
@@ -6668,7 +7061,9 @@
                 }
               ]
             },
-            "maxScaleDenominator": 4367830.188
+            "maxScaleDenominator": 4367830.188,
+            "minZoom": 7,
+            "maxZoom": 13
           },
           {
             "symbolizers": [
@@ -6851,17 +7246,25 @@
                 }
               ]
             },
-            "maxScaleDenominator": 4367830.188
+            "maxScaleDenominator": 4367830.188,
+            "minZoom": 7,
+            "maxZoom": 13
           }
         ],
-        "minZoom": 0,
+        "minZoom": 4,
         "maxZoom": 25,
         "overrides": [],
         "id": "style-x-light-china-poi-city",
         "labels": {
-          "enabled": false,
-          "minZoom": 0,
-          "field": "name"
+          "enabled": true,
+          "minZoom": 4,
+          "field": "name",
+          "fontSize": 14,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "bold",
+          "color": "#24364B",
+          "strokeColor": "#F8FAFC",
+          "strokeWidth": 4
         },
         "enabled": true,
         "symbol": {
@@ -6878,7 +7281,7 @@
         "id": "style-unknown-point",
         "geometryType": "POINT",
         "enabled": false,
-        "minZoom": 12,
+        "minZoom": 13,
         "maxZoom": 25,
         "renderOrder": 90,
         "symbol": {
@@ -6892,7 +7295,7 @@
           "enabled": false,
           "field": "name",
           "fallbackField": null,
-          "minZoom": 13,
+          "minZoom": 14,
           "collisionAvoidance": true
         },
         "overrides": []
@@ -6901,7 +7304,7 @@
         "id": "style-unknown-line",
         "geometryType": "LINE",
         "enabled": false,
-        "minZoom": 14,
+        "minZoom": 15,
         "maxZoom": 25,
         "renderOrder": 90,
         "symbol": {
@@ -6913,7 +7316,7 @@
           "enabled": false,
           "field": "name",
           "fallbackField": null,
-          "minZoom": 13,
+          "minZoom": 14,
           "collisionAvoidance": true
         },
         "overrides": []
@@ -6922,7 +7325,7 @@
         "id": "style-unknown-polygon",
         "geometryType": "POLYGON",
         "enabled": false,
-        "minZoom": 14,
+        "minZoom": 15,
         "maxZoom": 25,
         "renderOrder": 90,
         "symbol": {
@@ -6936,7 +7339,7 @@
           "enabled": false,
           "field": "name",
           "fallbackField": null,
-          "minZoom": 13,
+          "minZoom": 14,
           "collisionAvoidance": true
         },
         "overrides": []
