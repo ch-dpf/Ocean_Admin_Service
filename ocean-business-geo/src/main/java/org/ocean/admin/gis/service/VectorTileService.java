@@ -1,10 +1,12 @@
 package org.ocean.admin.gis.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.config.VectorTileProperties;
 import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.entity.GisVectorDataSetStyle;
 import org.ocean.admin.gis.vo.GisVectorVO;
 import org.springframework.dao.DataAccessException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.http.HttpStatus;
@@ -30,10 +32,15 @@ import java.util.function.Supplier;
 import java.util.zip.GZIPOutputStream;
 
 /** 同一数据版本生成一致的显示瓦片；原始要素查询和编辑仍由图层服务负责。 */
+@Slf4j
 @Service
 public class VectorTileService {
     private static final String TILE_PREFIX = "gis:vector:dataset:tile:v3:";
     private static final String CACHE_INDEX = "gis:vector:dataset:tile:index";
+    private static final DefaultRedisScript<String> CACHE_READ = new DefaultRedisScript<>("""
+            if redis.call('STRLEN',KEYS[1]) > tonumber(ARGV[1]) then return false end
+            return redis.call('GET',KEYS[1])
+            """, String.class);
     private static final DefaultRedisScript<Long> CACHE_WRITE = new DefaultRedisScript<>("""
             redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2])
             redis.call('ZADD',KEYS[2],ARGV[3],KEYS[1])
@@ -41,7 +48,7 @@ public class VectorTileService {
             local excess=redis.call('ZCARD',KEYS[2])-tonumber(ARGV[5])
             if excess>0 then
               local old=redis.call('ZRANGE',KEYS[2],0,excess-1)
-              for _,key in ipairs(old) do redis.call('DEL',key);redis.call('ZREM',KEYS[2],key) end
+              for _,key in ipairs(old) do redis.call('UNLINK',key);redis.call('ZREM',KEYS[2],key) end
             end
             redis.call('EXPIRE',KEYS[2],tonumber(ARGV[2])*2)
             return 1
@@ -61,12 +68,13 @@ public class VectorTileService {
     private final ConcurrentHashMap<String, TileContract> contracts = new ConcurrentHashMap<>();
     private final LinkedHashMap<String, LocalTile> localTiles = new LinkedHashMap<>(64, .75f, true);
     private long localCacheBytes;
+    private volatile long redisRetryAfter;
 
     private record LocalTile(byte[] body, long expiresAt) { }
     private record TileContract(GisVectorVO.MapDefinition definition, String policy) { }
 
     public VectorTileService(GisVectorMapper mapper, VectorDataSetStyleService snapshots, VectorRenderPlanner planner, VectorTileProperties properties,
-            StringRedisTemplate redis, ObjectMapper json, PlatformTransactionManager transactions, VectorResourceService resources) {
+            @Qualifier("tileRedisTemplate") StringRedisTemplate redis, ObjectMapper json, PlatformTransactionManager transactions, VectorResourceService resources) {
         this.mapper = mapper;
         this.snapshots = snapshots;
         this.planner = planner;
@@ -92,47 +100,84 @@ public class VectorTileService {
     }
 
     public byte[] getTile(Long dataSetId, String tileVersion, int z, int x, int y) {
-        if (tileVersion == null || !tileVersion.matches("[a-f0-9]{64}")) throw bad("tileVersion无效");
-        // 包括缓存命中也必须验证数据集仍可访问，不能从Redis绕过删除/权限检查。
-        requireState(dataSetId);
-        requireTile(z, x, y, 18);
-        String key = TILE_PREFIX + dataSetId + ':' + tileVersion + ':' + z + ':' + x + ':' + y;
-        byte[] cached = cachedTile(key);
-        if (cached != null) return cached;
-        var result = new CompletableFuture<byte[]>();
-        var pending = inFlight.putIfAbsent(key, result);
-        if (pending != null) return awaitTile(pending);
+        long started = System.nanoTime();
+        String[] phase = {"访问校验"};
         try {
-            byte[] body = spatial(() -> {
-                var current = requireState(dataSetId);
-                byte[] existing = cachedTile(key);
-                if (existing != null) return existing;
-                var contract = contract(current);
-                if (!contract.definition().tileVersion().equals(tileVersion))
-                    throw new ResponseStatusException(HttpStatus.GONE, "瓦片版本已过期，请重新读取地图定义");
-                mapper.setTileQueryTimeout(properties.getQueryTimeoutMs());
-                GisVectorVO.TilePayload payload;
-                if (mapper.hasPackageLayers(dataSetId)) {
-                    try {
-                        byte[] encoded=resources.tile(dataSetId,null,z,x,y,properties.getMaxDecodedTileBytes());
-                        payload=new GisVectorVO.TilePayload(encoded,encoded.length);
-                    } catch (IOException ex) { throw unavailable("读取矢量文件失败"); }
-                } else payload=mapper.dataSetTile(dataSetId, contract.policy(),z,x,y,properties.getMaxDecodedTileBytes());
-                if (payload == null) throw unavailable("瓦片编码未返回结果，请稍后重试");
-                if (payload.byteSize() > properties.getMaxDecodedTileBytes())
-                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "当前瓦片超过解码体积上限；未截断要素");
-                if (payload.body() == null) throw unavailable("瓦片编码失败，请稍后重试");
-                // HTTP层已启用MVT GZIP；不能用未压缩体积误判传输预算。
-                if (payload.body().length > properties.getMaxTileBytes()
-                        && gzipSize(payload.body()) > properties.getMaxTileBytes())
-                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "当前瓦片压缩后仍超过传输体积上限；未截断要素");
-                cache(key, payload.body());
-                return payload.body();
-            });
-            result.complete(body);
-            return body;
-        } catch (RuntimeException | Error ex) { result.completeExceptionally(ex); throw ex; }
-        finally { inFlight.remove(key, result); }
+            if (tileVersion == null || !tileVersion.matches("[a-f0-9]{64}")) throw bad("tileVersion无效");
+            // 包括缓存命中也必须验证数据集仍可访问，不能从Redis绕过删除/权限检查。
+            requireState(dataSetId);
+            requireTile(z, x, y, 18);
+            String key = TILE_PREFIX + dataSetId + ':' + tileVersion + ':' + z + ':' + x + ':' + y;
+            phase[0] = "缓存读取";
+            byte[] cached = cachedTile(key);
+            if (cached != null) return cached;
+            var result = new CompletableFuture<byte[]>();
+            var pending = inFlight.putIfAbsent(key, result);
+            phase[0] = "同瓦片等待";
+            if (pending != null) return awaitTile(pending);
+            try {
+                phase[0] = "空间查询排队";
+                byte[] body = spatial(() -> {
+                    phase[0] = "数据版本校验";
+                    var current = requireState(dataSetId);
+                    phase[0] = "缓存复查";
+                    byte[] existing = cachedTile(key);
+                    if (existing != null) return existing;
+                    phase[0] = "数据版本校验";
+                    var contract = contract(current);
+                    if (!contract.definition().tileVersion().equals(tileVersion))
+                        throw new ResponseStatusException(HttpStatus.GONE, "瓦片版本已过期，请重新读取地图定义");
+                    mapper.setTileQueryTimeout(properties.getQueryTimeoutMs());
+                    GisVectorVO.TilePayload payload;
+                    boolean packaged = mapper.hasPackageLayers(dataSetId);
+                    phase[0] = packaged ? "GPKG读取编码" : "PostGIS查询编码";
+                    long queryStarted = System.nanoTime();
+                    if (packaged) {
+                        try {
+                            byte[] encoded=resources.tile(dataSetId,null,z,x,y,properties.getMaxDecodedTileBytes());
+                            payload=new GisVectorVO.TilePayload(encoded,encoded.length);
+                        } catch (IOException ex) { throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"读取矢量文件失败",ex); }
+                    } else payload=mapper.dataSetTile(dataSetId, contract.policy(),z,x,y,properties.getMaxDecodedTileBytes());
+                    long queryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStarted);
+                    if (queryMs >= 1000) log.info("动态瓦片慢查询: dataset={}, tile={}/{}/{}, phase={}, queryMs={}",
+                            dataSetId,z,x,y,phase[0],queryMs);
+                    phase[0] = "体积校验";
+                    if (payload == null) throw unavailable("瓦片编码未返回结果，请稍后重试");
+                    if (payload.byteSize() > properties.getMaxDecodedTileBytes())
+                        throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "当前瓦片超过解码体积上限；未截断要素");
+                    if (payload.body() == null) throw unavailable("瓦片编码失败，请稍后重试");
+                    // HTTP层已启用MVT GZIP；不能用未压缩体积误判传输预算。
+                    if (payload.body().length > properties.getMaxTileBytes()
+                            && gzipSize(payload.body()) > properties.getMaxTileBytes())
+                        throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "当前瓦片压缩后仍超过传输体积上限；未截断要素");
+                    phase[0] = "事务提交";
+                    return payload.body();
+                });
+                // 空间查询事务先完成并释放执行名额，缓存网络等待不占用数据库连接。
+                phase[0] = "缓存写入";
+                cache(key, body);
+                result.complete(body);
+                return body;
+            } catch (RuntimeException | Error ex) { result.completeExceptionally(ex); throw ex; }
+            finally { inFlight.remove(key, result); }
+        } catch (RuntimeException ex) {
+            String sqlState = null;
+            Throwable root = ex;
+            while (root.getCause() != null && root.getCause() != root) {
+                if (root instanceof java.sql.SQLException sql) sqlState = sql.getSQLState();
+                root = root.getCause();
+            }
+            if (root instanceof java.sql.SQLException sql) sqlState = sql.getSQLState();
+            int status = ex instanceof ResponseStatusException response ? response.getStatusCode().value() : 500;
+            if (status >= 500) {
+                // 不记录SQL参数或要素内容；阶段、坐标和SQLSTATE足够关联失败请求。
+                String reason = ex instanceof ResponseStatusException response ? response.getReason() : null;
+                log.warn("动态瓦片失败: dataset={}, tile={}/{}/{}, phase={}, elapsedMs={}, status={}, reason={}, sqlState={}, cause={}",
+                        dataSetId,z,x,y,phase[0],TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started),
+                        status,reason,sqlState,root.getClass().getSimpleName());
+            }
+            throw ex;
+        }
     }
 
     private int gzipSize(byte[] body) {
@@ -185,22 +230,42 @@ public class VectorTileService {
     private byte[] cachedTile(String key) {
         byte[] memory = localTile(key);
         if (memory != null) return memory;
+        if (System.nanoTime() < redisRetryAfter) return null;
         try {
-            String cached = redis.opsForValue().get(key);
+            // 在服务端原子检查长度，确保读写两侧都遵守载荷上限。
+            String cached = redis.execute(CACHE_READ, List.of(key), Integer.toString(properties.getMaxRedisValueBytes()));
             if (cached == null) return null;
             redis.opsForZSet().add(CACHE_INDEX,key,System.currentTimeMillis());
             byte[] body = Base64.getDecoder().decode(cached);
             remember(key,body);
             return body;
-        } catch (DataAccessException ex) { throw unavailable("瓦片缓存暂不可用"); }
+        } catch (DataAccessException ex) {
+            redisRetryAfter = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            log.warn("矢量瓦片缓存读取失败，暂停共享缓存5秒并执行有界空间查询: cause={}", ex.getClass().getSimpleName());
+            return null;
+        }
     }
 
     private void cache(String key, byte[] bytes) {
-        long now = System.currentTimeMillis();
-        redis.execute(CACHE_WRITE,List.of(key,CACHE_INDEX),Base64.getEncoder().encodeToString(bytes),
-                Integer.toString(properties.getTileCacheTtlSeconds()),Long.toString(now),
-                Long.toString(now-properties.getTileCacheTtlSeconds()*1000L),Integer.toString(properties.getMaxCachedTiles()));
+        // 瓦片已完成版本和体积校验；共享缓存故障不能丢弃有效查询结果。
         remember(key,bytes);
+        if (System.nanoTime() < redisRetryAfter
+                || 4L * ((bytes.length + 2L) / 3L) > properties.getMaxRedisValueBytes()) return;
+        long now = System.currentTimeMillis();
+        long started = System.nanoTime();
+        try {
+            redis.execute(CACHE_WRITE,List.of(key,CACHE_INDEX),Base64.getEncoder().encodeToString(bytes),
+                    Integer.toString(properties.getTileCacheTtlSeconds()),Long.toString(now),
+                    Long.toString(now-properties.getTileCacheTtlSeconds()*1000L),Integer.toString(properties.getMaxCachedTiles()));
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            if (elapsedMs >= 1000) log.info("动态瓦片缓存写入耗时: key={}, bytes={}, elapsedMs={}",key,bytes.length,elapsedMs);
+        } catch (DataAccessException ex) {
+            redisRetryAfter = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            Throwable root = ex;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            log.warn("动态瓦片Redis缓存写入失败，返回已生成瓦片: key={}, bytes={}, elapsedMs={}, cause={}",
+                    key,bytes.length,TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),root.getClass().getSimpleName());
+        }
     }
 
     private GisVectorDataSetStyle requireState(Long dataSetId) {

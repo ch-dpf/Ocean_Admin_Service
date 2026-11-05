@@ -56,12 +56,13 @@ public class VectorTileEncoder {
             JsonNode group = null;
             for (JsonNode candidate : policy.path("groups"))
                 if (groupKey.equals(candidate.path("groupKey").asText())) { group=candidate; break; }
-            if (group == null || z < group.path("minZoom").asInt()) return;
+            double businessZoom = VectorTemplateRules.tileBusinessZoom(z, policy);
+            if (group == null || businessZoom < group.path("minZoom").asDouble()) return;
             JsonNode properties = json.readTree(feature.getPropertiesJson() == null ? "null" : feature.getPropertiesJson());
             if ("AUTO".equals(layer.getAssignmentMode())) {
                 for (JsonNode override : group.path("overrides")) {
                     if (rules.matches(override.path("filter"), properties)) {
-                        if (z < override.path("minZoom").asInt()) return;
+                        if (businessZoom < override.path("minZoom").asDouble()) return;
                         break;
                     }
                 }
@@ -91,7 +92,8 @@ public class VectorTileEncoder {
             attributes.put("_vector_group_key",json.valueToTree(groupKey));
             var nulls=json.createArrayNode();
             // 与PostGIS MVT契约一致，只投影固定的标量配图字段。
-            for (String name : List.of("fclass", "code", "id", "name", "ref")) {
+            for (JsonNode field : policy.path("propertyFields")) {
+                String name = field.asText();
                 JsonNode value = properties.path(name);
                 if (value.isNull()) nulls.add(name);
                 else if (value.isString() || value.isNumber() || value.isBoolean()) attributes.put(name, value);

@@ -5,7 +5,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
-/** 三种处理入口汇聚后的应用层命令。 */
+/** 各类受控处理入口汇聚后的应用层命令。 */
 public record GisSubmitProcessingCommand(
         GisInputSourceType sourceType,
         GisProcessingType processingType,

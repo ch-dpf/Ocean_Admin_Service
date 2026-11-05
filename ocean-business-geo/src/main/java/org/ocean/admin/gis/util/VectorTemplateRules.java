@@ -17,6 +17,8 @@ import java.util.regex.Pattern;
 public class VectorTemplateRules {
     private static final Pattern KEY = Pattern.compile("[A-Za-z0-9_-]{1,100}");
     private static final Set<String> KINDS = Set.of("POINT", "LINE", "POLYGON");
+    public static final Set<String> TILE_FIELDS = Set.of("fclass", "code", "id", "name", "ref",
+            "bridge", "tunnel", "ctype", "dtype", "dislevel", "kind", "mj", "roadname", "roadcode");
     private final ObjectMapper json;
     private final VectorStyleRules layerRules;
 
@@ -50,6 +52,17 @@ public class VectorTemplateRules {
             if (!KINDS.contains(kind)) throw bad("样式几何类别无效");
             bounds(style.path("minZoom").asDouble(Double.NaN), style.path("maxZoom").asDouble(Double.NaN));
             symbol(kind, style.path("symbol"));
+            if (style.has("renderRules")) {
+                validateRenderRules(style.path("renderRules"), kind);
+                double min = 25, max = 0;
+                for (JsonNode rule : style.path("renderRules")) {
+                    min = Math.min(min, rule.path("minZoom").asDouble());
+                    max = Math.max(max, rule.path("maxZoom").asDouble());
+                }
+                if (Math.abs(style.path("minZoom").asDouble() - min) > 1e-10
+                        || Math.abs(style.path("maxZoom").asDouble() - max) > 1e-10)
+                    throw bad("样式显示范围须与复合规则范围一致");
+            }
             if (!style.path("overrides").isArray()) throw bad("overrides须为数组");
             for (JsonNode override : style.path("overrides")) {
                 filter(override.path("filter"), 0);
@@ -67,7 +80,14 @@ public class VectorTemplateRules {
             JsonNode group = groups.get(rule.path("groupId").asText());
             if (group == null || !group.path("assignable").asBoolean()
                     || !group.path("geometryType").equals(rule.path("geometryType"))) throw bad("分类规则目标不合法");
-            filter(rule.path("filter"), 0);
+            if (rule.has("sourceLayers")) {
+                if (!rule.path("sourceLayers").isArray() || rule.path("sourceLayers").isEmpty()
+                        || rule.path("sourceLayers").size() > 100) throw bad("来源图层清单无效");
+                for (var name : rule.path("sourceLayers"))
+                    if (!name.isString() || name.asText().isBlank() || name.asText().length() > 255) throw bad("来源图层名称无效");
+            }
+            if (rule.has("filter")) filter(rule.path("filter"), 0);
+            else if (!rule.has("sourceLayers")) throw bad("分类规则缺少匹配条件");
         }
         for (String kind : KINDS) {
             JsonNode group = groups.get(classification.path("fallbackGroupByGeometry").path(kind).asText());
@@ -76,12 +96,21 @@ public class VectorTemplateRules {
         }
         JsonNode policy = definition.path("tilePolicy");
         if (policy.path("nativeMaxZoom").asInt() != 18 || policy.path("displayMaxZoom").asInt() != 24
-                || policy.path("tileSize").asInt() != 512 || policy.path("extent").asInt() != 8192
+                || policy.path("tileSize").asInt() != 512 || policy.path("zoomReferenceSize").asInt() != 256
+                || policy.path("extent").asInt() != 8192
                 || !policy.path("groups").isArray()) throw bad("瓦片策略无效");
         for (JsonNode item : policy.path("groups")) {
             if (!groups.containsKey(item.path("groupKey").asText())) throw bad("瓦片分类不存在");
             bounds(item.path("minZoom").asDouble(), 25);
+            JsonNode style = styles.get(groups.get(item.path("groupKey").asText()).path("defaultStyleId").asText());
+            if (style != null && style.has("renderRules")
+                    && item.path("minZoom").asDouble() != Math.floor(style.path("minZoom").asDouble()))
+                throw bad("复合规则的瓦片起始层级须由样式最早显示层级向下取整");
         }
+        if (!policy.path("propertyFields").isArray() || policy.path("propertyFields").size() > TILE_FIELDS.size())
+            throw bad("瓦片属性清单无效");
+        for (var field : policy.path("propertyFields"))
+            if (!TILE_FIELDS.contains(field.asText())) throw bad("不支持的瓦片属性");
         return new Compiled(definition.deepCopy(), Map.copyOf(groups), Map.copyOf(styles));
     }
 
@@ -96,11 +125,17 @@ public class VectorTemplateRules {
         return result;
     }
 
-    public Classification classify(Compiled template, JsonNode properties, String kind, boolean forceUnknown) {
+    public Classification classify(Compiled template, JsonNode properties, String kind, String placement, String sourceLayer) {
         JsonNode classification = template.definition().path("classification");
         JsonNode selected = null;
-        if (!forceUnknown) {
+        if (!"UNKNOWN".equals(placement)) {
             for (JsonNode rule : classification.path("rules")) {
+                if (!placement.equals(rule.path("placement").asText("AUTO"))) continue;
+                if (rule.has("sourceLayers")) {
+                    boolean found = false;
+                    for (var name : rule.path("sourceLayers")) if (name.asText().equals(sourceLayer)) found = true;
+                    if (!found) continue;
+                }
                 if (kind.equals(rule.path("geometryType").asText()) && matches(rule.path("filter"), properties)) {
                     selected = rule;
                     break;
@@ -160,6 +195,7 @@ public class VectorTemplateRules {
         }
         String field = filter.path("field").asText();
         JsonNode raw = property(properties, field);
+        if ("isNull".equals(operator)) return raw == null || raw.isNull();
         if ("missingOrEmpty".equals(operator)) {
             return empty(raw);
         }
@@ -182,6 +218,16 @@ public class VectorTemplateRules {
                 yield found;
             }
             case "regex" -> Pattern.matches(filter.path("value").asText(), actual.asText());
+            case "gt", "gte", "lt", "lte" -> {
+                if (!actual.isNumber() || expected == null || !expected.isNumber()) yield false;
+                int compared = actual.decimalValue().compareTo(expected.decimalValue());
+                yield switch (operator) {
+                    case "gt" -> compared > 0;
+                    case "gte" -> compared >= 0;
+                    case "lt" -> compared < 0;
+                    default -> compared <= 0;
+                };
+            }
             default -> false;
         };
     }
@@ -247,7 +293,7 @@ public class VectorTemplateRules {
                 for (JsonNode child : f.path("conditions")) filter(child, depth + 1);
             }
             case "not" -> filter(f.path("condition"), depth + 1);
-            case "eq", "ne", "in", "regex", "missingOrEmpty" -> {
+            case "eq", "ne", "in", "regex", "missingOrEmpty", "isNull", "gt", "gte", "lt", "lte" -> {
                 if (f.path("field").asText().isBlank() || f.path("field").asText().length() > 255) throw bad("属性字段无效");
                 if ("in".equals(f.path("op").asText()) && (!f.path("value").isArray() || f.path("value").size() > 100)) throw bad("in条件无效");
                 if ("regex".equals(f.path("op").asText())) {
@@ -257,6 +303,81 @@ public class VectorTemplateRules {
             }
             default -> throw bad("不支持的模板属性运算符");
         }
+    }
+
+    /** 按原比例尺的小数精度识别整数层级；非整数阈值保留连续范围。 */
+    public static double scaleZoom(double scale) {
+        double worldScale = 40075016.68557849 / 256 / 0.00028;
+        double zoom = Math.log(worldScale / scale) / Math.log(2);
+        int digits = Math.max(0, BigDecimal.valueOf(scale).stripTrailingZeros().scale());
+        double nearestScale = worldScale / Math.pow(2, Math.rint(zoom));
+        return Math.abs(scale - nearestScale) <= .5 * Math.pow(10, -digits) + 1e-9 ? Math.rint(zoom) : zoom;
+    }
+
+    /** 数据筛选按业务层级执行，最高原生瓦片必须包含后续放大需要的要素。 */
+    public static double tileBusinessZoom(int nativeZoom, JsonNode policy) {
+        if (nativeZoom == policy.path("nativeMaxZoom").asInt()) return policy.path("displayMaxZoom").asDouble();
+        return nativeZoom + Math.log(policy.path("tileSize").asDouble() / 256) / Math.log(2);
+    }
+
+    /** 复合配图使用全部命中规则，保持几何、文字和多重描边的绘制顺序。 */
+    private void validateRenderRules(JsonNode rules, String kind) {
+        if (!rules.isArray() || rules.isEmpty() || rules.size() > 128) throw bad("复合配图规则数量无效");
+        Set<String> ids = new HashSet<>();
+        for (var rule : rules) {
+            key(rule.path("id").asText());
+            if (!ids.add(rule.path("id").asText())) throw bad("复合配图规则ID重复");
+            double min = rule.path("minScaleDenominator").asDouble(0);
+            double max = rule.path("maxScaleDenominator").asDouble(Double.MAX_VALUE);
+            if (!Double.isFinite(min) || !Double.isFinite(max) || min < 0 || min >= max) throw bad("比例尺范围无效");
+            bounds(rule.path("minZoom").asDouble(Double.NaN), rule.path("maxZoom").asDouble(Double.NaN));
+            double expectedMin = rule.has("maxScaleDenominator") ? Math.max(0, scaleZoom(max)) : 0;
+            double expectedMax = min > 0 ? Math.min(25, scaleZoom(min)) : 25;
+            if (Math.abs(rule.path("minZoom").asDouble() - expectedMin) > 1e-10
+                    || Math.abs(rule.path("maxZoom").asDouble() - expectedMax) > 1e-10)
+                throw bad("复合配图层级须由源比例尺派生");
+            if (rule.has("filter")) { filter(rule.path("filter"), 0); validateRenderFields(rule.path("filter")); }
+            var symbols = rule.path("symbolizers");
+            if (!symbols.isArray() || symbols.isEmpty() || symbols.size() > 8) throw bad("复合符号数量无效");
+            for (var item : symbols) {
+                String type = item.path("type").asText();
+                if (!type.equals(kind) && !"TEXT".equals(type)) throw bad("复合符号与图层几何不一致");
+                for (String field : item.propertyNames()) {
+                    var value = item.path(field);
+                    if (field.toLowerCase(Locale.ROOT).endsWith("color") && !value.asText().matches("#[0-9a-fA-F]{6}"))
+                        throw bad("复合符号颜色无效");
+                    if (field.toLowerCase(Locale.ROOT).endsWith("opacity")) number(value, 0, 1);
+                }
+                if ("TEXT".equals(type)) {
+                    if (!TILE_FIELDS.contains(item.path("field").asText())) throw bad("不支持的标注字段");
+                    number(item.path("fontSize"), 1, 64); number(item.path("haloRadius"), 0, 12);
+                    number(item.path("offsetX"), -64, 64); number(item.path("offsetY"), -64, 64);
+                    if (!Set.of("normal", "bold").contains(item.path("fontWeight").asText())
+                            || !Set.of("normal", "italic").contains(item.path("fontStyle").asText())
+                            || !Set.of("point", "line").contains(item.path("placement").asText())
+                            || item.path("fontFamily").asText().length() > 100) throw bad("标注格式无效");
+                    number(item.path("repeat"), 0, 4096); number(item.path("priority"), 0, 10000);
+                } else if ("POINT".equals(type)) {
+                    if (!Set.of("circle", "star").contains(item.path("shape").asText())) throw bad("点符号形状无效");
+                    number(item.path("size"), 1, 24); number(item.path("strokeWidth"), 0, 12);
+                } else {
+                    var value = (ObjectNode) item.deepCopy(); value.remove("type");
+                    symbol(type, value);
+                    number(item.path("LINE".equals(type) ? "width" : "strokeWidth"), 0, 12);
+                }
+            }
+        }
+    }
+
+    private void validateRenderFields(JsonNode filter) {
+        if (filter.has("conditions")) for (var child : filter.path("conditions")) validateRenderFields(child);
+        else if (filter.has("condition")) validateRenderFields(filter.path("condition"));
+        else if (!TILE_FIELDS.contains(filter.path("field").asText())) throw bad("复合配图条件未包含在瓦片属性中");
+    }
+
+    private void number(JsonNode value, double min, double max) {
+        if (!value.isNumber() || !Double.isFinite(value.asDouble()) || value.asDouble() < min || value.asDouble() > max)
+            throw bad("复合符号数值超出允许范围");
     }
 
     public List<GeometryPart> parts(JsonNode geometry) {
@@ -325,14 +446,14 @@ public class VectorTemplateRules {
         definition.set("rules", json.createArrayNode().add(rule));
         JsonNode validated = layerRules.validate(definition).path("rules").get(0).path("symbol");
         if (dash != null) {
-            if ("POINT".equals(kind) || !dash.isArray() || dash.isEmpty() || dash.size() > 16) throw bad("虚线数组无效");
+            if ("POINT".equals(kind) || !dash.isArray() || dash.size() > 16) throw bad("虚线数组无效");
             for (JsonNode n : dash) if (!n.isNumber() || !Double.isFinite(n.asDouble()) || n.asDouble() <= 0 || n.asDouble() > 128) throw bad("虚线长度无效");
             ((ObjectNode) validated).set("dashArray", dash.deepCopy());
         }
         return validated;
     }
     public void bounds(double min, double max) {
-        if (!Double.isFinite(min) || !Double.isFinite(max) || min < 0 || min > 18 || max > 25 || min >= max) throw bad("显示范围须满足0≤开始级别≤18且开始级别<结束级别≤25");
+        if (!Double.isFinite(min) || !Double.isFinite(max) || min < 0 || min > 24 || max > 25 || min >= max) throw bad("显示范围须满足0≤开始级别≤24且开始级别<结束级别≤25");
     }
     private void key(String value) { if (!KEY.matcher(value).matches()) throw bad("模板业务键无效"); }
     private IllegalArgumentException bad(String message) { return new IllegalArgumentException(message); }

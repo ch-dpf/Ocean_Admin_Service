@@ -22,7 +22,10 @@ public class VectorRenderPlanner {
         if (snapshot.getSchemaVersion() != 3)
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.CONFLICT, "该数据集未使用新版分类协议，请保留原数据并重新导入新数据集");
-        return json.readTree(snapshot.getDefinitionJson()).path("tilePolicy");
+        var policy = json.readTree(snapshot.getDefinitionJson()).path("tilePolicy");
+        if (policy.path("zoomReferenceSize").asInt() != 256)
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT, "数据集层级规则尚未升级");
+        return policy;
     }
 
     public GisVectorVO.MapDefinition definition(GisVectorDataSetStyle snapshot) {
@@ -31,7 +34,7 @@ public class VectorRenderPlanner {
         var contract = json.createObjectNode();
         contract.set("classification", root.path("classification"));
         contract.set("tilePolicy", policy);
-        contract.put("encodingImplementation", 2);
+        contract.put("encodingImplementation", 3);
         String version = digest(snapshot.getDataSetId() + ":" + snapshot.getDataRevision() + ":" + json.writeValueAsString(contract));
         return new GisVectorVO.MapDefinition(snapshot.getDataSetId().toString(), version, snapshot.getDataRevision(),
                 policy.path("minZoom").asInt(), policy.path("nativeMaxZoom").asInt(), policy.path("displayMaxZoom").asInt(),

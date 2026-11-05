@@ -37,6 +37,13 @@ public class VectorStyleService {
         return mapper.schemes(dataSetId).stream().map(this::schemeVO).toList();
     }
 
+    /** 卡片列表仅返回名称、版本和三个代表色，选中时再读取完整方案。 */
+    public List<GisVectorVO.SchemeOption> schemeOptions(Long dataSetId) {
+        dataSetStyles.require(dataSetId, false);
+        return mapper.schemeOptions(dataSetId).stream().map(s -> new GisVectorVO.SchemeOption(
+                s.getId().toString(), s.getName(), s.getVersion(), json.readTree(s.getDefinitionJson()))).toList();
+    }
+
     public GisVectorVO.Scheme scheme(Long dataSetId,Long id) {
         var scheme=mapper.scheme(id);
         if(scheme==null || !dataSetId.equals(scheme.getDataSetId())) throw error(HttpStatus.NOT_FOUND,"样式方案不存在");
@@ -49,10 +56,31 @@ public class VectorStyleService {
         if(request.name()==null || request.name().isBlank() || request.name().trim().length()>100) throw error(HttpStatus.BAD_REQUEST,"样式方案名称无效");
         JsonNode definition=request.definition();
         if(definition==null) {
+            if (request.styleVersion() != null && !request.styleVersion().equals(snapshot.getStyleVersion()))
+                throw stale();
             ObjectNode captured=json.createObjectNode().put("schemaVersion",1).put("kind","VECTOR_STYLE_SCHEME");
             captured.set("cartography",json.valueToTree(cartography(dataSetId)));
             captured.set("featureOverrides",json.readTree(mapper.allFeatureCartography(dataSetId)));
             definition=captured;
+        }
+        // 新方案合并当前编辑草稿，不改动工作模板或作为基础的已保存方案。
+        definition = definition.deepCopy();
+        if (request.groupOverrides() != null) {
+            if (!request.groupOverrides().isObject()) throw error(HttpStatus.BAD_REQUEST, "分类草稿须为对象");
+            for (String key : request.groupOverrides().propertyNames()) {
+                JsonNode group = definition.path("cartography").path("groups").path(key);
+                if (!group.isObject()) throw error(HttpStatus.BAD_REQUEST, "分类草稿不属于当前方案: " + key);
+                ((ObjectNode) group).set("override", request.groupOverrides().path(key));
+            }
+        }
+        if (request.groupVisibility() != null) {
+            if (!request.groupVisibility().isObject()) throw error(HttpStatus.BAD_REQUEST, "分类显隐须为对象");
+            for (String key : request.groupVisibility().propertyNames()) {
+                JsonNode group = definition.path("cartography").path("groups").path(key);
+                JsonNode visible = request.groupVisibility().path(key);
+                if (!group.isObject() || !visible.isBoolean()) throw error(HttpStatus.BAD_REQUEST, "分类显隐无效: " + key);
+                ((ObjectNode) group).put("enabled", visible.asBoolean());
+            }
         }
         validateScheme(snapshot,definition);
         var scheme=new org.ocean.admin.gis.entity.GisVectorStyleScheme();
@@ -125,9 +153,47 @@ public class VectorStyleService {
     private void validateOverride(JsonNode patch, String kind) {
         if (!patch.isObject() || !patch.path("symbol").isObject() || json.writeValueAsBytes(patch).length > 16384)
             throw error(HttpStatus.BAD_REQUEST, "覆盖须提供不超过16KiB的symbol对象");
-        for (String key : patch.propertyNames()) if (!List.of("schemaVersion", "symbol", "visible").contains(key))
+        for (String key : patch.propertyNames()) if (!List.of("schemaVersion", "symbol", "visible", "mode", "minZoom", "maxZoom", "segments", "labels").contains(key))
             throw error(HttpStatus.BAD_REQUEST, "不支持的覆盖字段: " + key);
         if (patch.has("visible") && !patch.path("visible").isBoolean()) throw error(HttpStatus.BAD_REQUEST, "visible须为布尔值");
+        if (patch.has("mode")) {
+            String mode = patch.path("mode").asText();
+            if (!List.of("OVERALL", "SEGMENTED").contains(mode)) throw error(HttpStatus.BAD_REQUEST, "配图模式无效");
+            JsonNode min = patch.path("minZoom"), max = patch.path("maxZoom");
+            if (!min.isNumber() || !max.isNumber() || !Double.isFinite(min.asDouble()) || !Double.isFinite(max.asDouble()) || min.asDouble() < 0 || min.asDouble() > 24
+                    || max.asDouble() > 25 || min.asDouble() >= max.asDouble()) throw error(HttpStatus.BAD_REQUEST, "显示层级无效");
+            JsonNode segments = patch.path("segments");
+            if (!segments.isArray() || segments.size() > 25) throw error(HttpStatus.BAD_REQUEST, "分段配置无效");
+            if ("SEGMENTED".equals(mode)) {
+                double start = min.asDouble();
+                for (JsonNode segment : segments) {
+                    if (!segment.path("minZoom").isNumber() || !segment.path("maxZoom").isNumber()
+                            || segment.path("minZoom").asDouble() != start || !Double.isFinite(segment.path("maxZoom").asDouble()) || segment.path("maxZoom").asDouble() <= start
+                            || segment.path("maxZoom").asDouble() > max.asDouble())
+                        throw error(HttpStatus.BAD_REQUEST, "分段须连续且不能重叠");
+                    validateOverride(json.createObjectNode().set("symbol", segment.path("symbol")), kind);
+                    start = segment.path("maxZoom").asDouble();
+                }
+                if (segments.isEmpty() || start != max.asDouble()) throw error(HttpStatus.BAD_REQUEST, "分段须覆盖完整显示层级");
+            }
+            if (patch.has("labels") && !patch.path("labels").isNull()) {
+                JsonNode labels = patch.path("labels");
+                if (!labels.isObject() || !labels.path("enabled").isBoolean()
+                        || !labels.path("fontFamily").isString() || labels.path("fontFamily").asText().isBlank()
+                        || labels.path("fontFamily").asText().length() > 100
+                        || !List.of("normal", "bold").contains(labels.path("fontWeight").asText()))
+                    throw error(HttpStatus.BAD_REQUEST, "标注配置无效");
+                for (String color : List.of("color", "strokeColor"))
+                    if (!labels.path(color).asText().matches("#[0-9a-fA-F]{6}")) throw error(HttpStatus.BAD_REQUEST, "标注颜色无效");
+                double fontSize = labels.path("fontSize").asDouble(Double.NaN);
+                double strokeWidth = labels.path("strokeWidth").asDouble(Double.NaN);
+                if (!labels.path("fontSize").isNumber() || !labels.path("strokeWidth").isNumber()
+                        || !Double.isFinite(fontSize) || fontSize < 6 || fontSize > 36 || !Double.isFinite(strokeWidth) || strokeWidth < 0 || strokeWidth > 8)
+                    throw error(HttpStatus.BAD_REQUEST, "标注字号或描边宽度无效");
+            }
+        } else if (patch.has("minZoom") || patch.has("maxZoom") || patch.has("segments") || patch.has("labels")) {
+            throw error(HttpStatus.BAD_REQUEST, "完整配图配置须提供mode");
+        }
         validateSymbolSize(patch.path("symbol"), "覆盖符号尺寸不能超过12 CSS像素");
         for (String candidate : kind == null ? List.of("POINT", "LINE", "POLYGON") : List.of(kind)) {
             var defaults = json.createObjectNode();
@@ -381,8 +447,8 @@ public class VectorStyleService {
         if (filter.isMissingNode() || filter.isNull()) return;
         if (filter.has("conditions")) {
             for (var child : filter.path("conditions")) validateTileFields(child);
-        } else if (!List.of("fclass","code","id","name","ref").contains(filter.path("field").asText())) {
-            throw error(HttpStatus.BAD_REQUEST,"地图配图条件仅支持瓦片属性: fclass、code、id、name、ref");
+        } else if (!VectorTemplateRules.TILE_FIELDS.contains(filter.path("field").asText())) {
+            throw error(HttpStatus.BAD_REQUEST,"地图配图条件仅支持已声明的瓦片属性");
         }
     }
 

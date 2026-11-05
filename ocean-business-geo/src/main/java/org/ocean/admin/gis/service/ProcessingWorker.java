@@ -40,6 +40,10 @@ public class ProcessingWorker {
     private final ProcessingTaskRecordService taskService;
     private final ObjectMapper objectMapper;
 
+    /** 静态矢量任务使用独立的单线程队列，避免占满交互服务所需资源。 */
+    @Async("vectorTileExecutor")
+    public void processVector(Long taskId) { process(taskId); }
+
     @Async("taskExecutor")
     public void process(Long taskId) {
         GisProcessingTask task = taskService.getRequired(taskId);
@@ -102,7 +106,7 @@ public class ProcessingWorker {
     }
 
     private void refreshTileMetadata(GisTileSet tileSet, GisProcessingWorkspace workspace) {
-        if (tileSet.getTileType() == GisProcessingType.IMAGERY) {
+        if (tileSet.getTileType() == GisProcessingType.IMAGERY || tileSet.getTileType() == GisProcessingType.VECTOR) {
             refreshImageryMetadata(tileSet, workspace.outputPath());
         } else if (tileSet.getTileType() == GisProcessingType.TERRAIN) {
             refreshTerrainMetadata(tileSet, workspace.outputPath());

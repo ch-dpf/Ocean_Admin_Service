@@ -149,7 +149,7 @@ CREATE TABLE ocean_gis.gis_file_meta (
     file_group_id            BIGINT,
     member_path              VARCHAR(1000),
     ingest_outcome           VARCHAR(32) CHECK (ingest_outcome IN ('REGISTERED','DUPLICATE')),
-    vector_placement         VARCHAR(10) CHECK (vector_placement IN ('AUTO','UNKNOWN')),
+    vector_placement         VARCHAR(10) CHECK (vector_placement IN ('AUTO','UNKNOWN','X_LIGHT','X_DARK')),
     vector_dataset_style_id  BIGINT,
     original_name            VARCHAR(255)  NOT NULL,
     source_type              VARCHAR(20) NOT NULL DEFAULT 'UPLOAD' CHECK (source_type IN ('UPLOAD', 'WORKSPACE')),
@@ -586,7 +586,7 @@ CREATE TABLE ocean_gis.gis_processing_task (
     CONSTRAINT ck_gis_processing_task_type
         CHECK (processing_type IN ('TERRAIN', 'IMAGERY', 'VECTOR')),
     CONSTRAINT ck_gis_processing_task_source
-        CHECK (source_type IN ('UPLOAD', 'WORKSPACE', 'MANAGED_FILE')),
+        CHECK (source_type IN ('UPLOAD', 'WORKSPACE', 'MANAGED_FILE', 'VECTOR_RESOURCE')),
     CONSTRAINT ck_gis_processing_task_schema_version
         CHECK (parameter_schema_version > 0),
     CONSTRAINT ck_gis_processing_task_counts

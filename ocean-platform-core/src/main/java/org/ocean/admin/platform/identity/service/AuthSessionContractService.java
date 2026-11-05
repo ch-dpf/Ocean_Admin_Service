@@ -3,6 +3,10 @@ package org.ocean.admin.platform.identity.service;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.ocean.admin.platform.identity.utils.JwtUtil;
 import org.springframework.stereotype.Service;
 
@@ -12,6 +16,7 @@ import java.util.UUID;
  * 认证会话契约服务，统一管理 Token 与登录设备会话映射。
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class AuthSessionContractService {
 
@@ -62,9 +67,15 @@ public class AuthSessionContractService {
             return null;
         }
         Long absoluteExpireAtSeconds = jwtUtil.getExpirationEpochSeconds(token);
-        if (absoluteExpireAtSeconds == null
-                || !authUserSessionService.isSessionActive(userId, sessionId, absoluteExpireAtSeconds * 1000L)) {
-            return null;
+        if (absoluteExpireAtSeconds == null) return null;
+        long started = System.nanoTime();
+        try {
+            if (!authUserSessionService.isSessionActive(userId, sessionId, absoluteExpireAtSeconds * 1000L)) return null;
+        } catch (DataAccessException ex) {
+            // Redis不可用不能解释为Token过期，更不能跳过服务端撤销校验。
+            log.warn("认证会话存储暂不可用: elapsedMs={}, cause={}",
+                    (System.nanoTime() - started) / 1_000_000, ex.getClass().getSimpleName());
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "认证服务暂不可用，请稍后重试", ex);
         }
         return new AuthenticatedSession(userId, sessionId, username);
     }

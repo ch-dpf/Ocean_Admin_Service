@@ -155,7 +155,7 @@ public class VectorPublicationService {
         JsonNode contract=json.readTree(resource.getDefinitionJson());JsonNode binding=json.readTree(publication.getVectorDefinition());
         ObjectNode result=json.createObjectNode().put("tilejson","3.0.0").put("name",publication.getServiceName())
                 .put("releaseVersion",binding.path("releaseVersion").asText()).put("defaultStyleId",binding.path("defaultStyleId").asText())
-                .put("tileVersion",resource.getId().toString()).put("minzoom",contract.path("map").path("minZoom").asInt())
+                .put("tileVersion",resource.getId().toString()).put("minzoom",Math.max(0,contract.path("map").path("minZoom").asInt() - 1))
                 .put("maxzoom",contract.path("map").path("nativeMaxZoom").asInt());
         result.putArray("tiles").add(base(code)+"/tiles/"+resource.getId()+"/{z}/{x}/{y}.mvt");
         ObjectNode dataContract = (ObjectNode) contract.path("map").deepCopy();

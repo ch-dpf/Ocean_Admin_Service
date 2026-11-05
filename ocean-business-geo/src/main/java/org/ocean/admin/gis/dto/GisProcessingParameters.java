@@ -26,11 +26,13 @@ public sealed interface GisProcessingParameters
         return null;
     }
 
-    /** 尚未实现的矢量引擎保留原有参数结构，避免影响现有请求模型。 */
+    /** 静态矢量成果绑定确定的数据修订及完整样式快照。 */
     record VectorProcessingParameters(
             String targetCrs,
             String tileProfile,
-            String outputFormat) implements GisProcessingParameters {
+            String outputFormat, Long dataSetId, Long dataRevision,
+            Integer minZoom, Integer maxZoom, java.util.List<Double> bounds,
+            tools.jackson.databind.JsonNode schemeSnapshot) implements GisProcessingParameters {
 
         @Override
         public GisProcessingType processingType() {

@@ -752,7 +752,8 @@ public class GdalDatasetReader {
                         String filename = "vector-" + result.path("vectors").size() + ".geojson";
                         Path output = directory.resolve(filename);
                         Vector<String> arguments = new Vector<>(List.of("-f", "GeoJSON", "-t_srs", "EPSG:4326",
-                                "-s_srs", sourceCrs, "-lco", "RFC7946=YES", "-lco", "COORDINATE_PRECISION=15", "-preserve_fid", name));
+                                "-s_srs", sourceCrs, "-makevalid", "-lco", "RFC7946=YES", "-lco", "WRAPDATELINE=YES",
+                                "-lco", "COORDINATE_PRECISION=15", "-preserve_fid", name));
                         progress.accept(ProgressStage.indeterminate("NATIVE_VECTOR_CONVERSION", "Java GDAL 转换源图层: " + name));
                         VectorTranslateOptions translate = new VectorTranslateOptions(arguments);
                         ProgressCallback callback = callback("NATIVE_VECTOR_CONVERSION", "转换源图层: " + name);
@@ -774,6 +775,8 @@ public class GdalDatasetReader {
                         try { metadata.put("driver", sourceDriver.getShortName()); }
                         finally { sourceDriver.delete(); }
                         metadata.set("sourceLayer", description); metadata.set("readOptions", options); metadata.put("sourceCrs", sourceCrs);
+                        metadata.putObject("geometryProcessing").put("makeValid", true).put("wrapDateline", true)
+                                .put("outputStandard", "RFC7946").put("rawSnapshotUnchanged", true);
                         append("vectors", stableKey("layer", name), name, filename, parsedCrs, geometry.get("extent"), metadata);
                     } finally { layer.delete(); }
                 }
