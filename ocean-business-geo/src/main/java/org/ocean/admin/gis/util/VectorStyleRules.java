@@ -132,7 +132,7 @@ public class VectorStyleRules {
         }
     }
 
-    private boolean matchesFilter(JsonNode filter, JsonNode properties) {
+    public boolean matchesFilter(JsonNode filter, JsonNode properties) {
         if (filter == null || filter.isNull()) return true;
         String op = filter.path("op").asText();
         if ("and".equals(op)) {

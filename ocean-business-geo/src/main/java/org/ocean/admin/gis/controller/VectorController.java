@@ -45,7 +45,14 @@ public class VectorController {
     @Operation(summary = "使用已保存样式方案生成静态矢量瓦片")
     public ResponseResult<?> buildStaticTiles(@PathVariable Long dataSetId,
             @Valid @RequestBody GisVectorRequests.TileBuild request) {
-        return ResponseResult.success(processing.submitVector(dataSetId, request));
+        return ResponseResult.success(processing.submitVector(dataSetId, request, "MVT"));
+    }
+
+    @PostMapping("/datasets/{dataSetId}/static-raster-tiles")
+    @Operation(summary = "使用已保存样式方案生成静态栅格瓦片")
+    public ResponseResult<?> buildStaticRasterTiles(@PathVariable Long dataSetId,
+            @Valid @RequestBody GisVectorRequests.TileBuild request) {
+        return ResponseResult.success(processing.submitVector(dataSetId, request, "PNG"));
     }
     private final org.ocean.admin.gis.service.VectorResourceService resources;
 
@@ -146,7 +153,7 @@ public class VectorController {
     public ResponseEntity<ResponseResult<GisVectorVO.MapDefinition>> mapDefinition(@PathVariable Long dataSetId) {
         var definition = tiles.definition(dataSetId);
         return ResponseEntity.ok().header("Cache-Control", "private, no-cache")
-                .eTag("\"map-" + definition.tileVersion() + "\"").body(ResponseResult.success(definition));
+                .eTag("\"map-" + definition.tileVersion() + "-" + definition.changeCursor() + "\"").body(ResponseResult.success(definition));
     }
 
     @GetMapping(value = "/datasets/{dataSetId}/tiles/{tileVersion}/{z}/{x}/{y}.mvt", produces = "application/vnd.mapbox-vector-tile")
@@ -161,9 +168,17 @@ public class VectorController {
         boolean unchanged = ifNoneMatch != null && java.util.Arrays.stream(ifNoneMatch.split(","))
                 .map(String::trim).anyMatch(value -> value.equals("*") || value.equals(tag) || value.equals(etag));
         return ResponseEntity.status(unchanged ? HttpStatus.NOT_MODIFIED : HttpStatus.OK)
-                .header("Cache-Control","private, max-age=300, immutable")
+                .header("Cache-Control","private, no-cache")
                 .header("Vary","Accept-Encoding").eTag(etag)
                 .body(unchanged ? null : body);
+    }
+
+    @GetMapping("/datasets/{dataSetId}/tile-changes")
+    @Operation(summary = "补取要素修改影响的瓦片范围")
+    public ResponseEntity<ResponseResult<GisVectorVO.TileChanges>> tileChanges(@PathVariable Long dataSetId,
+            @RequestParam(defaultValue = "0") long after) {
+        return ResponseEntity.ok().header("Cache-Control", "private, no-store")
+                .body(ResponseResult.success(tiles.changes(dataSetId, after)));
     }
 
     @GetMapping("/datasets/{dataSetId}/cartography")

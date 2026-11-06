@@ -6,8 +6,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisPublication;
 import org.ocean.admin.gis.entity.GisTileSet;
-import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
+import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisPublicationMapper;
 import org.ocean.admin.gis.mapper.GisTileSetMapper;
 import org.ocean.admin.gis.processing.GisProcessingType;
@@ -33,7 +33,7 @@ public class PublicationRecordService {
     private final GisPublicationMapper publicationMapper;
     private final GisTileSetMapper tileSetMapper;
     private final GisProcessingInputMapper inputMapper;
-    private final GisFileMetaMapper fileMetaMapper;
+    private final GisDataSetMapper dataSetMapper;
 
     @Value("${gis.publication.public-base-url:http://localhost:8090}")
     private String publicBaseUrl;
@@ -61,7 +61,9 @@ public class PublicationRecordService {
                 .le(publishTimeEnd != null, GisPublication::getPublishTime, publishTimeEnd)
                 .orderByDesc(GisPublication::getPublishTime);
         if (processingType == GisProcessingType.VECTOR) {
-            query.isNotNull(GisPublication::getVectorResourceId);
+            query.and(source -> source.isNotNull(GisPublication::getVectorResourceId)
+                    .or().inSql(GisPublication::getTileSetId,
+                            "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = 'VECTOR'"));
         } else if (processingType != null) {
             query.inSql(GisPublication::getTileSetId,
                     "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = '"
@@ -77,9 +79,13 @@ public class PublicationRecordService {
         GisPublication publication = publicationMapper.selectOne(
                 new LambdaQueryWrapper<GisPublication>()
                         .eq(GisPublication::getServiceCode, serviceCode)
-                        .inSql(GisPublication::getTileSetId,
-                                "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = '"
-                                        + processingType.name() + "'"));
+                        .and(source -> {
+                            source.inSql(GisPublication::getTileSetId,
+                                    "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = '"
+                                            + processingType.name() + "'");
+                            if (processingType == GisProcessingType.VECTOR)
+                                source.or().isNotNull(GisPublication::getVectorResourceId);
+                        }));
         if (publication == null) {
             throw new IllegalArgumentException(
                     processingType.name() + "发布服务不存在: " + serviceCode);
@@ -112,6 +118,11 @@ public class PublicationRecordService {
             publication = new GisPublication();
             publication.setServiceCode(initialServiceCode);
             publication.setTileSetId(tileSet.getId());
+            publication.setServiceProtocol(switch (tileSet.getTileType()) {
+                case VECTOR -> "TMS_WMTS";
+                case TERRAIN -> "TERRAIN";
+                case IMAGERY -> tileSet.getTileProfile();
+            });
             publication.setDataSetId(commonDataSetId(tileSet.getTaskId()));
             publication.setDeleted(0);
         }
@@ -212,20 +223,15 @@ public class PublicationRecordService {
     private Long commonDataSetId(Long taskId) {
         Long result = null;
         for (var input : inputMapper.selectByTaskId(taskId)) {
-            if (input.getFileMetaId() == null) {
-                return null;
-            }
-            var fileMeta = fileMetaMapper.selectById(input.getFileMetaId());
-            if (fileMeta == null) {
-                return null;
-            }
+            Long dataSetId = input.getSourceDataSetId();
+            if (dataSetId == null) return null;
             if (result == null) {
-                result = fileMeta.getDataSetId();
-            } else if (!result.equals(fileMeta.getDataSetId())) {
+                result = dataSetId;
+            } else if (!result.equals(dataSetId)) {
                 return null;
             }
         }
-        return result;
+        return result != null && dataSetMapper.selectById(result) != null ? result : null;
     }
 
     private String upperTrimToNull(String value) {

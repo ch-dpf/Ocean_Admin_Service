@@ -34,9 +34,10 @@ public class VectorRenderPlanner {
         var contract = json.createObjectNode();
         contract.set("classification", root.path("classification"));
         contract.set("tilePolicy", policy);
-        contract.put("encodingImplementation", 3);
-        String version = digest(snapshot.getDataSetId() + ":" + snapshot.getDataRevision() + ":" + json.writeValueAsString(contract));
-        return new GisVectorVO.MapDefinition(snapshot.getDataSetId().toString(), version, snapshot.getDataRevision(),
+        contract.put("encodingImplementation", 5);
+        // 要素修改使用空间变更记录修订局部瓦片，不能让整个数据集的地址失效。
+        String version = digest(snapshot.getDataSetId() + ":" + json.writeValueAsString(contract));
+        return new GisVectorVO.MapDefinition(snapshot.getDataSetId().toString(), version, snapshot.getDataRevision(), "0",
                 policy.path("minZoom").asInt(), policy.path("nativeMaxZoom").asInt(), policy.path("displayMaxZoom").asInt(),
                 policy.path("tileSize").asInt(), "/api/gis/vector/datasets/" + snapshot.getDataSetId()
                     + "/tiles/" + version + "/{z}/{x}/{y}.mvt", null);

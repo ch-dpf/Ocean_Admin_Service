@@ -56,10 +56,10 @@ public class ProcessingService {
     private final VectorStyleService vectorStyles;
     private final VectorTileProperties vectorLimits;
 
-    public GisBatchProcessingTaskVO submitVector(Long dataSetId, GisVectorRequests.TileBuild request) {
+    public GisBatchProcessingTaskVO submitVector(Long dataSetId, GisVectorRequests.TileBuild request, String outputFormat) {
         var scheme = vectorStyles.scheme(dataSetId, request.schemeId());
         if (scheme.version() != request.schemeVersion()) throw new IllegalArgumentException("样式方案已变化，请重新选择");
-        var parameters = new GisProcessingParameters.VectorProcessingParameters("EPSG:3857", "XYZ", "MVT",
+        var parameters = new GisProcessingParameters.VectorProcessingParameters("EPSG:3857", "XYZ", outputFormat,
                 dataSetId, request.dataRevision(), request.minZoom(), request.maxZoom(), request.bounds(), objectMapper.valueToTree(scheme));
         long tileCount = VectorFileProcessingEngine.tileRanges(parameters).stream()
                 .mapToLong(r -> (long) (r[2] - r[1] + 1) * (r[4] - r[3] + 1)).sum();

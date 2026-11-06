@@ -93,7 +93,7 @@ public class TerrainPublicationService implements PublicationProtocol {
     @Override
     public PublicationAccess buildAccess(GisPublication publication, GisTileSet tileSet) {
         String root = recordService.buildServiceRoot(PROCESSING_TYPE, publication.getServiceCode());
-        return new PublicationAccess(root, root + "layer.json", null);
+        return new PublicationAccess(root, root + "layer.json", null, null, null);
     }
 
     private PublishedArtifact loadPublishedArtifact(String serviceCode) {

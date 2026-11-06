@@ -107,7 +107,7 @@ public class ImageryPublicationService implements PublicationProtocol {
         String extension = "PNG".equalsIgnoreCase(tileSet.getOutputFormat()) ? "png" : "jpg";
         String tileUrlTemplate = root + "{z}/{x}/{y}." + extension;
         return new PublicationAccess(
-                tileUrlTemplate, root + "tilejson.json", tileUrlTemplate);
+                tileUrlTemplate, root + "tilejson.json", tileUrlTemplate, null, null);
     }
 
     private PublishedArtifact loadPublishedArtifact(String serviceCode) {

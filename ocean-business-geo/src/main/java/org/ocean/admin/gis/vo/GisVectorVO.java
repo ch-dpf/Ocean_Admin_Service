@@ -51,7 +51,7 @@ public final class GisVectorVO {
             long version, long presentationVersion, boolean configured, JsonNode definition) { }
 
     /** 瓦片版本只由数据与抽析规则决定，连续显示缩放和配图不参与。 */
-    public record MapDefinition(String dataSetId, String tileVersion, long dataRevision,
+    public record MapDefinition(String dataSetId, String tileVersion, long dataRevision, String changeCursor,
             int minZoom, int nativeMaxZoom, int displayMaxZoom, int tileSize, String tiles, JsonNode extent) { }
 
     public record Cartography(String dataSetId, long styleVersion, long displayRevision,
@@ -59,4 +59,9 @@ public final class GisVectorVO {
 
     /** 仅供数据库与瓦片服务协作，不直接作为HTTP JSON响应。 */
     public record TilePayload(byte[] body, long byteSize) { }
+
+    /** 修订号以字符串传输，避免浏览器整数精度丢失。 */
+    public record TileChange(String id, boolean globalChange, JsonNode bounds) { }
+    public record TileChanges(String cursor, String tileVersion, boolean reset, List<TileChange> changes) { }
+    public record PendingChange(long id, long resourceId, String requestJson) { }
 }

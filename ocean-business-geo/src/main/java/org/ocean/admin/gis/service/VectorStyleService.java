@@ -31,6 +31,7 @@ public class VectorStyleService {
     private final ObjectMapper json;
     private final VectorDataSetStyleService dataSetStyles;
     private final VectorTemplateRules templateRules;
+    private final VectorResourceService resources;
 
     public List<GisVectorVO.Scheme> schemes(Long dataSetId) {
         dataSetStyles.require(dataSetId,false);
@@ -498,7 +499,10 @@ public class VectorStyleService {
         layer.setStyleMode(request.styleMode());
         layer.setEnabled(Boolean.TRUE.equals(request.enabled()));
         touch(layer);
-        if (regrouped) mapper.bumpDataSetRevision(layer.getDataSetId(),true,false);
+        if (regrouped) {
+            resources.rebuildLayer(layer);
+            mapper.bumpDataSetRevision(layer.getDataSetId(),true,false);
+        }
         return layers.detail(layerId);
     }
 

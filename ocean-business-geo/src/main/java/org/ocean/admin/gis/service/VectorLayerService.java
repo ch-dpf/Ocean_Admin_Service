@@ -117,6 +117,7 @@ public class VectorLayerService {
                 throw new ImportException("VECTOR_ALREADY_EXTRACTED", "已完成图层不可被元数据重试覆盖");
             }
             mapper.deleteExtractingLayersBySource(source.getId());
+            mapper.retireUnusedWorkingResources(source.getId());
         });
         Map<String, GisVectorLayer> layers = new LinkedHashMap<>();
         Map<String, Long> counts = new LinkedHashMap<>();
@@ -126,80 +127,94 @@ public class VectorLayerService {
         long[] processedFeatures = {0};
         long[] emptyGeometryFeatures = {0};
         long sourceFeatures = 0;
-        for (ImportLayer input : inputs) {
-            String layerName = importLayerName(source, input);
-            Long sourceLayerId = resources.sourceLayers(source.getId()).stream()
-                    .filter(layer -> input.sourceLayerKey().equals(layer.getLayerKey())).map(layer -> layer.getId())
-                    .findFirst().orElseThrow(() -> new IllegalStateException("原始集合身份缺失"));
-            sourceFeatures += reader.read(input.geoJsonPath(), parsed -> {
-                JsonNode properties = json.readTree(parsed.properties());
-                JsonNode geometry = json.readTree(parsed.geometry());
-                if (geometry.isNull()) {
-                    emptyGeometryFeatures[0]++;
-                    statistics[3]++;
-                }
-                for (var part : geometry.isNull() ? List.<VectorTemplateRules.GeometryPart>of() : templateRules.parts(geometry)) {
-                    var match = templateRules.classify(template, properties, part.kind(), source.getVectorPlacement(), layerName);
-                    var group = targets.get(match.groupKey());
-                    if (group == null) throw new IllegalStateException("数据集缺少模板分类: " + match.groupKey());
-                    String layerKey = importLayerKey(input.sourceLayerKey(), match.groupKey(), part.kind());
-                    GisVectorLayer layer = layers.get(layerKey);
-                    if (layer == null) {
-                        layer = new GisVectorLayer();
-                        layer.setId(IdWorker.getId()); layer.setDataSetId(source.getDataSetId()); layer.setSourceFileId(source.getId());
-                        layer.setSourceLayerId(sourceLayerId);
-                        layer.setGroupId(group.getId()); layer.setOriginalGroupId(group.getId()); layer.setGeometryType(part.kind());
-                        layer.setAssignmentMode("AUTO");
-                        boolean unknown = "UNKNOWN_CLASSIFICATION".equals(group.getNodeType());
-                        layer.setEnabled(!unknown && template.groups().get(match.groupKey()).path("defaultLayerEnabled").asBoolean());
-                        layer.setStyleMode(unknown ? "UNCONFIGURED" : "INHERIT_TARGET_GROUP");
-                        layer.setLayerKey(layerKey); layer.setLayerName(layerName);
-                        GisVectorLayer created = layer;
-                        transactions.executeWithoutResult(status -> {
-                            claimGuard.run();
-                            if (mapper.insertLayer(created) != 1) throw new IllegalStateException("分类图层创建失败");
-                        });
-                        layers.put(layerKey, layer);
+        long resourceId = IdWorker.getId();
+        Path inputPath = resources.workingInput(resourceId);
+        try (var output = java.nio.file.Files.newBufferedWriter(inputPath)) {
+            for (ImportLayer input : inputs) {
+                String layerName = importLayerName(source, input);
+                Long sourceLayerId = resources.sourceLayers(source.getId()).stream()
+                        .filter(layer -> input.sourceLayerKey().equals(layer.getLayerKey())).map(layer -> layer.getId())
+                        .findFirst().orElseThrow(() -> new IllegalStateException("原始集合身份缺失"));
+                sourceFeatures += reader.read(input.geoJsonPath(), parsed -> {
+                    JsonNode properties = json.readTree(parsed.properties());
+                    JsonNode geometry = json.readTree(parsed.geometry());
+                    if (geometry.isNull()) {
+                        emptyGeometryFeatures[0]++;
+                        statistics[3]++;
                     }
-                    GisVectorFeature feature = new GisVectorFeature();
-                    feature.setId(IdWorker.getId()); feature.setLayerId(layer.getId());
-                    feature.setSourceLayerId(sourceLayerId);
-                    feature.setGeometryJson(json.writeValueAsString(part.geometry())); feature.setPropertiesJson(parsed.properties());
-                    feature.setSourceFeatureId(parsed.sourceId()); feature.setSourceFeatureIndex(parsed.index());
-                    feature.setSourceGeometryPath(part.path()); feature.setClassificationRuleKey(match.ruleKey());
-                    batch.add(feature);
-                    statistics[0] += feature.getGeometryJson().length() + parsed.properties().length();
-                    statistics[1]++;
-                    if ("UNKNOWN_CLASSIFICATION".equals(group.getNodeType())) statistics[2]++;
-                    if (match.warning()) statistics[3]++;
-                    counts.merge(match.groupKey(), 1L, Long::sum);
-                    if (batch.size() >= 100 || statistics[0] >= 2 * 1024 * 1024) {
-                        committedParts[0] += flushImportBatch(batch, claimGuard);
-                        statistics[0] = 0;
+                    for (var part : geometry.isNull() ? List.<VectorTemplateRules.GeometryPart>of() : templateRules.parts(geometry)) {
+                        var match = templateRules.classify(template, properties, part.kind(), source.getVectorPlacement(), layerName);
+                        var group = targets.get(match.groupKey());
+                        if (group == null) throw new IllegalStateException("数据集缺少模板分类: " + match.groupKey());
+                        String layerKey = importLayerKey(input.sourceLayerKey(), match.groupKey(), part.kind());
+                        GisVectorLayer layer = layers.get(layerKey);
+                        if (layer == null) {
+                            layer = new GisVectorLayer();
+                            layer.setId(IdWorker.getId()); layer.setDataSetId(source.getDataSetId()); layer.setSourceFileId(source.getId());
+                            layer.setSourceLayerId(sourceLayerId);
+                            layer.setGroupId(group.getId()); layer.setOriginalGroupId(group.getId()); layer.setGeometryType(part.kind());
+                            layer.setAssignmentMode("AUTO");
+                            boolean unknown = "UNKNOWN_CLASSIFICATION".equals(group.getNodeType());
+                            layer.setEnabled(!unknown && template.groups().get(match.groupKey()).path("defaultLayerEnabled").asBoolean());
+                            layer.setStyleMode(unknown ? "UNCONFIGURED" : "INHERIT_TARGET_GROUP");
+                            layer.setLayerKey(layerKey); layer.setLayerName(layerName);
+                            GisVectorLayer created = layer;
+                            transactions.executeWithoutResult(status -> {
+                                claimGuard.run();
+                                if (mapper.insertLayer(created) != 1) throw new IllegalStateException("分类图层创建失败");
+                            });
+                            layers.put(layerKey, layer);
+                        }
+                        GisVectorFeature feature = new GisVectorFeature();
+                        feature.setId(IdWorker.getId()); feature.setLayerId(layer.getId());
+                        feature.setSourceLayerId(sourceLayerId);
+                        feature.setGeometryJson(json.writeValueAsString(part.geometry())); feature.setPropertiesJson(parsed.properties());
+                        feature.setSourceFeatureId(parsed.sourceId()); feature.setSourceFeatureIndex(parsed.index());
+                        feature.setSourceGeometryPath(part.path()); feature.setClassificationRuleKey(match.ruleKey());
+                        feature.setVersion(1L);
+                        feature.setCreateTime(java.time.LocalDateTime.now()); feature.setUpdateTime(feature.getCreateTime());
+                        batch.add(feature);
+                        statistics[0] += feature.getGeometryJson().length() + parsed.properties().length();
+                        statistics[1]++;
+                        if ("UNKNOWN_CLASSIFICATION".equals(group.getNodeType())) statistics[2]++;
+                        if (match.warning()) statistics[3]++;
+                        counts.merge(match.groupKey(), 1L, Long::sum);
+                        if (batch.size() >= 100 || statistics[0] >= 2 * 1024 * 1024) {
+                            committedParts[0] += flushImportBatch(batch, claimGuard, output);
+                            statistics[0] = 0;
+                        }
                     }
-                }
-                processedFeatures[0]++;
-                progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理与入库；已提交几何 " + committedParts[0] + " 个",
-                        Math.min(processedFeatures[0], progressTotal), progressTotal, ProgressUnit.FEATURE));
-            }, heartbeat);
+                    processedFeatures[0]++;
+                    progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理与入库；已提交几何 " + committedParts[0] + " 个",
+                            Math.min(processedFeatures[0], progressTotal), progressTotal, ProgressUnit.FEATURE));
+                }, heartbeat);
+            }
+            committedParts[0] += flushImportBatch(batch, claimGuard, output);
+        } catch (IOException | RuntimeException ex) {
+            java.nio.file.Files.deleteIfExists(inputPath);
+            throw ex;
         }
-        committedParts[0] += flushImportBatch(batch, claimGuard);
-        progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理结束；已提交几何 " + committedParts[0] + " 个",
-                sourceFeatures, Math.max(progressTotal, sourceFeatures), ProgressUnit.FEATURE));
-        if (sourceFeatures == 0 || layers.isEmpty()) throw new ImportException("EMPTY_GEOMETRY", "来源不包含可制图要素");
-        return new VectorExtraction(layers.values().stream().map(GisVectorLayer::getId).toList(),
-                sourceFeatures, statistics[1], statistics[2], statistics[3], emptyGeometryFeatures[0], counts);
+        try {
+            progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理结束；已提交几何 " + committedParts[0] + " 个",
+                    sourceFeatures, Math.max(progressTotal, sourceFeatures), ProgressUnit.FEATURE));
+            if (sourceFeatures == 0 || layers.isEmpty()) throw new ImportException("EMPTY_GEOMETRY", "来源不包含可制图要素");
+            resources.importWorking(resourceId, source, List.copyOf(layers.values()), claimGuard, heartbeat);
+            return new VectorExtraction(layers.values().stream().map(GisVectorLayer::getId).toList(),
+                    sourceFeatures, statistics[1], statistics[2], statistics[3], emptyGeometryFeatures[0], counts);
+        } finally { java.nio.file.Files.deleteIfExists(inputPath); }
     }
 
-    private int flushImportBatch(List<GisVectorFeature> batch, Runnable claimGuard) {
+    private int flushImportBatch(List<GisVectorFeature> batch, Runnable claimGuard, java.io.BufferedWriter output) {
         if (batch.isEmpty()) return 0;
         int size = batch.size();
         transactions.executeWithoutResult(status -> {
             claimGuard.run();
             var error = mapper.firstGeometryError(batch);
             if (error != null) throw new GeoJsonFeatureReader.FeatureReadException(error.featureIndex(), error.reason());
-            if (mapper.insertFeatures(batch) != size) throw new IllegalStateException("矢量要素批量写入数量不一致");
         });
+        try {
+            for (var feature : batch) { output.write(json.writeValueAsString(feature)); output.newLine(); }
+        } catch (IOException ex) { throw new IllegalStateException("工作包要素写入失败", ex); }
         batch.clear();
         return size;
     }
@@ -284,12 +299,15 @@ public class VectorLayerService {
         GisVectorFeature feature = parsedFeature(layerId, body);
         requireKind(layer, body);
         feature.setId(IdWorker.getId());
+        feature.setVersion(1L); feature.setCreateTime(java.time.LocalDateTime.now()); feature.setUpdateTime(feature.getCreateTime());
         validateTopology(feature);
-        mapper.insertFeatures(List.of(feature));
-        Long targetId = reclassify(layer,feature);
-        mapper.refreshLayer(layerId);
+        boolean packaged = packaged(layer);
+        if (!packaged) mapper.insertFeatures(List.of(feature));
+        reclassify(layer,feature,!packaged);
+        resources.edit(layer, null, feature);
+        if (!packaged) mapper.refreshLayer(layerId);
         mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
-        return toFeature(requireFeature(targetId, feature.getId()));
+        return toFeature(feature);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -302,15 +320,22 @@ public class VectorLayerService {
         GisVectorFeature feature = parsedFeature(layerId, body);
         requireKind(layer, body);
         feature.setId(id);
+        feature.setVersion(existing.getVersion() + 1);
+        feature.setSourceLayerId(existing.getSourceLayerId()); feature.setSourceFeatureId(existing.getSourceFeatureId());
+        feature.setSourceFeatureIndex(existing.getSourceFeatureIndex()); feature.setSourceGeometryPath(existing.getSourceGeometryPath());
+        feature.setClassificationRuleKey(existing.getClassificationRuleKey());
+        feature.setCreateTime(existing.getCreateTime()); feature.setUpdateTime(java.time.LocalDateTime.now());
         // XYZ 编辑须显式提交高程，防止二维拖动误删已有 Z。
         JsonNode oldGeometry = json.readTree(existing.getGeometryJson());
         if (coordinateDimension(oldGeometry) != coordinateDimension(body.get("geometry"))) throw badRequest("编辑须保留原要素的 XY/XYZ 坐标维度");
         validateTopology(feature);
-        if (mapper.updateFeature(feature, existing.getVersion()) != 1) throw preconditionFailed();
-        Long targetId = reclassify(layer,feature);
-        mapper.refreshLayer(layerId);
+        boolean packaged = packaged(layer);
+        if (!packaged && mapper.updateFeature(feature, existing.getVersion()) != 1) throw preconditionFailed();
+        reclassify(layer,feature,!packaged);
+        resources.edit(layer, existing, feature);
+        if (!packaged) mapper.refreshLayer(layerId);
         mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
-        return toFeature(requireFeature(targetId, id));
+        return toFeature(feature);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -319,8 +344,10 @@ public class VectorLayerService {
         resources.requireEditable(layer);
         GisVectorFeature existing = requireFeature(layerId, id);
         requireMatch(ifMatch, featureEtag(id, existing.getVersion()));
-        if (mapper.deleteFeature(layerId, id, existing.getVersion()) != 1) throw preconditionFailed();
-        mapper.refreshLayer(layerId);
+        boolean packaged = packaged(layer);
+        if (!packaged && mapper.deleteFeature(layerId, id, existing.getVersion()) != 1) throw preconditionFailed();
+        resources.edit(layer, existing, null);
+        if (!packaged) mapper.refreshLayer(layerId);
         mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
     }
 
@@ -331,6 +358,8 @@ public class VectorLayerService {
         requireMatch(ifMatch, layerEtag(id, layer.getDataVersion(), layer.getPresentationVersion()));
         mapper.deleteLayer(id);
         mapper.purgeLayerFeatures(id);
+        if (layer.getResourceId() != null && mapper.resourceReferences(layer.getResourceId()) == 0)
+            mapper.retireResource(layer.getResourceId());
         mapper.bumpDataSetRevision(layer.getDataSetId(), true, true);
     }
 
@@ -343,7 +372,8 @@ public class VectorLayerService {
                 layer.getGroupId().toString(), layer.getOriginalGroupId().toString(), layer.getGeometryType(), layer.getAssignmentMode(),
                 Boolean.TRUE.equals(layer.getEnabled()), layer.getStyleMode(), layer.getPresentationVersion(),
                 layer.getSourceLayerId() == null ? null : layer.getSourceLayerId().toString(),
-                layer.getResourceId() == null ? null : layer.getResourceId().toString(), storageType, "GPKG".equals(storageType));
+                layer.getResourceId() == null ? null : layer.getResourceId().toString(), storageType,
+                layer.getResourceId() != null && !"WORKING".equals(resources.require(layer.getResourceId()).getResourceKind()));
     }
 
     public static String featureEtag(Long id, long version) { return "\"feature-" + id + "-v" + version + "\""; }
@@ -351,6 +381,7 @@ public class VectorLayerService {
 
     private GisVectorLayer ready(Long id, boolean lock) {
         GisVectorLayer layer = requireLayer(id, lock);
+        if (lock) resources.finishPending(layer.getDataSetId());
         if (!"READY".equals(layer.getLayerStatus())) throw new ResponseStatusException(HttpStatus.CONFLICT, "图层尚未完成导入");
         return layer;
     }
@@ -368,7 +399,11 @@ public class VectorLayerService {
         return layer;
     }
 
-    private Long reclassify(GisVectorLayer source, GisVectorFeature feature) {
+    private boolean packaged(GisVectorLayer layer) {
+        return layer.getResourceId() != null && "GPKG".equals(resources.require(layer.getResourceId()).getStorageType());
+    }
+
+    private Long reclassify(GisVectorLayer source, GisVectorFeature feature, boolean persist) {
         if (!"AUTO".equals(source.getAssignmentMode())) return source.getId();
         var original = mapper.group(source.getDataSetId(),source.getOriginalGroupId());
         if (original != null && "UNKNOWN_CLASSIFICATION".equals(original.getNodeType())) return source.getId();
@@ -381,6 +416,7 @@ public class VectorLayerService {
         if (!group.getId().equals(source.getGroupId())) {
             target = mapper.layersBySource(source.getSourceFileId()).stream()
                     .filter(l -> group.getId().equals(l.getGroupId()) && "AUTO".equals(l.getAssignmentMode())
+                        && Objects.equals(l.getSourceLayerId(), source.getSourceLayerId()) && Objects.equals(l.getResourceId(), source.getResourceId())
                         && source.getGeometryType().equals(l.getGeometryType()) && "READY".equals(l.getLayerStatus()))
                     .findFirst().orElse(null);
             if (target == null) {
@@ -398,10 +434,11 @@ public class VectorLayerService {
                 mapper.setLayerStatus(target.getId(),"READY");
             }
         }
-        if (mapper.reclassifyFeature(feature.getId(),source.getId(),target.getId(),classification.ruleKey()) != 1)
+        if (persist && mapper.reclassifyFeature(feature.getId(),source.getId(),target.getId(),classification.ruleKey()) != 1)
             throw preconditionFailed();
+        feature.setLayerId(target.getId()); feature.setClassificationRuleKey(classification.ruleKey());
         if (!target.getId().equals(source.getId())) {
-            mapper.refreshLayer(target.getId());
+            if (persist) mapper.refreshLayer(target.getId());
             mapper.bumpDataSetRevision(source.getDataSetId(),false,true);
         }
         return target.getId();

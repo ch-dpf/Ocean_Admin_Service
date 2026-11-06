@@ -10,8 +10,12 @@ import org.springframework.web.servlet.AsyncHandlerInterceptor;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.ocean.admin.interceptor.RolePermissionInterceptor;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.CacheControl;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.time.Duration;
 
 /**
  * Web配置类
@@ -32,6 +36,14 @@ public class WebConfig implements WebMvcConfigurer {
         this.rolePermissionInterceptor = rolePermissionInterceptor;
         this.systemMetricsSsePublisher = systemMetricsSsePublisher;
         this.gisRealtimeSsePublisher = gisRealtimeSsePublisher;
+    }
+
+    /** 数据集类型示意图随 GIS 模块打包，同一类型的卡片复用浏览器缓存。 */
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        registry.addResourceHandler("/api/gis/dataSet/thumbnails/**")
+                .addResourceLocations("classpath:/static/dataset-thumbnails/")
+                .setCacheControl(CacheControl.maxAge(Duration.ofDays(1)).cachePublic());
     }
 
     /**

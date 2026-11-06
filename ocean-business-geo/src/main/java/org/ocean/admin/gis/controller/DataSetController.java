@@ -35,7 +35,7 @@ public class DataSetController {
     }
 
     @GetMapping("/page")
-    @Operation(summary = "获取数据集分页")
+    @Operation(summary = "获取数据集分页", description = "仅返回数据集基本信息及文件数、文件组数、总大小；不查询文件点位、轮廓或解析状态汇总")
     public ResponseResult<PageResult<List<GisDataSetVO>>> getDataSetPage(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "10") Integer size,
