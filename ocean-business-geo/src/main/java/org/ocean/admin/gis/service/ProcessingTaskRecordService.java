@@ -58,8 +58,11 @@ public class ProcessingTaskRecordService {
         if (task.getProcessingType() != GisProcessingType.VECTOR || task.getTaskStatus() != TaskStatus.COMPLETED
                 || tiles == null || !"READY".equals(tiles.getTileSetStatus()))
             throw new IllegalArgumentException("静态矢量成果尚未完成或已失效");
-        if (!relative.matches("(manifest|style)\\.json|[0-9]{1,2}/[0-9]+/[0-9]+\\.mvt"))
+        if (!relative.matches("(manifest|style)\\.json|[0-9]{1,2}/[0-9]+/[0-9]+\\.(mvt|png)"))
             throw new IllegalArgumentException("非法矢量成果路径");
+        if ((relative.endsWith(".png") && !"PNG".equals(tiles.getOutputFormat()))
+                || (relative.endsWith(".mvt") && !"MVT".equals(tiles.getOutputFormat())))
+            throw new IllegalArgumentException("请求格式与任务成果不一致");
         var root = storageService.resolveTiles(tiles.getOutputKey());
         var path = root.resolve(relative).normalize();
         try {
@@ -71,7 +74,8 @@ public class ProcessingTaskRecordService {
 
     public JsonNode vectorManifest(Long taskId) throws java.io.IOException {
         var manifest = (ObjectNode) objectMapper.readTree(vectorArtifact(taskId, "manifest.json").toFile());
-        manifest.put("tiles", "/api/gis/task/" + taskId + "/vector/{z}/{x}/{y}.mvt");
+        String extension = "PNG".equals(manifest.path("format").asText()) ? "png" : "mvt";
+        manifest.put("tiles", "/api/gis/task/" + taskId + "/vector/{z}/{x}/{y}." + extension);
         manifest.put("style", "/api/gis/task/" + taskId + "/vector/style.json");
         manifest.put("tileVersion", "static-" + taskId);
         return manifest;
@@ -173,8 +177,14 @@ public class ProcessingTaskRecordService {
         }
         Page<GisProcessingTask> page = taskMapper.selectPage(
                 new Page<>(currentPage, pageSize), query);
+        Map<Long, String> formatsByTaskId = page.getRecords().isEmpty() ? Map.of()
+                : tileSetMapper.selectList(new LambdaQueryWrapper<GisTileSet>()
+                        .select(GisTileSet::getTaskId, GisTileSet::getOutputFormat)
+                        .in(GisTileSet::getTaskId, page.getRecords().stream()
+                                .map(GisProcessingTask::getId).toList()))
+                        .stream().collect(Collectors.toMap(GisTileSet::getTaskId, GisTileSet::getOutputFormat));
         List<GisProcessingTaskSummaryVO> records = page.getRecords().stream()
-                .map(this::toSummary).toList();
+                .map(task -> toSummary(task, formatsByTaskId.get(task.getId()))).toList();
         enrichArchiveStatus(records);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), records);
     }
@@ -186,7 +196,7 @@ public class ProcessingTaskRecordService {
         if (tileSet == null) {
             throw new IllegalStateException("处理任务关联的瓦片集不存在: " + taskId);
         }
-        GisProcessingTaskSummaryVO taskSummary = toSummary(task);
+        GisProcessingTaskSummaryVO taskSummary = toSummary(task, tileSet.getOutputFormat());
         enrichArchiveStatus(List.of(taskSummary));
         return GisProcessingTaskDetailVO.builder()
                 .task(taskSummary)
@@ -291,12 +301,13 @@ public class ProcessingTaskRecordService {
         }
     }
 
-    private GisProcessingTaskSummaryVO toSummary(GisProcessingTask task) {
+    private GisProcessingTaskSummaryVO toSummary(GisProcessingTask task, String outputFormat) {
         GisProcessingTaskSummaryVO result = new GisProcessingTaskSummaryVO();
         result.setId(task.getId());
         result.setTaskNo(task.getTaskNo());
         result.setTaskName(task.getTaskName());
         result.setProcessingType(task.getProcessingType());
+        result.setOutputFormat(outputFormat);
         result.setSourceType(task.getSourceType());
         result.setSourceTypeName(task.getSourceType().displayName());
         result.setPriority(task.getPriority());

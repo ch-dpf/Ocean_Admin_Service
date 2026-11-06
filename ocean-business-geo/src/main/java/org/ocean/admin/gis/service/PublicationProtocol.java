@@ -39,6 +39,8 @@ public interface PublicationProtocol {
     record PublicationAccess(
             String serviceUrl,
             String descriptorUrl,
-            String tileUrlTemplate) {
+            String tileUrlTemplate,
+            String tmsUrl,
+            String tmsTileUrlTemplate) {
     }
 }

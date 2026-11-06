@@ -30,7 +30,7 @@ import java.util.List;
 /** GIS 服务发布的统一管理入口。 */
 @RestController
 @RequestMapping("/api/gis/publications")
-@Tag(name = "GIS服务发布", description = "地形、影像服务的统一发布管理")
+@Tag(name = "GIS服务发布", description = "地形、影像、动态矢量和静态配图服务的统一发布管理")
 @RequiredArgsConstructor
 public class PublicationController {
 
@@ -42,6 +42,13 @@ public class PublicationController {
     @OperationLog(module="GIS_PUBLICATION",type=OperationType.SUBMIT,description="发布动态矢量服务")
     public ResponseResult<?> publishVector(@Valid @RequestBody org.ocean.admin.gis.dto.GisVectorRequests.Publish request) throws java.io.IOException {
         return ResponseResult.success(vectors.publish(request));
+    }
+
+    @PostMapping("/VECTOR/wms/publish")
+    @Operation(summary="按固定数据与样式版本发布动态 WMS 服务")
+    @OperationLog(module="GIS_PUBLICATION",type=OperationType.SUBMIT,description="发布动态 WMS 服务")
+    public ResponseResult<?> publishWms(@Valid @RequestBody org.ocean.admin.gis.dto.GisVectorRequests.Publish request) throws java.io.IOException {
+        return ResponseResult.success(vectors.publish(request, "WMS"));
     }
 
     @PutMapping("/VECTOR/{serviceCode}/styles")
@@ -100,7 +107,7 @@ public class PublicationController {
     @OperationLog(module = "GIS_PUBLICATION", type = OperationType.SUBMIT,
             description = "发布GIS瓦片服务", recordResponse = true)
     public ResponseResult<GisPublicationVO> publish(
-            @Parameter(description = "发布类型：TERRAIN 或 IMAGERY")
+            @Parameter(description = "发布类型：TERRAIN、IMAGERY 或 VECTOR（静态 PNG）")
             @PathVariable GisProcessingType processingType,
             @PathVariable Long sourceTaskId,
             @Valid @RequestBody ServiceNameRequest request) {
@@ -111,7 +118,7 @@ public class PublicationController {
     @GetMapping("/{processingType}/{serviceCode}")
     @Operation(summary = "查询GIS发布信息")
     public ResponseResult<GisPublicationVO> get(
-            @Parameter(description = "发布类型：TERRAIN 或 IMAGERY")
+            @Parameter(description = "发布类型：TERRAIN、IMAGERY 或 VECTOR（静态 PNG）")
             @PathVariable GisProcessingType processingType,
             @PathVariable String serviceCode) {
         return ResponseResult.success(publicationService.get(processingType, serviceCode));
@@ -122,7 +129,7 @@ public class PublicationController {
     @OperationLog(module = "GIS_PUBLICATION", type = OperationType.CANCEL,
             description = "停用GIS瓦片服务", recordResponse = true)
     public ResponseResult<GisPublicationVO> disable(
-            @Parameter(description = "发布类型：TERRAIN 或 IMAGERY")
+            @Parameter(description = "发布类型：TERRAIN、IMAGERY 或 VECTOR（静态 PNG）")
             @PathVariable GisProcessingType processingType,
             @PathVariable String serviceCode) {
         return ResponseResult.success("GIS服务已停用",

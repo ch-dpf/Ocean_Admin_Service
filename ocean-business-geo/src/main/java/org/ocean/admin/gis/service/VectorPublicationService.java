@@ -39,6 +39,8 @@ public class VectorPublicationService {
     private final VectorRenderPlanner planner;
     private final VectorTileProperties limits;
     private final ObjectMapper json;
+    private final org.ocean.admin.gis.mapper.GisDataSetMapper dataSets;
+    private final PublicationRecordService publicationRecords;
     private final Semaphore tileSlots=new Semaphore(4,true);
     private final java.util.LinkedHashMap<String, CachedTile> tileCache = new java.util.LinkedHashMap<>(64, .75f, true);
     private long cacheBytes;
@@ -47,16 +49,25 @@ public class VectorPublicationService {
 
     @Transactional(rollbackFor=Exception.class)
     public GisPublicationVO publish(GisVectorRequests.Publish request) throws IOException {
+        return publish(request, "MVT");
+    }
+
+    /** 两种动态服务共享数据快照与样式发布，协议必须在创建时明确指定。 */
+    @Transactional(rollbackFor=Exception.class)
+    public GisPublicationVO publish(GisVectorRequests.Publish request, String protocol) throws IOException {
+        if (!java.util.Set.of("MVT", "WMS").contains(protocol)) throw new IllegalArgumentException("动态发布协议无效");
         var state=dataSetStyles.require(request.dataSetId(),true);
         ObjectNode binding=bind(request);
         String tileVersion=planner.definition(state).tileVersion();
         GisVectorResource source=mapper.resources(request.dataSetId()).stream()
                 .filter(resource->"PUBLICATION".equals(resource.getResourceKind()))
+                .filter(resource->java.util.Objects.equals(resource.getDataVersion(),state.getDataRevision()))
                 .filter(resource->tileVersion.equals(json.readTree(resource.getDefinitionJson()).path("map").path("tileVersion").asText()))
                 .findFirst().orElse(null);
         if(source==null) source=resources.freeze(request.dataSetId(),"PUBLICATION");
         validateBinding(source,binding);
         GisPublication publication=new GisPublication(); publication.setId(IdWorker.getId());
+        publication.setServiceProtocol(protocol);
         publication.setServiceCode("VECTOR-"+UUID.randomUUID().toString().replace("-","").toUpperCase(java.util.Locale.ROOT));
         publication.setServiceName(request.serviceName().trim()); publication.setDataSetId(request.dataSetId());
         publication.setVectorResourceId(source.getId()); publication.setVectorDefinition(json.writeValueAsString(binding));
@@ -152,6 +163,7 @@ public class VectorPublicationService {
 
     public ObjectNode descriptor(String code) {
         var publication=get(code,true);var resource=resources.require(publication.getVectorResourceId());
+        requireMvt(publication);
         JsonNode contract=json.readTree(resource.getDefinitionJson());JsonNode binding=json.readTree(publication.getVectorDefinition());
         ObjectNode result=json.createObjectNode().put("tilejson","3.0.0").put("name",publication.getServiceName())
                 .put("releaseVersion",binding.path("releaseVersion").asText()).put("defaultStyleId",binding.path("defaultStyleId").asText())
@@ -170,7 +182,9 @@ public class VectorPublicationService {
     }
 
     public JsonNode style(String code,String releaseVersion,String schemeId) {
-        var publication=get(code,true);String saved=publications.vectorRevision(publication.getId(),releaseVersion);
+        var publication=get(code,true);
+        requireMvt(publication);
+        String saved=publications.vectorRevision(publication.getId(),releaseVersion);
         if(saved==null) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"样式发布版本不存在");
         JsonNode binding=json.readTree(saved);
         for(JsonNode scheme:binding.path("styles")) if(schemeId.equals(scheme.path("id").asText())) {
@@ -183,6 +197,7 @@ public class VectorPublicationService {
 
     public byte[] tile(String code,Long resourceId,int z,int x,int y) throws IOException {
         var publication=get(code,true);
+        requireMvt(publication);
         if(!resourceId.equals(publication.getVectorResourceId())) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"瓦片版本不属于该服务");
         if (z < 0 || z > 18 || x < 0 || y < 0 || x >= (1L << z) || y >= (1L << z))
             throw new IllegalArgumentException("瓦片坐标超出范围");
@@ -212,13 +227,26 @@ public class VectorPublicationService {
 
     public GisPublicationVO toVO(GisPublication publication) {
         JsonNode binding = json.readTree(publication.getVectorDefinition());
+        boolean wms = "WMS".equals(publication.getServiceProtocol());
+        var dataSet = publication.getDataSetId() == null ? null : dataSets.selectById(publication.getDataSetId());
+        String root = wms
+                ? publicationRecords.buildServiceRoot(GisProcessingType.VECTOR, publication.getServiceCode()).replaceAll("/$", "")
+                : base(publication.getServiceCode());
         return GisPublicationVO.builder().id(publication.getId()).serviceCode(publication.getServiceCode())
+                .serviceProtocol(publication.getServiceProtocol()).dataSetName(dataSet == null ? null : dataSet.getDataSetName())
                 .serviceName(publication.getServiceName()).processingType(GisProcessingType.VECTOR).dataSetId(publication.getDataSetId())
                 .status(publication.getStatus()).publishTime(publication.getPublishTime()).updateTime(publication.getUpdateTime())
                 .vectorResourceId(publication.getVectorResourceId().toString()).releaseVersion(binding.path("releaseVersion").asText())
                 .defaultStyleId(binding.path("defaultStyleId").asText()).styles(binding.path("styles"))
-                .serviceUrl(base(publication.getServiceCode())).descriptorUrl(base(publication.getServiceCode())+"/manifest.json")
-                .tileUrlTemplate(base(publication.getServiceCode())+"/tiles/"+publication.getVectorResourceId()+"/{z}/{x}/{y}.mvt").build();
+                .targetCrs(wms ? "EPSG:3857 / EPSG:4326" : "EPSG:3857").outputFormat(wms ? "PNG" : "MVT")
+                .serviceUrl(wms ? root + "/wms" : root)
+                .descriptorUrl(wms ? root + "/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities" : root + "/manifest.json")
+                .tileUrlTemplate(wms ? null : root + "/tiles/" + publication.getVectorResourceId() + "/{z}/{x}/{y}.mvt").build();
+    }
+
+    private static void requireMvt(GisPublication publication) {
+        if (!"MVT".equals(publication.getServiceProtocol()))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "当前服务不提供 MVT 资源");
     }
 
     private String base(String code) {return "/gis/publications/VECTOR/"+code;}

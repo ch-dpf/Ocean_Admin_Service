@@ -83,8 +83,6 @@ public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
 
     List<GisDataSetVO.FileSummary> selectDataSetFileSummaries(@Param("ids") List<Long> ids);
 
-    List<GisDataSetVO.FilePoint> selectDataSetFilePoints(@Param("ids") List<Long> ids);
-
     Page<GisFileMetaVO> selectFilePage(Page<GisFileMetaVO> page,
             @Param("q") GisFileQuery query);
 

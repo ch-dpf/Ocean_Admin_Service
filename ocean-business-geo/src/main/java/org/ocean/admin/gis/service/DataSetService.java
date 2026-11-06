@@ -123,8 +123,7 @@ public class DataSetService {
                 queryWrapper
         );
         List<GisDataSetVO> records = page.getRecords().stream().map(this::toVO).toList();
-        populateFileInformation(records, false, 0);
-        populateFilePoints(records);
+        populateFileGroupCounts(records);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), records);
     }
 
@@ -291,13 +290,8 @@ public class DataSetService {
      */
     private void populateFileInformation(List<GisDataSetVO> records, boolean includeFootprints, double tolerance) {
         if (records.isEmpty()) return;
+        populateFileGroupCounts(records);
         List<Long> ids = records.stream().map(GisDataSetVO::getId).toList();
-        Map<Long, Long> groupCounts = new TreeMap<>();
-        for (Map<String, Object> row : fileGroupMapper.selectMaps(new QueryWrapper<GisFileGroup>()
-                .select("data_set_id", "COUNT(*) AS group_count").in("data_set_id", ids)
-                .ne("assembly_status", "DUPLICATE").groupBy("data_set_id"))) {
-            groupCounts.put(((Number) row.get("data_set_id")).longValue(), ((Number) row.get("group_count")).longValue());
-        }
         Map<Long, GisDataSetVO.FileSummary> summaries = gisFileMetaMapper.selectDataSetFileSummaries(ids).stream()
                 .collect(Collectors.toMap(GisDataSetVO.FileSummary::getDataSetId, item -> item));
         Map<Long, List<GisDataSetVO.FootprintRow>> footprints = includeFootprints
@@ -311,7 +305,6 @@ public class DataSetService {
                 summary.setDataSetId(record.getId());
             }
             record.setFileSummary(summary);
-            record.setFileGroupCount(groupCounts.getOrDefault(record.getId(), 0L));
             if (includeFootprints) {
                 List<GisDataSetVO.FootprintFeature> features = footprints.getOrDefault(record.getId(), List.of()).stream()
                         .map(row -> new GisDataSetVO.FootprintFeature("Feature", row.getId().toString(),
@@ -324,17 +317,18 @@ public class DataSetService {
         }
     }
 
-    /**
-     * 填充数据集文件点
-     * @param records 数据集记录
-     */
-    private void populateFilePoints(List<GisDataSetVO> records) {
+    /** 列表仅补充文件组数量，文件数和总大小直接使用数据集已维护的统计值。 */
+    private void populateFileGroupCounts(List<GisDataSetVO> records) {
         if (records.isEmpty()) return;
-        Map<Long, List<GisDataSetVO.FilePoint>> points = gisFileMetaMapper.selectDataSetFilePoints(
-                        records.stream().map(GisDataSetVO::getId).toList()).stream()
-                .collect(Collectors.groupingBy(GisDataSetVO.FilePoint::getDataSetId));
+        List<Long> ids = records.stream().map(GisDataSetVO::getId).toList();
+        Map<Long, Long> groupCounts = new TreeMap<>();
+        for (Map<String, Object> row : fileGroupMapper.selectMaps(new QueryWrapper<GisFileGroup>()
+                .select("data_set_id", "COUNT(*) AS group_count").in("data_set_id", ids)
+                .ne("assembly_status", "DUPLICATE").groupBy("data_set_id"))) {
+            groupCounts.put(((Number) row.get("data_set_id")).longValue(), ((Number) row.get("group_count")).longValue());
+        }
         for (GisDataSetVO record : records) {
-            record.setFilePoints(points.getOrDefault(record.getId(), List.of()));
+            record.setFileGroupCount(groupCounts.getOrDefault(record.getId(), 0L));
         }
     }
 

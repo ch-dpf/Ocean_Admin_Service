@@ -67,6 +67,16 @@ public class ProcessingTaskController {
                 .header("Vary", "Accept-Encoding").body(new org.springframework.core.io.FileSystemResource(path));
     }
 
+    /** 读取已完成任务的 PNG，沿用任务接口的权限约束。 */
+    @GetMapping(value = "/{taskId}/vector/{z}/{x}/{y}.png", produces = MediaType.IMAGE_PNG_VALUE)
+    public org.springframework.http.ResponseEntity<org.springframework.core.io.Resource> rasterTile(@PathVariable Long taskId,
+            @PathVariable int z, @PathVariable int x, @PathVariable int y) {
+        var path = taskService.vectorArtifact(taskId, z + "/" + x + "/" + y + ".png");
+        return org.springframework.http.ResponseEntity.ok().contentType(MediaType.IMAGE_PNG)
+                .header("Cache-Control", "private, max-age=300")
+                .body(new org.springframework.core.io.FileSystemResource(path));
+    }
+
     /** 静态瓦片生成任务的名称修改请求。 */
     public record RenameTaskRequest(
             @NotBlank @Size(max = 200) String taskName) { }

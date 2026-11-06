@@ -171,7 +171,10 @@ public class FileSpatialMetadataService {
             if (dataSetMapper.selectActiveByIdForUpdate(claim.getDataSetId()) == null || !fileGroups.lockCurrent(group)) return;
             GisFileMeta locked = spatialMapper.lockClaim(fileId, claim.getMetadataVersion());
             if (locked == null) return;
-            if (code != null) vectorMapper.deleteExtractingLayersBySource(fileId);
+            if (code != null) {
+                vectorMapper.deleteExtractingLayersBySource(fileId);
+                vectorMapper.retireUnusedWorkingResources(fileId);
+            }
             spatialMapper.deleteByFileId(fileId);
             for (GisFileSpatialMetadata item : extracted) spatialMapper.insert(item);
             GisFileMeta point = extracted.isEmpty() ? null : spatialMapper.selectRepresentativePoint(fileId);
@@ -179,7 +182,8 @@ public class FileSpatialMetadataService {
             if (extractedVector != null) {
                 vectorDataSetStyles.require(claim.getDataSetId(), true);
                 for (Long layerId : extractedVector.layerIds()) {
-                    if (vectorMapper.refreshLayer(layerId) != 1 || vectorMapper.setLayerStatus(layerId, "READY") != 1)
+                    // 工作包构建时已校验并登记数量和范围，不能再从 PostGIS 空表覆盖汇总。
+                    if (vectorMapper.setLayerStatus(layerId, "READY") != 1)
                         throw new IllegalStateException("矢量图层提取结果提交失败: " + fileId);
                 }
                 vectorMapper.bumpDataSetRevision(claim.getDataSetId(), true, true);

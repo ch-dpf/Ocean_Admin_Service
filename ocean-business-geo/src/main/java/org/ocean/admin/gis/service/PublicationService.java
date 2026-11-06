@@ -80,21 +80,26 @@ public class PublicationService {
     }
 
     public GisPublicationVO get(GisProcessingType processingType, String serviceCode) {
-        if(processingType==GisProcessingType.VECTOR) return vectors.toVO(vectors.get(serviceCode,false));
+        if (processingType == GisProcessingType.VECTOR)
+            return toVO(recordService.getRequired(processingType, serviceCode));
         PublicationProtocol protocol = requireProtocol(processingType);
         return toVO(recordService.getRequired(
                 processingType, protocol.normalizeServiceCode(serviceCode)));
     }
 
     public GisPublicationVO rename(GisProcessingType processingType, String serviceCode, String serviceName) {
-        if(processingType==GisProcessingType.VECTOR) return vectors.rename(serviceCode,serviceName);
+        if (processingType == GisProcessingType.VECTOR
+                && recordService.getRequired(processingType, serviceCode).getVectorResourceId() != null)
+            return vectors.rename(serviceCode, serviceName);
         PublicationProtocol protocol = requireProtocol(processingType);
         return toVO(recordService.rename(processingType,
                 protocol.normalizeServiceCode(serviceCode), serviceName));
     }
 
     public GisPublicationVO disable(GisProcessingType processingType, String serviceCode) {
-        if(processingType==GisProcessingType.VECTOR) return vectors.disable(serviceCode);
+        if (processingType == GisProcessingType.VECTOR
+                && recordService.getRequired(processingType, serviceCode).getVectorResourceId() != null)
+            return vectors.disable(serviceCode);
         PublicationProtocol protocol = requireProtocol(processingType);
         String normalizedCode = protocol.normalizeServiceCode(serviceCode);
         GisPublication publication = recordService.disable(
@@ -122,12 +127,13 @@ public class PublicationService {
                 ? new PublicationProtocol.PublicationAccess(
                         recordService.buildServiceRoot(
                                 tileSet.getTileType(), publication.getServiceCode()),
-                        null, null)
+                        null, null, null, null)
                 : protocol.buildAccess(publication, tileSet);
         return GisPublicationVO.builder()
                 .id(publication.getId())
                 .serviceCode(publication.getServiceCode())
                 .serviceName(publication.getServiceName())
+                .serviceProtocol(publication.getServiceProtocol())
                 .processingType(tileSet.getTileType())
                 .tileSetId(tileSet.getId())
                 .sourceTaskId(tileSet.getTaskId())
@@ -144,6 +150,8 @@ public class PublicationService {
                 .serviceUrl(access.serviceUrl())
                 .descriptorUrl(access.descriptorUrl())
                 .tileUrlTemplate(access.tileUrlTemplate())
+                .tmsUrl(access.tmsUrl())
+                .tmsTileUrlTemplate(access.tmsTileUrlTemplate())
                 .publishTime(publication.getPublishTime())
                 .updateTime(publication.getUpdateTime())
                 .build();

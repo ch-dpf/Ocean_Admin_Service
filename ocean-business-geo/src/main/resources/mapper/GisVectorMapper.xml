@@ -48,6 +48,12 @@
         JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
         WHERE l.id = #{id} AND l.deleted = 0 AND l.layer_status = 'READY'
     </select>
+    <select id="tileLayers" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
+        SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        WHERE l.data_set_id=#{id} AND l.deleted=0 AND l.layer_status='READY'
+          AND l.geographic_extent &amp;&amp; ST_MakeEnvelope(#{b[0]},#{b[1]},#{b[2]},#{b[3]},4326)
+        ORDER BY l.id
+    </select>
     <select id="lockLayer" resultType="org.ocean.admin.gis.entity.GisVectorLayer" flushCache="true">
         SELECT <include refid="layerColumns"/> FROM ocean_gis.gis_vector_layer l
         JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0

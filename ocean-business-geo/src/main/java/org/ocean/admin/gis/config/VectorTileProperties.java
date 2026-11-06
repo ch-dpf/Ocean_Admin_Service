@@ -17,6 +17,9 @@ public class VectorTileProperties {
     /** 单次静态矢量任务允许生成的瓦片数量上限。 */
     @Positive
     private long maxStaticTileCount = 50_000;
+    /** 静态栅格任务使用独立进程，允许较长运行时间，单位为秒。 */
+    @Min(60) @Max(86400)
+    private long staticRasterTimeoutSeconds = 21600;
     /** 单个压缩矢量瓦片允许的最大字节数。 */
     @Positive
     private int maxTileBytes = 2 * 1024 * 1024;

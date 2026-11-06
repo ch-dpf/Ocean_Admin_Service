@@ -63,7 +63,7 @@ public class VectorResourceInputResolver implements GisProcessingInputResolver {
             schemes.validateScheme(state, parameters.schemeSnapshot().path("definition"));
             heartbeat.run();
             try {
-                var frozen = resources.freeze(parameters.dataSetId(), "PUBLICATION");
+                var frozen = resources.freeze(parameters.dataSetId(), "PUBLICATION", heartbeat, progress);
                 Path input = paths.getFirst();
                 Files.createDirectories(input.getParent());
                 Files.copy(store.path(frozen.getStorageKey()), input);

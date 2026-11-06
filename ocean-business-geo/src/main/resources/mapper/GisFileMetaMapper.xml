@@ -16,17 +16,6 @@
         GROUP BY fm.data_set_id
     </select>
 
-    <select id="selectDataSetFilePoints" resultType="org.ocean.admin.gis.vo.GisDataSetVO$FilePoint">
-        SELECT data_set_id, id AS file_id, original_name AS file_name,
-               representative_longitude AS longitude, representative_latitude AS latitude,
-               representative_layer_key AS layer_key, representative_extent_kind AS extent_kind
-        FROM ocean_gis.gis_file_meta
-        WHERE deleted = 0 AND file_status = 'READY' AND metadata_status = 'COMPLETED'
-          AND data_set_id IN
-        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
-        ORDER BY data_set_id, id
-    </select>
-
     <sql id="queryEnvelope">
         <choose>
             <when test="q.west &gt; q.east">

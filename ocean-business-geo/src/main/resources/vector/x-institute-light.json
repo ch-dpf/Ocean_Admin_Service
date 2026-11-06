@@ -2,15 +2,12 @@
   "schemaVersion": 3,
   "kind": "VECTOR_DATASET_STYLE_TEMPLATE",
   "templateId": "x-institute-light",
-  "templateVersion": 2,
+  "templateVersion": 3,
   "name": "x院业务分类－亮色",
   "description": "依据原始图层和当前亮色与暗色主题样式清单配置业务分类、比例尺与配图。",
   "provenance": {
     "excluded": [
-      "china_line_train.shp",
-      "label_sources\\world_poi_ocean.shp",
-      "osm_taiwan\\osm_china_line_metro.shp",
-      "osm_taiwan\\osm_china_line_train.shp"
+      "label_sources\\world_poi_ocean.shp"
     ],
     "sldDirectory": "configuration/ocean_basemap/styles",
     "assumptions": {
@@ -36,7 +33,8 @@
     },
     "styleChecklist": "04-当前亮色与暗色主题样式清单.md",
     "scaleConvention": "WEB_MERCATOR_256；整数边界按SLD数值精度归一化，[minZoom,maxZoom)",
-    "sldVerifiedDirectory": "E:/web service/geoserver-3.0.1-bin/configuration/ocean_basemap/styles"
+    "sldVerifiedDirectory": "E:/web service/geoserver-3.0.1-bin/configuration/ocean_basemap/styles",
+    "classificationSupplement": "补齐铁路、地铁源图层分类；河流面经几何处理拆出的线分量单独归类，保留来源与原始属性。新增线样式沿用通用模板的铁路和水系符号。"
   },
   "initialization": {
     "onDatasetCreate": "COPY_TEMPLATE_TO_DATASET_SNAPSHOT",
@@ -565,6 +563,63 @@
       "nodeType": "CLASSIFICATION"
     },
     {
+      "nodeType": "BUSINESS_FOLDER",
+      "parentId": "x-light",
+      "geometryType": null,
+      "assignable": false,
+      "name": "铁路与轨道交通",
+      "sortOrder": 7,
+      "id": "x-light-rail"
+    },
+    {
+      "placement": "X_LIGHT",
+      "sortOrder": 1,
+      "parentId": "x-light-rail",
+      "id": "x-light-china-line-train",
+      "defaultLayerEnabled": true,
+      "name": "中国铁路",
+      "defaultStyleId": "style-x-light-china-line-train",
+      "assignable": true,
+      "geometryType": "LINE",
+      "nodeType": "CLASSIFICATION"
+    },
+    {
+      "placement": "X_LIGHT",
+      "sortOrder": 2,
+      "parentId": "x-light-rail",
+      "id": "x-light-osm-china-line-train",
+      "defaultLayerEnabled": true,
+      "name": "OSM铁路与轨道",
+      "defaultStyleId": "style-x-light-osm-china-line-train",
+      "assignable": true,
+      "geometryType": "LINE",
+      "nodeType": "CLASSIFICATION"
+    },
+    {
+      "placement": "X_LIGHT",
+      "sortOrder": 3,
+      "parentId": "x-light-rail",
+      "id": "x-light-osm-china-line-metro",
+      "defaultLayerEnabled": true,
+      "name": "OSM地铁",
+      "defaultStyleId": "style-x-light-osm-china-line-metro",
+      "assignable": true,
+      "geometryType": "LINE",
+      "nodeType": "CLASSIFICATION"
+    },
+    {
+      "placement": "X_LIGHT",
+      "sortOrder": 17,
+      "parentId": "x-light-water",
+      "id": "x-light-osm-china-aoi-river-line",
+      "defaultLayerEnabled": true,
+      "name": "OSM河流面附属线",
+      "defaultStyleId": "style-x-light-osm-china-aoi-river-line",
+      "assignable": true,
+      "geometryType": "LINE",
+      "nodeType": "CLASSIFICATION"
+    },
+    {
       "id": "unknown",
       "parentId": "x-light",
       "name": "未匹配图层",
@@ -964,6 +1019,46 @@
         ],
         "groupId": "x-light-china-poi-city",
         "id": "classify-x-light-china-poi-city"
+      },
+      {
+        "placement": "X_LIGHT",
+        "sourceClasses": [],
+        "geometryType": "LINE",
+        "sourceLayers": [
+          "china_line_train"
+        ],
+        "groupId": "x-light-china-line-train",
+        "id": "classify-x-light-china-line-train"
+      },
+      {
+        "placement": "X_LIGHT",
+        "sourceClasses": [],
+        "geometryType": "LINE",
+        "sourceLayers": [
+          "osm_china_line_train"
+        ],
+        "groupId": "x-light-osm-china-line-train",
+        "id": "classify-x-light-osm-china-line-train"
+      },
+      {
+        "placement": "X_LIGHT",
+        "sourceClasses": [],
+        "geometryType": "LINE",
+        "sourceLayers": [
+          "osm_china_line_metro"
+        ],
+        "groupId": "x-light-osm-china-line-metro",
+        "id": "classify-x-light-osm-china-line-metro"
+      },
+      {
+        "placement": "X_LIGHT",
+        "sourceClasses": [],
+        "geometryType": "LINE",
+        "sourceLayers": [
+          "osm_china_aoi_river"
+        ],
+        "groupId": "x-light-osm-china-aoi-river-line",
+        "id": "classify-x-light-osm-china-aoi-river-line"
       }
     ],
     "strategy": "FIRST_MATCH",
@@ -1321,6 +1416,30 @@
         "minZoom": 15,
         "preserveBoundary": false,
         "overrides": []
+      },
+      {
+        "preserveBoundary": false,
+        "overrides": [],
+        "minZoom": 9,
+        "groupKey": "x-light-china-line-train"
+      },
+      {
+        "preserveBoundary": false,
+        "overrides": [],
+        "minZoom": 9,
+        "groupKey": "x-light-osm-china-line-train"
+      },
+      {
+        "preserveBoundary": false,
+        "overrides": [],
+        "minZoom": 11,
+        "groupKey": "x-light-osm-china-line-metro"
+      },
+      {
+        "preserveBoundary": false,
+        "overrides": [],
+        "minZoom": 15,
+        "groupKey": "x-light-osm-china-aoi-river-line"
       }
     ],
     "propertyFields": [
@@ -7334,6 +7453,138 @@
           "strokeColor": "#b2927c",
           "strokeWidth": 1,
           "strokeOpacity": 1
+        },
+        "labels": {
+          "enabled": false,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 14,
+          "collisionAvoidance": true
+        },
+        "overrides": []
+      },
+      {
+        "id": "style-x-light-china-line-train",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 9,
+        "maxZoom": 25,
+        "renderOrder": 450,
+        "symbol": {
+          "color": "#7e6ca6",
+          "width": 1.2,
+          "opacity": 1,
+          "dashArray": [
+            4,
+            3
+          ]
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 14,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              6,
+              1.2
+            ],
+            [
+              16,
+              2.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-x-light-osm-china-line-train",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 9,
+        "maxZoom": 25,
+        "renderOrder": 450,
+        "symbol": {
+          "color": "#7e6ca6",
+          "width": 1.2,
+          "opacity": 1,
+          "dashArray": [
+            4,
+            3
+          ]
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 14,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              6,
+              1.2
+            ],
+            [
+              16,
+              2.2
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-x-light-osm-china-line-metro",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 11,
+        "maxZoom": 25,
+        "renderOrder": 450,
+        "symbol": {
+          "color": "#a05b8d",
+          "width": 1.3,
+          "opacity": 1,
+          "dashArray": [
+            4,
+            3
+          ]
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 14,
+          "collisionAvoidance": true
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              6,
+              1.3
+            ],
+            [
+              16,
+              2.4
+            ]
+          ]
+        }
+      },
+      {
+        "id": "style-x-light-osm-china-aoi-river-line",
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 15,
+        "maxZoom": 25,
+        "renderOrder": 450,
+        "symbol": {
+          "color": "#3289a8",
+          "width": 1.4,
+          "opacity": 1
         },
         "labels": {
           "enabled": false,

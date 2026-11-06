@@ -46,6 +46,8 @@ mvn -pl ocean-bootstrap -am spring-boot:run
 
 ## GIS 空间元数据与范围查询
 
+`GET /api/gis/dataSet/page` 仅接受 `current`、`size`、`categoryId`、`dataSetName`，返回数据集基本信息及文件数、文件组数、总大小，不查询或返回 `filePoints`，也不加载文件解析状态汇总。卡片按分类显示 `GET /api/gis/dataSet/thumbnails/{imagery|terrain|vector}.png` 提供的类型示意图，原图位于 GIS 模块的 `src/main/resources/static/dataset-thumbnails/`，浏览器缓存一天。示意图不代表数据集实际覆盖范围；查看真实范围时按需调用 `GET /api/gis/dataSet/{id}/footprints?simplifyTolerance=0`。本次移除了分页响应的点位字段，前后端需同步更新。
+
 上传或工作区扫描整批收口后，后台自动识别文件组，再进入 `EXTRACTING_METADATA`。文件组是业务管理和解析单位，单个独立文件也建立组；同一数据集可包含多个组，每个物理文件最多属于一个组。矢量组在同一次提取中生成可编辑图层与要素，所有图层 READY 后才计为解析成功。接入仍使用现有数据集、文件或工作区路径参数，不要求客户端提供分组清单。
 
 支持的矢量入口为 GeoJSON、SHP、DXF、MIF、TAB、CSV、GPX、DWG；栅格入口为 GeoTIFF、IMG、JPG/JPEG、PNG、GIF、GRIB2。GeoJSON 与 GeoTIFF 保留既有 Java 解析链路，其他格式通过 GDAL/OGR 读取真实图层或波段。GeoJSON 继续要求 RFC 7946 的 WGS84 经度、纬度顺序，接受下文列出的顶层旧式 WGS84 命名 `crs` 声明；读取配置不能将任意投影的 JSON 当作标准 GeoJSON 导入。

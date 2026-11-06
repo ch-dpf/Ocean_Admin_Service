@@ -35,7 +35,7 @@ import java.util.zip.GZIPOutputStream;
 @Slf4j
 @Service
 public class VectorTileService {
-    private static final String TILE_PREFIX = "gis:vector:dataset:tile:v3:";
+    private static final String TILE_PREFIX = "gis:vector:dataset:tile:v4:";
     private static final String CACHE_INDEX = "gis:vector:dataset:tile:index";
     private static final DefaultRedisScript<String> CACHE_READ = new DefaultRedisScript<>("""
             if redis.call('STRLEN',KEYS[1]) > tonumber(ARGV[1]) then return false end
@@ -90,24 +90,54 @@ public class VectorTileService {
     }
 
     public GisVectorVO.MapDefinition definition(Long dataSetId) {
+        requireState(dataSetId);
+        resources.finishPending(dataSetId);
         return spatial(() -> {
             var definition = contract(requireState(dataSetId)).definition();
             var extent = mapper.dataSetExtent(dataSetId);
-            return new GisVectorVO.MapDefinition(definition.dataSetId(),definition.tileVersion(),definition.dataRevision(),
+            return new GisVectorVO.MapDefinition(definition.dataSetId(),definition.tileVersion(),definition.dataRevision(),Long.toString(mapper.latestChange(dataSetId)),
                     definition.minZoom(),definition.nativeMaxZoom(),definition.displayMaxZoom(),definition.tileSize(),
                     definition.tiles(),extent == null ? null : json.readTree(extent));
         });
     }
 
     public byte[] getTile(Long dataSetId, String tileVersion, int z, int x, int y) {
+        return getTile(dataSetId, tileVersion, z, x, y, 0);
+    }
+
+    public GisVectorVO.TileChanges changes(Long dataSetId, long after) {
+        if (after < 0) throw bad("变更游标无效");
+        requireState(dataSetId);
+        resources.finishPending(dataSetId);
+        return spatial(() -> {
+            var definition = contract(requireState(dataSetId)).definition();
+            long latest = mapper.latestChange(dataSetId);
+            var nodes = json.readTree(mapper.changes(dataSetId, after));
+            boolean reset = after > latest || nodes.size() > 256;
+            var changes = new java.util.ArrayList<GisVectorVO.TileChange>();
+            if (!reset) for (var node : nodes) changes.add(json.treeToValue(node, GisVectorVO.TileChange.class));
+            return new GisVectorVO.TileChanges(Long.toString(latest), definition.tileVersion(), reset, changes);
+        });
+    }
+
+    private byte[] getTile(Long dataSetId, String tileVersion, int z, int x, int y, int attempt) {
         long started = System.nanoTime();
         String[] phase = {"访问校验"};
         try {
             if (tileVersion == null || !tileVersion.matches("[a-f0-9]{64}")) throw bad("tileVersion无效");
             // 包括缓存命中也必须验证数据集仍可访问，不能从Redis绕过删除/权限检查。
             requireState(dataSetId);
+            resources.finishPending(dataSetId);
             requireTile(z, x, y, 18);
-            String key = TILE_PREFIX + dataSetId + ':' + tileVersion + ':' + z + ':' + x + ':' + y;
+            var initial = contract(requireState(dataSetId));
+            if (!initial.definition().tileVersion().equals(tileVersion))
+                throw new ResponseStatusException(HttpStatus.GONE, "瓦片规则已更新，请重新读取地图定义");
+            var policy = json.readTree(initial.policy());
+            double margin = policy.path("buffer").asDouble(256) / policy.path("extent").asDouble(8192);
+            long revision = mapper.tileRevision(dataSetId,z,x,y,margin);
+            // 修订记录可能刚刚提交；必须先完成其工作包写入，才能读取该修订的缓存或数据。
+            resources.finishPending(dataSetId);
+            String key = TILE_PREFIX + dataSetId + ':' + tileVersion + ':' + z + ':' + x + ':' + y + ':' + revision;
             phase[0] = "缓存读取";
             byte[] cached = cachedTile(key);
             if (cached != null) return cached;
@@ -153,6 +183,13 @@ public class VectorTileService {
                     phase[0] = "事务提交";
                     return payload.body();
                 });
+                // 生成期间编辑可能已经提交；旧结果只能属于旧修订，不能进入最新缓存或覆盖地图。
+                if (mapper.tileRevision(dataSetId,z,x,y,margin) != revision) {
+                    if (attempt >= 2) throw new ResponseStatusException(HttpStatus.CONFLICT,"瓦片区域正在编辑，请重试");
+                    byte[] latest = getTile(dataSetId,tileVersion,z,x,y,attempt+1);
+                    result.complete(latest);
+                    return latest;
+                }
                 // 空间查询事务先完成并释放执行名额，缓存网络等待不占用数据库连接。
                 phase[0] = "缓存写入";
                 cache(key, body);
