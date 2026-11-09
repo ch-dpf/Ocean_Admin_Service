@@ -184,7 +184,7 @@ public class GdalDatasetReader {
                 catch (IOException ex) { throw new IllegalStateException("无法构造地图工作进程", ex); }
             });
         }
-        if (Set.of("QUERY", "TILE").contains(request.path("packageOperation").asText())) {
+        if (Set.of("QUERY", "TILE", "WINDOW").contains(request.path("packageOperation").asText())) {
             return tileWorkers.execute(request, path -> {
                 try { return workerCommand(path); }
                 catch (IOException ex) { throw new IllegalStateException("无法构造瓦片工作进程", ex); }
@@ -206,7 +206,10 @@ public class GdalDatasetReader {
         try {
             request.put("version", properties.getGdalVersion());
             request.put("maxMetadataBytes", Math.max(properties.getGdalMaxMetadataBytes(), 16 * 1024 * 1024));
-            if (Set.of("QUERY","TILE").contains(request.path("packageOperation").asText())) context.timeout=Duration.ofSeconds(30);
+            if (Set.of("QUERY", "TILE", "WINDOW").contains(
+                    request.path("packageOperation").asText())) {
+                context.timeout = Duration.ofSeconds(30);
+            }
             if (request.hasNonNull("output")) context.packageOutput = Path.of(request.path("output").asText());
             Path requestFile = context.directory().resolve("request.json");
             json.writeValue(requestFile.toFile(), request);
@@ -654,7 +657,7 @@ public class GdalDatasetReader {
                                     || Files.size(requestFile) > 16 * 1024 * 1024) throw new IOException("瓦片请求文件无效");
                             JsonNode request = mapper.readTree(requestFile.toFile());
                             if (!initialized) { initialize(request.path("version").asText()); initialized = true; }
-                            if (!Set.of("TILE", "QUERY", "WMS_MAP").contains(request.path("packageOperation").asText()))
+                            if (!Set.of("TILE", "QUERY", "WINDOW", "WMS_MAP").contains(request.path("packageOperation").asText()))
                                 throw new IOException("交互工作进程仅允许读取操作");
                             response = GeoPackageStore.executeNative(request, requestFile.getParent(), mapper);
                         } catch (Exception ex) { response = error(mapper, "PACKAGE_IO", ex.getMessage()); }

@@ -938,3 +938,41 @@ CREATE TABLE ocean_gis.gis_vector_publication_revision (
     PRIMARY KEY(publication_id,release_version)
 );
 COMMENT ON TABLE ocean_gis.gis_vector_publication_revision IS '已发布样式组合的不可变版本；共享发布记录的固定瓦片源';
+-- =========================================================
+-- WMTS/WMS/TMS 独立服务发布
+-- =========================================================
+
+CREATE TABLE ocean_gis.gis_ogc_service (
+    id                  BIGINT       PRIMARY KEY,
+    service_code        VARCHAR(64)  NOT NULL,
+    protocol            VARCHAR(16)  NOT NULL,
+    service_name        VARCHAR(200) NOT NULL,
+    layer_name          VARCHAR(200) NOT NULL,
+    description         VARCHAR(500),
+    tile_set_id         BIGINT       NOT NULL REFERENCES ocean_gis.gis_tile_set(id) ON DELETE CASCADE,
+    source_task_id      BIGINT       NOT NULL REFERENCES ocean_gis.gis_processing_task(id) ON DELETE CASCADE,
+    data_set_id         BIGINT,
+    status              VARCHAR(20)  NOT NULL DEFAULT 'PUBLISHED',
+    min_zoom            INTEGER      NOT NULL,
+    max_zoom            INTEGER      NOT NULL,
+    target_crs          VARCHAR(32)  NOT NULL,
+    tile_matrix_set     VARCHAR(64)  NOT NULL,
+    output_format       VARCHAR(32)  NOT NULL,
+    tile_profile        VARCHAR(32)  NOT NULL,
+    publish_time        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_gis_ogc_service_code UNIQUE (service_code),
+    CONSTRAINT uk_gis_ogc_service_task_protocol UNIQUE (source_task_id, protocol),
+    CONSTRAINT ck_gis_ogc_service_protocol CHECK (protocol IN ('WMTS','WMS','TMS')),
+    CONSTRAINT ck_gis_ogc_service_status CHECK (status IN ('PUBLISHED','DISABLED')),
+    CONSTRAINT ck_gis_ogc_service_zoom CHECK (min_zoom >= 0 AND max_zoom >= min_zoom AND max_zoom <= 22)
+);
+CREATE INDEX idx_gis_ogc_service_protocol_status
+    ON ocean_gis.gis_ogc_service (protocol, status, publish_time DESC);
+CREATE INDEX idx_gis_ogc_service_data_set
+    ON ocean_gis.gis_ogc_service (data_set_id);
+COMMENT ON TABLE ocean_gis.gis_ogc_service IS 'WMTS、WMS、TMS 独立发布服务；与地形、影像、矢量发布记录互不依赖';
+COMMENT ON COLUMN ocean_gis.gis_ogc_service.service_code IS '后端生成的稳定编码，同时作为 OGC 请求的 LAYER 标识';
+COMMENT ON COLUMN ocean_gis.gis_ogc_service.layer_name IS '仅用于能力文档展示的图层名称，改名不影响服务链接';
+COMMENT ON COLUMN ocean_gis.gis_ogc_service.tile_set_id IS '发布时关联的已完成影像瓦片集';
+COMMENT ON COLUMN ocean_gis.gis_ogc_service.min_zoom IS '服务对外层级下界，发布时可覆盖切片层级但不得超出产物范围';
