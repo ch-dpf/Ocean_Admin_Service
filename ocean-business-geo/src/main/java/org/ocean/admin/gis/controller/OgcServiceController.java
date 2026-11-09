@@ -22,24 +22,26 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** WMTS、WMS、TMS 独立服务的发布与列表管理入口。 */
+/** WMTS、WMS、TMS 独立服务与动态矢量 OGC 服务的统一发布管理入口。 */
 @RestController
 @RequestMapping("/api/gis/ogc-services")
-@Tag(name = "OGC服务发布", description = "WMTS、WMS、TMS 独立发布管理")
+@Tag(name = "OGC服务发布", description = "按资源类型发布栅格 OGC 服务或动态矢量 OGC 服务")
 @RequiredArgsConstructor
 public class OgcServiceController {
 
     private final OgcServicePublicationService ogcServicePublicationService;
 
     @PostMapping("/publish")
-    @Operation(summary = "发布影像瓦片集为独立 OGC 服务")
+    @Operation(summary = "按资源类型发布 OGC 服务",
+            description = "RASTER 发布影像瓦片集；VECTOR 发布冻结数据与样式的动态矢量服务")
     @OperationLog(module = "GIS_PUBLICATION", type = OperationType.SUBMIT,
-            description = "发布 WMTS/WMS/TMS 服务", recordResponse = true)
+            description = "发布 OGC 服务", recordResponse = true)
     public ResponseResult<GisOgcServiceVO> publish(
-            @Valid @RequestBody OgcServicePublishRequest request) {
+            @Valid @RequestBody OgcServicePublishRequest request) throws IOException {
         return ResponseResult.success("OGC 服务发布成功",
                 ogcServicePublicationService.publish(request));
     }

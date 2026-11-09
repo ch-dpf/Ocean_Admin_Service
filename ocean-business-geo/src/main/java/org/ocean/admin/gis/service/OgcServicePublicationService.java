@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.dto.GisVectorRequests;
 import org.ocean.admin.gis.dto.OgcServicePublishRequest;
 import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.entity.GisDataSet;
@@ -20,6 +21,7 @@ import org.ocean.admin.gis.ogc.TileMatrixSetDefinition;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.vo.GisOgcServiceVO;
+import org.ocean.admin.gis.vo.GisPublicationVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,7 +38,7 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-/** WMTS、WMS、TMS 独立服务的发布、查询、停用与启用。 */
+/** WMTS、WMS、TMS 栅格独立服务与动态矢量 OGC 服务的统一发布入口。 */
 @Service
 @RequiredArgsConstructor
 public class OgcServicePublicationService {
@@ -44,6 +46,8 @@ public class OgcServicePublicationService {
     public static final String PUBLISHED = "PUBLISHED";
     public static final String DISABLED = "DISABLED";
 
+    private static final String RASTER = "RASTER";
+    private static final String VECTOR = "VECTOR";
     private static final String AVAILABLE = "AVAILABLE";
     private static final String READY = "READY";
     private static final String IMAGERY_PREFIX = "imagery/";
@@ -55,6 +59,7 @@ public class OgcServicePublicationService {
     private final GisProcessingStorageService storageService;
     private final GisProcessingInputMapper inputMapper;
     private final GisDataSetMapper dataSetMapper;
+    private final VectorPublicationService vectorPublicationService;
     private final ObjectMapper objectMapper;
 
     /** 分页查询独立服务列表；行内包含地址、能力参数、状态与关联信息。 */
@@ -97,12 +102,35 @@ public class OgcServicePublicationService {
     }
 
     /**
-     * 发布影像瓦片集为一种独立 OGC 服务。
+     * 按资源类型发布 OGC 服务：栅格写独立服务记录，矢量复用动态矢量发布。
      *
-     * <p>发布前强校验任务完成、瓦片集 READY、tilejson.json 合法且至少存在一张瓦片。</p>
+     * <p>栅格发布前强校验任务完成、瓦片集 READY、tilejson.json 合法且至少存在一张瓦片；
+     * 矢量发布写 gis_publication，运行时目录会自动把它纳入 WMS、WMTS、TMS 与 WFS。</p>
      */
     @Transactional(rollbackFor = Exception.class)
-    public GisOgcServiceVO publish(OgcServicePublishRequest request) {
+    public GisOgcServiceVO publish(OgcServicePublishRequest request) throws IOException {
+        String resourceType = upperTrimToNull(request.resourceType());
+        if (RASTER.equals(resourceType)) {
+            return publishRaster(request);
+        }
+        if (VECTOR.equals(resourceType)) {
+            return publishVector(request);
+        }
+        throw new IllegalArgumentException("发布资源类型只能为 RASTER 或 VECTOR");
+    }
+
+    /** 栅格模式校验条件必填字段，并沿用原有独立 OGC 发布流程。 */
+    private GisOgcServiceVO publishRaster(OgcServicePublishRequest request) {
+        if (request.sourceTaskId() == null) {
+            throw new IllegalArgumentException("源任务 ID 不能为空");
+        }
+        if (request.protocol() == null || request.protocol().isBlank()) {
+            throw new IllegalArgumentException("服务类型不能为空");
+        }
+        if (request.layerName() == null || request.layerName().isBlank()
+                || request.layerName().length() > 200) {
+            throw new IllegalArgumentException("图层名称不能为空且最多 200 个字符");
+        }
         OgcProtocol protocol = OgcProtocol.parse(request.protocol());
         String serviceName = requiredText(request.serviceName(), "服务名称", 200);
         String layerName = requiredText(request.layerName(), "图层名称", 200);
@@ -153,6 +181,27 @@ public class OgcServicePublicationService {
             throw new IllegalStateException("OGC 服务发布记录保存失败");
         }
         return toVO(service, tileSet, artifact);
+    }
+
+    /** 矢量模式委托现有动态发布，返回统一 OGC 视图而不写 gis_ogc_service。 */
+    private GisOgcServiceVO publishVector(OgcServicePublishRequest request) throws IOException {
+        if (request.dataSetId() == null || request.dataSetId() <= 0) {
+            throw new IllegalArgumentException("矢量数据集 ID 不能为空且必须为正数");
+        }
+        if (request.styleSchemeIds() == null || request.styleSchemeIds().isEmpty()) {
+            throw new IllegalArgumentException("至少需要选择一套矢量样式方案");
+        }
+        if (request.styleSchemeIds().size() > 100) {
+            throw new IllegalArgumentException("矢量样式方案最多 100 套");
+        }
+        if (request.defaultStyleSchemeId() == null || request.defaultStyleSchemeId() <= 0) {
+            throw new IllegalArgumentException("默认样式方案 ID 不能为空且必须为正数");
+        }
+        GisVectorRequests.Publish vectorRequest = request.vectorRequest();
+        if (!vectorRequest.styleSchemeIds().contains(vectorRequest.defaultStyleSchemeId())) {
+            throw new IllegalArgumentException("默认样式方案必须属于所选方案");
+        }
+        return vectorVO(vectorPublicationService.publish(vectorRequest));
     }
 
     /** 停用服务；停用后三个协议的能力文档与瓦片请求都不再暴露该图层。 */
@@ -229,6 +278,7 @@ public class OgcServicePublicationService {
         GisOgcServiceVO.GisOgcServiceVOBuilder builder = GisOgcServiceVO.builder()
                 .id(service.getId())
                 .serviceCode(service.getServiceCode())
+                .resourceType(RASTER)
                 .protocol(service.getProtocol())
                 .serviceName(service.getServiceName())
                 .layerName(service.getLayerName())
@@ -260,6 +310,41 @@ public class OgcServicePublicationService {
             builder.wmtsTileMatrixSetLimits(matrixLimits(service, artifact));
         }
         return builder.build();
+    }
+
+    /** 动态矢量发布记录不属于独立服务列表/启停接口，这里只返回发布结果与四套 OGC 地址。 */
+    private GisOgcServiceVO vectorVO(GisPublicationVO publication) {
+        String code = publication.getServiceCode();
+        return GisOgcServiceVO.builder()
+                .id(publication.getId())
+                .serviceCode(code)
+                .resourceType(VECTOR)
+                .serviceName(publication.getServiceName())
+                .layerName(publication.getServiceName())
+                .status(publication.getStatus())
+                .availability(AVAILABLE)
+                .dataSetId(publication.getDataSetId())
+                .dataSetName(publication.getDataSetName())
+                .outputFormat("PNG")
+                .serviceUrl(recordService.buildPublicUrl("/gis/wms"))
+                .capabilitiesUrl(recordService.buildPublicUrl(
+                        "/gis/wms?SERVICE=WMS&REQUEST=GetCapabilities"))
+                .tileUrlTemplate(recordService.buildPublicUrl("/gis/wmts/rest/" + code
+                        + "/{Style}/WebMercatorQuad/{TileMatrix}/{TileRow}/{TileCol}.png"))
+                .wmsCapabilitiesUrl(recordService.buildPublicUrl(
+                        "/gis/wms?SERVICE=WMS&REQUEST=GetCapabilities"))
+                .wmtsCapabilitiesUrl(recordService.buildPublicUrl(
+                        "/gis/wmts?SERVICE=WMTS&REQUEST=GetCapabilities"))
+                .tmsCapabilitiesUrl(recordService.buildPublicUrl("/gis/tms/1.0.0"))
+                .wfsCapabilitiesUrl(recordService.buildPublicUrl(
+                        "/gis/wfs?SERVICE=WFS&REQUEST=GetCapabilities"))
+                .vectorResourceId(publication.getVectorResourceId())
+                .releaseVersion(publication.getReleaseVersion())
+                .defaultStyleId(publication.getDefaultStyleId())
+                .styles(publication.getStyles())
+                .publishTime(publication.getPublishTime())
+                .updateTime(publication.getUpdateTime())
+                .build();
     }
 
     private String serviceUrl(OgcProtocol protocol) {
