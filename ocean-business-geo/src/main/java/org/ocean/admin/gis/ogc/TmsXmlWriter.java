@@ -28,7 +28,8 @@ public final class TmsXmlWriter {
      * @param layers  已发布图层
      */
     public static String tileMapService(String baseUrl,
-            List<PublishedImageryCatalog.PublishedLayer> layers) {
+            List<PublishedImageryCatalog.PublishedLayer> layers,
+            List<PublishedVectorCatalog.VectorLayerView> vectorLayers) {
         String root = stripTrailingSlash(baseUrl);
         StringWriter buffer = new StringWriter();
         XMLStreamWriter writer = null;
@@ -48,6 +49,14 @@ public final class TmsXmlWriter {
                 writer.writeAttribute("srs", layer.matrixSet().tmsSrs());
                 writer.writeAttribute("profile", layer.matrixSet().tmsProfile());
                 writer.writeAttribute("href", tileMapHref(root, layer));
+                writer.writeEndElement(); // TileMap
+            }
+            for (PublishedVectorCatalog.VectorLayerView layer : vectorLayers) {
+                writer.writeStartElement("TileMap");
+                writer.writeAttribute("title", vectorSpec(layer));
+                writer.writeAttribute("srs", layer.matrixSet().tmsSrs());
+                writer.writeAttribute("profile", layer.matrixSet().tmsProfile());
+                writer.writeAttribute("href", root + "/" + vectorSpec(layer));
                 writer.writeEndElement(); // TileMap
             }
             writer.writeEndElement(); // TileMaps
@@ -73,9 +82,26 @@ public final class TmsXmlWriter {
      * @param layer   已发布图层
      */
     public static String tileMap(String baseUrl, PublishedImageryCatalog.PublishedLayer layer) {
+        return tileMap(baseUrl, layer.serviceCode(), catalogTitle(layer),
+                layer.matrixSet(), layer.wgs84Bounds(), layer.mediaType(),
+                layer.extension(), layer.minZoom(), layer.maxZoom(),
+                spec(layer));
+    }
+
+    /** 矢量 TileMap 文档；参数与影像一致，取图地址由动态渲染器消费。 */
+    public static String tileMap(String baseUrl,
+            PublishedVectorCatalog.VectorLayerView layer) {
+        return tileMap(baseUrl, vectorSpec(layer), layer.title(),
+                layer.matrixSet(), layer.wgs84Bounds(), layer.mediaType(),
+                layer.extension(), layer.minZoom(), layer.maxZoom(),
+                vectorSpec(layer));
+    }
+
+    private static String tileMap(String baseUrl, String identifier, String title,
+            TileMatrixSetDefinition matrixSet, double[] wgs84Bounds,
+            String mediaType, String extension, int minZoom, int maxZoom, String hrefSuffix) {
         String root = stripTrailingSlash(baseUrl);
-        TileMatrixSetDefinition matrixSet = layer.matrixSet();
-        double[] bounds = matrixSet.targetBounds(layer.wgs84Bounds());
+        double[] bounds = matrixSet.targetBounds(wgs84Bounds);
         StringWriter buffer = new StringWriter();
         XMLStreamWriter writer = null;
         try {
@@ -85,8 +111,8 @@ public final class TmsXmlWriter {
             writer.writeAttribute("version", VERSION);
             writer.writeAttribute("tilemapservice", root);
 
-            writeText(writer, "Title", layer.serviceCode());
-            writeText(writer, "Abstract", "已发布影像服务: " + layer.serviceCode());
+            writeText(writer, "Title", title);
+            writeText(writer, "Abstract", "已发布 OGC 服务: " + identifier);
             writeText(writer, "SRS", matrixSet.tmsSrs());
 
             writer.writeStartElement("BoundingBox");
@@ -104,14 +130,14 @@ public final class TmsXmlWriter {
             writer.writeStartElement("TileFormat");
             writer.writeAttribute("width", Integer.toString(TileMatrixSetDefinition.TILE_SIZE));
             writer.writeAttribute("height", Integer.toString(TileMatrixSetDefinition.TILE_SIZE));
-            writer.writeAttribute("mime-type", layer.mediaType());
-            writer.writeAttribute("extension", layer.extension());
+            writer.writeAttribute("mime-type", mediaType);
+            writer.writeAttribute("extension", extension);
             writer.writeEndElement();
 
-            String href = tileMapHref(root, layer);
+            String href = root + "/" + hrefSuffix;
             writer.writeStartElement("TileSets");
             writer.writeAttribute("profile", matrixSet.tmsProfile());
-            for (int zoom = layer.minZoom(); zoom <= layer.maxZoom(); zoom++) {
+            for (int zoom = minZoom; zoom <= maxZoom; zoom++) {
                 writer.writeStartElement("TileSet");
                 writer.writeAttribute("href", href + "/" + zoom);
                 writer.writeAttribute("units-per-pixel", decimal(matrixSet.unitsPerPixel(zoom)));
@@ -138,6 +164,12 @@ public final class TmsXmlWriter {
         return layer.serviceCode() + "@" + layer.matrixSet().id() + "@" + layer.extension();
     }
 
+    /** 矢量 TileMap 标识：{@code 服务编码@矩阵集@格式@vector}。 */
+    static String vectorSpec(PublishedVectorCatalog.VectorLayerView layer) {
+        return layer.serviceCode() + "@" + layer.matrixSet().id()
+                + "@" + layer.extension() + "@vector";
+    }
+
     private static String tileMapHref(String root, PublishedImageryCatalog.PublishedLayer layer) {
         return root + "/" + spec(layer);
     }
@@ -157,6 +189,12 @@ public final class TmsXmlWriter {
         writer.writeStartElement(localName);
         writer.writeCharacters(value == null ? "" : value);
         writer.writeEndElement();
+    }
+
+    /** 能力文档展示名优先使用发布时填写的图层名称，缺失时回退服务编码。 */
+    private static String catalogTitle(PublishedImageryCatalog.PublishedLayer layer) {
+        String title = layer.layerName();
+        return title == null || title.isBlank() ? layer.serviceCode() : title;
     }
 
     private static XMLStreamWriter newWriter(StringWriter buffer) throws XMLStreamException {

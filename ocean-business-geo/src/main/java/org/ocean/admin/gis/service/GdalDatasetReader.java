@@ -178,7 +178,10 @@ public class GdalDatasetReader {
         try {
             request.put("version", properties.getGdalVersion());
             request.put("maxMetadataBytes", Math.max(properties.getGdalMaxMetadataBytes(), 16 * 1024 * 1024));
-            if (Set.of("QUERY","TILE").contains(request.path("packageOperation").asText())) context.timeout=Duration.ofSeconds(30);
+            if (Set.of("QUERY", "TILE", "WINDOW").contains(
+                    request.path("packageOperation").asText())) {
+                context.timeout = Duration.ofSeconds(30);
+            }
             if (request.hasNonNull("output")) context.packageOutput = Path.of(request.path("output").asText());
             Path requestFile = context.directory().resolve("request.json");
             json.writeValue(requestFile.toFile(), request);

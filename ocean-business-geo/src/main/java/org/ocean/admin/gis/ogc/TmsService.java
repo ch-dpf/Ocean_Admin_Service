@@ -1,8 +1,7 @@
 package org.ocean.admin.gis.ogc;
 
-import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.service.PublicationRecordService;
-import org.ocean.admin.gis.service.PublicationService;
+import org.ocean.admin.gis.service.OgcServicePublicationService;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -26,24 +25,35 @@ public class TmsService {
     private static final String SPEC_SEPARATOR = "@";
 
     private final PublishedImageryCatalog catalog;
-    private final PublicationService publicationService;
+    private final PublishedVectorCatalog vectorCatalog;
+    private final VectorTileRenderer vectorTileRenderer;
+    private final OgcServicePublicationService publicationService;
     private final PublicationRecordService recordService;
 
     public TmsService(PublishedImageryCatalog catalog,
-            PublicationService publicationService,
+            PublishedVectorCatalog vectorCatalog,
+            VectorTileRenderer vectorTileRenderer,
+            OgcServicePublicationService publicationService,
             PublicationRecordService recordService) {
         this.catalog = catalog;
+        this.vectorCatalog = vectorCatalog;
+        this.vectorTileRenderer = vectorTileRenderer;
         this.publicationService = publicationService;
         this.recordService = recordService;
     }
 
     /** 生成 TileMapService 根文档。 */
     public String tileMapServiceXml() {
-        return TmsXmlWriter.tileMapService(baseUrl(), catalog.listPublished());
+        return TmsXmlWriter.tileMapService(baseUrl(),
+                catalog.listPublished(OgcProtocol.TMS), vectorCatalog.listViews());
     }
 
     /** 生成单个 TileMap 文档；图层不存在时抛出 404。 */
     public String tileMapXml(String spec) {
+        PublishedVectorCatalog.VectorLayerView vector = vectorView(spec);
+        if (vector != null) {
+            return TmsXmlWriter.tileMap(baseUrl(), vector);
+        }
         return TmsXmlWriter.tileMap(baseUrl(), requireLayer(spec));
     }
 
@@ -61,6 +71,10 @@ public class TmsService {
      * @param row    行号，自南向北（TMS 约定）
      */
     public TileResource resolveTile(String spec, String zoom, String column, String row) {
+        PublishedVectorCatalog.VectorLayerView vector = vectorView(spec);
+        if (vector != null) {
+            return vectorTile(vector, zoom, column, row);
+        }
         PublishedImageryCatalog.PublishedLayer layer = requireLayer(spec);
         int z = parseInt(zoom, "zoom");
         int x = parseInt(column, "x");
@@ -79,12 +93,52 @@ public class TmsService {
         int storageRow = matrixSet.storageRow(layer.tileProfile(), z, topDownRow);
         String relativePath = z + "/" + x + "/" + storageRow + "." + layer.extension();
         try {
-            Path file = publicationService.resolvePublishedFile(
-                    GisProcessingType.IMAGERY, layer.serviceCode(), relativePath);
-            return new TileResource(file, layer.mediaType());
+            Path file = publicationService.resolveTileFile(
+                    layer.serviceCode(), OgcProtocol.TMS, relativePath);
+            return new TileResource(file, layer.mediaType(), null);
         } catch (IllegalArgumentException | IllegalStateException ex) {
             // 行列号在矩阵内但图层范围未覆盖，该瓦片不存在
             throw new TmsException(404, "瓦片不存在: " + relativePath);
+        }
+    }
+
+    /** 解析矢量 TileMap 标识；非矢量标识返回 null，由影像目录继续解析。 */
+    private PublishedVectorCatalog.VectorLayerView vectorView(String spec) {
+        if (spec == null || spec.isBlank()) {
+            return null;
+        }
+        String[] parts = spec.trim().split(SPEC_SEPARATOR, -1);
+        if (parts.length != 4 || !"vector".equalsIgnoreCase(parts[3].trim())) {
+            return null;
+        }
+        PublishedVectorCatalog.VectorLayerView view = vectorCatalog.findView(
+                parts[0].trim() + "@" + parts[1].trim());
+        if (view == null || !view.extension().equalsIgnoreCase(parts[2].trim())) {
+            return null;
+        }
+        return view;
+    }
+
+    /** TMS 的 y 自南向北，换成统一的自北向南行号后交给动态渲染器。 */
+    private TileResource vectorTile(PublishedVectorCatalog.VectorLayerView view,
+            String zoom, String column, String row) {
+        int z = parseInt(zoom, "zoom");
+        int x = parseInt(column, "x");
+        int y = parseInt(row, "y");
+        if (z < view.minZoom() || z > view.maxZoom()) {
+            throw new TmsException(404,
+                    "层级 " + z + " 超出图层范围 " + view.minZoom() + "-" + view.maxZoom());
+        }
+        if (x < 0 || x >= view.matrixSet().matrixWidth(z)
+                || y < 0 || y >= view.matrixSet().matrixHeight(z)) {
+            throw new TmsException(404, "瓦片行列号超出矩阵范围: " + x + "/" + y);
+        }
+        int topDownRow = view.matrixSet().matrixHeight(z) - 1 - y;
+        try {
+            byte[] body = vectorTileRenderer.render(view, null, "TMS", z, topDownRow, x);
+            return new TileResource(null, view.mediaType(), body);
+        } catch (RuntimeException ex) {
+            throw new TmsException(500, "矢量瓦片渲染失败: " + ex.getMessage());
         }
     }
 
@@ -101,7 +155,7 @@ public class TmsService {
         if (parts.length != 3 || parts[0].isBlank() || parts[1].isBlank() || parts[2].isBlank()) {
             throw new TmsException(400, "TileMap 标识应为 服务编码@矩阵集@格式: " + spec);
         }
-        PublishedImageryCatalog.PublishedLayer layer = catalog.load(parts[0].trim());
+        PublishedImageryCatalog.PublishedLayer layer = catalog.load(parts[0].trim(), OgcProtocol.TMS);
         if (layer == null) {
             throw new TmsException(404, "图层不存在或已停用: " + parts[0]);
         }
@@ -128,8 +182,8 @@ public class TmsService {
         }
     }
 
-    /** 已定位的瓦片文件及其响应媒体类型。 */
-    public record TileResource(Path file, String mediaType) {
+    /** 已定位的影像瓦片文件，或动态生成的矢量瓦片字节。 */
+    public record TileResource(Path file, String mediaType, byte[] body) {
     }
 
     /**

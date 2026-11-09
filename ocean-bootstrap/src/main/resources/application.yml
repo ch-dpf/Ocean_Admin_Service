@@ -20,9 +20,9 @@ spring:
   # 数据库配置
   datasource:
     driver-class-name: org.postgresql.Driver
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/ocean_admin}
-    username: ${DB_USERNAME:ocean_admin}
-    password: ${DB_PASSWORD:ocean_admin}
+    url: ${DB_URL:jdbc:postgresql://127.0.0.1:5432/ocean_admin}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:123456}
     # HikariCP连接池配置
     hikari:
       connection-init-sql: SET TIME ZONE 'Asia/Shanghai'
@@ -34,9 +34,9 @@ spring:
   # Redis 会话状态（登录并发控制）
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
+      host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:123456}
+      password: ${REDIS_PASSWORD:}
       database: ${REDIS_DB:0}
       timeout: 3s
 
@@ -114,11 +114,18 @@ gis:
     imagery-overview-min-size: ${GIS_IMAGERY_OVERVIEW_MIN_SIZE:512}
     archive-compression-level: ${GIS_ARCHIVE_COMPRESSION_LEVEL:1}
     workspace-max-scan-entries: ${GIS_WORKSPACE_MAX_SCAN_ENTRIES:10000}
+    gdal-version: '@gdal.version@'
+    gdal-worker-max-heap: ${GIS_GDAL_WORKER_MAX_HEAP:1g}
+    gdal-native-library-path: ${GIS_GDAL_NATIVE_LIBRARY_PATH:}
+    gdal-process-timeout: ${GIS_GDAL_PROCESS_TIMEOUT:30m}
+    gdal-max-log-bytes: ${GIS_GDAL_MAX_LOG_BYTES:65536}
+    gdal-max-metadata-bytes: ${GIS_GDAL_MAX_METADATA_BYTES:16777216}
+    gdal-max-output-bytes: ${GIS_GDAL_MAX_OUTPUT_BYTES:107374182400}
     workspaces:
       default: ${GIS_PROCESSING_WORKSPACE_DEFAULT:gis/workspaces/default}
   publication:
     # 对外返回的服务地址；经反向代理部署时配置为浏览器可访问的域名。
-    public-base-url: ${GIS_PUBLIC_BASE_URL:http://192.168.14.65:8090}
+    public-base-url: ${GIS_PUBLIC_BASE_URL:http://192.168.14.52:8090}
   terrain:
     mago:
       enabled: ${GIS_TERRAIN_MAGO_ENABLED:true}

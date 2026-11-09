@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import tools.jackson.core.JsonToken;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
@@ -86,6 +87,36 @@ public class GeoPackageStore {
         reader.executePackage(request, () -> { });
     }
 
+    /**
+     * 一次打开冻结包读取多个图层的窗口要素，供 OGC 服务端渲染使用。
+     *
+     * <p>与逐层分页查询相比，多图层只启动一次隔离工作进程；返回项携带图层 ID，
+     * 由调用方按图层样式分别绘制。</p>
+     */
+    public JsonNode queryWindow(String key, List<Long> layerIds, double[] bbox,
+            int maxBytes, int limit) throws IOException {
+        if (layerIds == null || layerIds.isEmpty() || layerIds.size() > 512
+                || bbox == null || bbox.length != 4 || maxBytes < 1024 || limit < 1) {
+            throw new IllegalArgumentException("窗口查询参数无效");
+        }
+        ObjectNode request = json.createObjectNode().put("packageOperation", "WINDOW")
+                .put("input", path(key).toString())
+                .put("maxBytes", Math.min(maxBytes, 8 * 1024 * 1024))
+                .put("limit", limit);
+        request.set("layerIds", json.valueToTree(layerIds));
+        request.set("bbox", json.valueToTree(bbox));
+        JsonNode result = reader.executePackage(request, () -> { });
+        byte[] compressed = java.util.Base64.getDecoder().decode(result.path("body").asText());
+        try (var gzip = new java.util.zip.GZIPInputStream(
+                new java.io.ByteArrayInputStream(compressed))) {
+            byte[] bytes = gzip.readNBytes(maxBytes + 1);
+            if (bytes.length > maxBytes) {
+                throw new IllegalArgumentException("窗口要素超过解码限额");
+            }
+            return json.readTree(bytes);
+        }
+    }
+
     public byte[] tile(String key, JsonNode definition, int z, int x, int y, int maxBytes) throws IOException {
         ObjectNode request=json.createObjectNode().put("packageOperation","TILE").put("input",path(key).toString())
                 .put("z",z).put("x",x).put("y",y).put("maxBytes",maxBytes);
@@ -106,9 +137,82 @@ public class GeoPackageStore {
             case "BUILD" -> buildNative(request, json);
             case "QUERY" -> queryNative(request, json);
             case "TILE" -> tileNative(request, json);
+            case "WINDOW" -> windowNative(request, json);
             case "EXPORT" -> exportNative(request, json);
             default -> throw new IllegalArgumentException("未知矢量包操作");
         };
+    }
+
+    /** 一次打开冻结包，按 RTree 粗筛后精确相交，返回多个图层的 WGS84 几何与属性。 */
+    private static ObjectNode windowNative(JsonNode request, ObjectMapper json) throws IOException {
+        JsonNode box = request.path("bbox");
+        if (!box.isArray() || box.size() != 4) throw new IllegalArgumentException("窗口范围无效");
+        double west = box.get(0).asDouble(), south = box.get(1).asDouble();
+        double east = box.get(2).asDouble(), north = box.get(3).asDouble();
+        if (!Double.isFinite(west) || !Double.isFinite(south) || !Double.isFinite(east)
+                || !Double.isFinite(north) || west >= east || south >= north) {
+            throw new IllegalArgumentException("窗口范围无效");
+        }
+        int limit = request.path("limit").asInt();
+        int maxBytes = request.path("maxBytes").asInt();
+        if (limit < 1 || limit > 20000 || maxBytes < 1024) {
+            throw new IllegalArgumentException("窗口查询限额无效");
+        }
+        String longitude = "minx<=" + east + " AND maxx>=" + west;
+        Geometry filter = rectangle(west, south, east, north);
+        DataSource data = ogr.Open(request.path("input").asText(), 0);
+        if (data == null) {
+            filter.delete();
+            throw new IllegalStateException("矢量包不可读取");
+        }
+        ArrayNode items = json.createArrayNode();
+        long bytes = 0;
+        try {
+            for (JsonNode idNode : request.path("layerIds")) {
+                if (idNode.asLong() < 1) throw new IllegalArgumentException("工作图层ID无效");
+                String table = "l_" + idNode.asLong();
+                Layer rows = data.ExecuteSQL("SELECT feature_json,geom FROM " + table
+                        + " WHERE fid IN (SELECT id FROM rtree_" + table + "_geom WHERE " + longitude
+                        + " AND miny<=" + north + " AND maxy>=" + south + ") ORDER BY fid LIMIT " + limit);
+                if (rows == null) throw new IllegalStateException("瓦片源图层不存在");
+                try {
+                    Feature row;
+                    while ((row = rows.GetNextFeature()) != null) {
+                        try {
+                            // RTree 只筛选包围盒，再用窗口多边形精确相交排除孔洞与弯曲线误命中。
+                            if (row.GetGeometryRef() == null
+                                    || !row.GetGeometryRef().Intersects(filter)) {
+                                continue;
+                            }
+                            String value = row.GetFieldAsString("feature_json");
+                            bytes += value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                            if (bytes > maxBytes || items.size() >= limit) {
+                                throw new IllegalArgumentException("窗口要素超过解码或数量限额");
+                            }
+                            JsonNode feature = json.readTree(value);
+                            ObjectNode item = items.addObject().put("layerId", idNode.asLong());
+                            item.put("id", feature.path("id").asText(""));
+                            item.set("properties", json.readTree(
+                                    feature.path("propertiesJson").asText("{}")));
+                            item.set("geometry", json.readTree(row.GetGeometryRef().ExportToJson()));
+                        } finally {
+                            row.delete();
+                        }
+                    }
+                } finally {
+                    data.ReleaseResultSet(rows);
+                }
+            }
+            var compressed = new java.io.ByteArrayOutputStream();
+            try (var gzip = new java.util.zip.GZIPOutputStream(compressed)) {
+                gzip.write(json.writeValueAsBytes(items));
+            }
+            return json.createObjectNode().put("body",
+                    java.util.Base64.getEncoder().encodeToString(compressed.toByteArray()));
+        } finally {
+            data.delete();
+            filter.delete();
+        }
     }
 
     private static ObjectNode exportNative(JsonNode request, ObjectMapper json) throws IOException {

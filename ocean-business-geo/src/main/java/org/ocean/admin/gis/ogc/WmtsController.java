@@ -77,6 +77,13 @@ public class WmtsController {
             return ResponseEntity.ok().contentType(XML)
                     .header("Cache-Control", "no-store").body(reply.xml());
         }
+        if (reply.body() != null) {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(reply.mediaType()))
+                    .contentLength(reply.body().length)
+                    .cacheControl(CacheControl.maxAge(Duration.ofMinutes(10)).cachePublic())
+                    .body(reply.body());
+        }
         Path file = reply.file();
         try {
             long size = Files.size(file);

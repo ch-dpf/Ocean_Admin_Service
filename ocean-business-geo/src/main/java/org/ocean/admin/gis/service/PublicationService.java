@@ -5,8 +5,6 @@ import org.ocean.admin.gis.entity.GisPublication;
 import org.ocean.admin.gis.entity.GisTileSet;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
-import org.ocean.admin.gis.ogc.PublishedImageryCatalog;
-import org.ocean.admin.gis.ogc.TileMatrixSetDefinition;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.vo.GisPublicationVO;
 import org.ocean.admin.kernel.common.PageResult;
@@ -15,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
@@ -27,7 +24,6 @@ public class PublicationService {
 
     private final PublicationRecordService recordService;
     private final ProcessingTaskRecordService taskService;
-    private final PublishedImageryCatalog imageryCatalog;
     private final GisDataSetMapper dataSetMapper;
     private final VectorPublicationService vectors;
     private final Map<GisProcessingType, PublicationProtocol> protocols;
@@ -35,12 +31,10 @@ public class PublicationService {
     public PublicationService(
             PublicationRecordService recordService,
             ProcessingTaskRecordService taskService,
-            PublishedImageryCatalog imageryCatalog,
             List<PublicationProtocol> protocolList,
             GisDataSetMapper dataSetMapper, VectorPublicationService vectors) {
         this.recordService = recordService;
         this.taskService = taskService;
-        this.imageryCatalog = imageryCatalog;
         this.dataSetMapper = dataSetMapper;
         this.vectors = vectors;
         EnumMap<GisProcessingType, PublicationProtocol> protocolMap =
@@ -130,7 +124,7 @@ public class PublicationService {
                                 tileSet.getTileType(), publication.getServiceCode()),
                         null, null)
                 : protocol.buildAccess(publication, tileSet);
-        GisPublicationVO.GisPublicationVOBuilder builder = GisPublicationVO.builder()
+        return GisPublicationVO.builder()
                 .id(publication.getId())
                 .serviceCode(publication.getServiceCode())
                 .serviceName(publication.getServiceName())
@@ -151,57 +145,8 @@ public class PublicationService {
                 .descriptorUrl(access.descriptorUrl())
                 .tileUrlTemplate(access.tileUrlTemplate())
                 .publishTime(publication.getPublishTime())
-                .updateTime(publication.getUpdateTime());
-        if (tileSet.getTileType() == GisProcessingType.IMAGERY) {
-            appendWmtsAccess(builder, publication, tileSet);
-        }
-        return builder.build();
-    }
-
-    /** 补齐前端直接调用 WMTS 所需参数；瓦片集未就绪时只返回能力文档与矩阵集。 */
-    private void appendWmtsAccess(GisPublicationVO.GisPublicationVOBuilder builder,
-            GisPublication publication, GisTileSet tileSet) {
-        String serviceCode = publication.getServiceCode();
-        builder.wmtsCapabilitiesUrl(recordService.buildPublicUrl(
-                        "/gis/wmts?SERVICE=WMTS&REQUEST=GetCapabilities"))
-                .wmtsLayer(serviceCode);
-        TileMatrixSetDefinition matrixSet =
-                TileMatrixSetDefinition.resolveByCrs(tileSet.getTargetCrs());
-        if (matrixSet == null) {
-            return;
-        }
-        String extension = "JPEG".equalsIgnoreCase(tileSet.getOutputFormat()) ? "jpg" : "png";
-        builder.wmtsTileMatrixSet(matrixSet.id())
-                .wmtsTileUrlTemplate(recordService.buildPublicUrl(
-                        "/gis/wmts/rest/" + serviceCode + "/default/" + matrixSet.id()
-                                + "/{TileMatrix}/{TileRow}/{TileCol}." + extension));
-        PublishedImageryCatalog.PublishedLayer layer =
-                imageryCatalog.load(tileSet, serviceCode);
-        if (layer != null) {
-            builder.wmtsTileMatrixSetLimits(matrixLimits(layer));
-        }
-    }
-
-    /** 只为实际存在瓦片的层级输出范围，与能力文档中的 TileMatrixSetLimits 保持一致。 */
-    private List<GisPublicationVO.WmtsMatrixLimitsVO> matrixLimits(
-            PublishedImageryCatalog.PublishedLayer layer) {
-        List<GisPublicationVO.WmtsMatrixLimitsVO> limits = new ArrayList<>();
-        for (int zoom = layer.minZoom(); zoom <= layer.maxZoom(); zoom++) {
-            if (layer.matrixSet().matrixWidth(zoom) < 2
-                    || layer.matrixSet().matrixHeight(zoom) < 2) {
-                continue;
-            }
-            TileMatrixSetDefinition.MatrixLimits range =
-                    layer.matrixSet().limits(zoom, layer.wgs84Bounds());
-            limits.add(GisPublicationVO.WmtsMatrixLimitsVO.builder()
-                    .zoom(zoom)
-                    .minRow(range.minRow())
-                    .maxRow(range.maxRow())
-                    .minCol(range.minCol())
-                    .maxCol(range.maxCol())
-                    .build());
-        }
-        return limits;
+                .updateTime(publication.getUpdateTime())
+                .build();
     }
 
     private PublicationProtocol requireProtocol(GisProcessingType processingType) {

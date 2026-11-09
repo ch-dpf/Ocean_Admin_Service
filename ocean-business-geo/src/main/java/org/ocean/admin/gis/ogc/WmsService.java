@@ -4,7 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.referencing.CRS;
-import org.ocean.admin.gis.processing.GisProcessingType;
+import org.ocean.admin.gis.service.OgcServicePublicationService;
 import org.ocean.admin.gis.service.PublicationRecordService;
 import org.springframework.stereotype.Service;
 
@@ -39,22 +39,31 @@ public class WmsService {
     private static final int MAX_BUFFER = 20;
 
     private final PublishedImageryCatalog catalog;
+    private final PublishedVectorCatalog vectorCatalog;
     private final PublicationRecordService recordService;
+    private final OgcServicePublicationService publicationService;
     private final WmsSourceResolver sourceResolver;
     private final WmsRasterRenderer rasterRenderer;
+    private final VectorMapRenderer vectorRenderer;
     private final WmsPixelSampler pixelSampler;
     private final WmsInfoWriter infoWriter;
 
     public WmsService(PublishedImageryCatalog catalog,
+            PublishedVectorCatalog vectorCatalog,
             PublicationRecordService recordService,
+            OgcServicePublicationService publicationService,
             WmsSourceResolver sourceResolver,
             WmsRasterRenderer rasterRenderer,
+            VectorMapRenderer vectorRenderer,
             WmsPixelSampler pixelSampler,
             WmsInfoWriter infoWriter) {
         this.catalog = catalog;
+        this.vectorCatalog = vectorCatalog;
         this.recordService = recordService;
+        this.publicationService = publicationService;
         this.sourceResolver = sourceResolver;
         this.rasterRenderer = rasterRenderer;
+        this.vectorRenderer = vectorRenderer;
         this.pixelSampler = pixelSampler;
         this.infoWriter = infoWriter;
     }
@@ -76,7 +85,8 @@ public class WmsService {
     /** 生成 GetCapabilities 文档；服务地址与其它 OGC 入口同源。 */
     public String capabilitiesXml() {
         return WmsXmlWriter.capabilities(
-                recordService.buildPublicUrl("/gis/wms"), catalog.listPublished());
+                recordService.buildPublicUrl("/gis/wms"),
+                catalog.listPublished(OgcProtocol.WMS), vectorCatalog.listPublished());
     }
 
     /** 生成 WMS 异常报告文档。 */
@@ -147,6 +157,10 @@ public class WmsService {
 
         List<WmsInfoWriter.FeatureInfo> features = new ArrayList<>();
         for (String layerCode : request.queryLayers()) {
+            if (vectorCatalog.load(layerCode, null) != null) {
+                // WFS 提供矢量要素属性查询；WMS 的矢量图层不做像元采样
+                continue;
+            }
             PublishedImageryCatalog.PublishedLayer published = requirePublishedLayer(
                     layerCode, "QUERY_LAYERS");
             LayerSources layer = resolveSources(layerCode, "QUERY_LAYERS");
@@ -185,15 +199,33 @@ public class WmsService {
                     graphics.fillRect(0, 0, request.width(), request.height());
                 }
                 // 多图层按请求顺序叠放，后画的在前
-                for (String layerCode : request.layers()) {
-                    RenderingUnit unit = resolveRenderingUnit(layerCode, request);
-                    if (unit == null) {
+                for (int index = 0; index < request.layers().size(); index++) {
+                    String layerCode = request.layers().get(index);
+                    PublishedImageryCatalog.PublishedLayer raster =
+                            catalog.load(layerCode, OgcProtocol.WMS);
+                    if (raster != null) {
+                        LayerSources sources = resolveSources(layerCode, "LAYERS");
+                        if (sources.sources().isEmpty()) {
+                            // 源数据已不可用时不阻断整张图，跳过该图层
+                            log.warn("[OGC][WMS] 图层 {} 没有可用的源数据，已跳过", layerCode);
+                            continue;
+                        }
+                        BufferedImage layerImage = rasterRenderer.render(
+                                sources.sources(), boundsOf(raster, request), request);
+                        graphics.drawImage(layerImage, 0, 0, null);
+                        layerImage.flush();
                         continue;
                     }
-                    BufferedImage layerImage = rasterRenderer.render(
-                            unit.sources(), unit.bounds(), request);
-                    graphics.drawImage(layerImage, 0, 0, null);
-                    layerImage.flush();
+                    String style = styleAt(request.styles(), index, layerCode);
+                    PublishedVectorCatalog.PublishedVectorLayer vector =
+                            vectorCatalog.load(layerCode, style);
+                    if (vector == null) {
+                        throw new OgcException("LayerNotDefined", "LAYERS",
+                                "图层不存在或已停用: " + layerCode);
+                    }
+                    vectorRenderer.draw(graphics, new VectorMapRenderer.RenderWindow(
+                            request.bbox(), requireVectorCrs(request.crs()),
+                            request.width(), request.height(), zoomOf(request)), vector, style);
                 }
             } finally {
                 graphics.dispose();
@@ -213,32 +245,68 @@ public class WmsService {
         }
     }
 
-    /** 把图层编码解析成「源文件 + 请求坐标系下的范围」；图层不存在时抛出 OGC 异常。 */
-    private RenderingUnit resolveRenderingUnit(String layerCode, WmsMapRequest request) {
-        PublishedImageryCatalog.PublishedLayer published = requirePublishedLayer(layerCode, "LAYERS");
-        LayerSources layer = resolveSources(layerCode, "LAYERS");
-        if (layer.sources().isEmpty()) {
-            // 源数据已不可用时不阻断整张图，跳过该图层
-            log.warn("[OGC][WMS] 图层 {} 没有可用的源数据，已跳过", layerCode);
-            return null;
-        }
+    /** 把已发布影像图层的 WGS84 范围变换到请求坐标系，供源 GeoTIFF 窗口读取。 */
+    private ReferencedEnvelope boundsOf(PublishedImageryCatalog.PublishedLayer layer,
+            WmsMapRequest request) {
         try {
             CoordinateReferenceSystem targetCrs = decodeCrs(request.crs());
-            double[] b = published.wgs84Bounds();
+            double[] b = layer.wgs84Bounds();
             ReferencedEnvelope wgs84 = new ReferencedEnvelope(
                     b[0], b[2], b[1], b[3], CRS.decode(WGS84, true));
-            ReferencedEnvelope bounds = wgs84.transform(targetCrs, true);
-            return new RenderingUnit(layer.sources(), bounds);
+            return wgs84.transform(targetCrs, true);
         } catch (Exception ex) {
             throw new OgcException("InvalidCRS", "CRS",
                     "无法转换图层坐标系: " + request.crs());
         }
     }
 
+    /**
+     * WMS 的 STYLES 与 LAYERS 一一对应；留空、default 或逗号空项都使用发布默认样式，
+     * 其它值按矢量样式方案 ID 查找。
+     */
+    private String styleAt(List<String> styles, int index, String layerCode) {
+        if (styles.isEmpty() || index >= styles.size()) {
+            return null;
+        }
+        String style = styles.get(index).trim();
+        if (style.isEmpty() || DEFAULT_STYLE.equalsIgnoreCase(style)) {
+            return null;
+        }
+        PublishedVectorCatalog.PublishedVectorLayer layer = vectorCatalog.load(layerCode, style);
+        if (layer == null) {
+            throw new OgcException("StyleNotDefined", "STYLES",
+                    "图层 " + layerCode + " 不支持样式: " + style);
+        }
+        return style;
+    }
+
+    /** 矢量渲染只支持能力文档声明的三种坐标系，避免把任意投影当成经纬度处理。 */
+    private String requireVectorCrs(String crs) {
+        if ("CRS:84".equalsIgnoreCase(crs)) {
+            return "EPSG:4326";
+        }
+        if ("EPSG:3857".equalsIgnoreCase(crs) || "EPSG:4326".equalsIgnoreCase(crs)) {
+            return crs;
+        }
+        throw new OgcException("InvalidCRS", "CRS",
+                "矢量图层仅支持 EPSG:3857、EPSG:4326 或 CRS:84: " + crs);
+    }
+
+    /** 按请求范围在 3857 下换算标准 Web 层级，用于矢量样式规则与 zoomStops。 */
+    private double zoomOf(WmsMapRequest request) {
+        double span = request.bbox()[2] - request.bbox()[0];
+        if (!"EPSG:3857".equalsIgnoreCase(request.crs())) {
+            span *= 20037508.342789244 / 180d;
+        }
+        return Math.max(0, Math.min(TileMatrixSetDefinition.MAX_ZOOM,
+                Math.log(2 * 20037508.342789244 / (span / request.width() * 256))
+                        / Math.log(2)));
+    }
+
     /** 校验图层已发布且元数据可读，返回对外元数据。 */
     private PublishedImageryCatalog.PublishedLayer requirePublishedLayer(
             String layerCode, String locator) {
-        PublishedImageryCatalog.PublishedLayer published = catalog.load(layerCode);
+        PublishedImageryCatalog.PublishedLayer published = catalog.load(layerCode, OgcProtocol.WMS);
         if (published == null) {
             throw new OgcException("LayerNotDefined", locator,
                     "图层不存在或已停用: " + layerCode);
@@ -249,8 +317,11 @@ public class WmsService {
     /** 定位图层的源 GeoTIFF；源文件全部不可用时返回空列表，由调用方决定降级方式。 */
     private LayerSources resolveSources(String layerCode, String locator) {
         try {
-            var publication = recordService.getRequired(GisProcessingType.IMAGERY, layerCode);
-            var tileSet = recordService.getPublicationTileSet(publication);
+            var tileSet = publicationService.publishedTileSet(layerCode, OgcProtocol.WMS);
+            if (tileSet == null) {
+                throw new OgcException("LayerNotDefined", locator,
+                        "图层不存在或已停用: " + layerCode);
+            }
             return new LayerSources(sourceResolver.resolveSources(tileSet));
         } catch (RuntimeException ex) {
             throw new OgcException("LayerNotDefined", locator,
@@ -517,10 +588,6 @@ public class WmsService {
     private WmsReply document(String xml) {
         return new WmsReply(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 "application/xml;charset=UTF-8");
-    }
-
-    /** 单个图层的渲染输入。 */
-    private record RenderingUnit(List<Path> sources, ReferencedEnvelope bounds) {
     }
 
     /** 单个图层的源 GeoTIFF；全部不可用时为空列表。 */

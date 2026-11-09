@@ -99,6 +99,13 @@ public class TmsController {
     }
 
     private ResponseEntity<?> tileReply(TmsService.TileResource tile) {
+        if (tile.body() != null) {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(tile.mediaType()))
+                    .contentLength(tile.body().length)
+                    .cacheControl(CacheControl.maxAge(Duration.ofMinutes(10)).cachePublic())
+                    .body(tile.body());
+        }
         Path file = tile.file();
         try {
             long size = Files.size(file);
