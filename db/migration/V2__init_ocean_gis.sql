@@ -896,6 +896,29 @@ CREATE TABLE ocean_gis.gis_publication (
     service_code        VARCHAR(64)  NOT NULL,
     service_name        VARCHAR(200) NOT NULL,
     service_protocol    VARCHAR(20) NOT NULL,
+    protocols           TEXT         NOT NULL DEFAULT '[]',
+    source_task_id      BIGINT       REFERENCES ocean_gis.gis_processing_task(id) ON DELETE CASCADE,
+    processing_type     VARCHAR(20)  NOT NULL,
+    layer_name          VARCHAR(200),
+    title               VARCHAR(200),
+    abstract            VARCHAR(1000),
+    keywords            VARCHAR(500),
+    default_crs         VARCHAR(32),
+    supported_crs       TEXT,
+    tile_matrix_sets    TEXT,
+    min_zoom            INTEGER,
+    max_zoom            INTEGER,
+    target_crs          VARCHAR(32),
+    tile_matrix_set     VARCHAR(64),
+    output_format       VARCHAR(32),
+    tile_profile        VARCHAR(32),
+    bounds_wgs84        TEXT,
+    style_id            VARCHAR(64),
+    style_name          VARCHAR(200),
+    public_base_url     VARCHAR(500),
+    capabilities_urls   TEXT,
+    service_urls        TEXT,
+    tile_url_templates  TEXT,
     tile_set_id         BIGINT,
     vector_resource_id  BIGINT REFERENCES ocean_gis.gis_vector_resource(id),
     vector_definition   TEXT,
@@ -929,6 +952,15 @@ COMMENT ON COLUMN ocean_gis.gis_publication.tile_set_id IS '被发布的静态�
 CREATE INDEX idx_gis_publication_status
     ON ocean_gis.gis_publication (status, publish_time DESC)
     WHERE deleted = 0;
+CREATE UNIQUE INDEX uk_gis_publication_task
+    ON ocean_gis.gis_publication (source_task_id)
+    WHERE deleted = 0 AND source_task_id IS NOT NULL;
+CREATE INDEX idx_gis_publication_processing_status
+    ON ocean_gis.gis_publication (processing_type, status, publish_time DESC)
+    WHERE deleted = 0;
+COMMENT ON COLUMN ocean_gis.gis_publication.protocols IS '本次发布支持的协议集合：WMS、WMTS、TMS、WFS、XYZ';
+COMMENT ON COLUMN ocean_gis.gis_publication.source_task_id IS '发起发布的数据处理任务 ID';
+COMMENT ON COLUMN ocean_gis.gis_publication.processing_type IS '原始数据类别；决定记录进入影像、地形或矢量服务列表';
 
 CREATE TABLE ocean_gis.gis_vector_publication_revision (
     publication_id BIGINT NOT NULL REFERENCES ocean_gis.gis_publication(id) ON DELETE CASCADE,
@@ -938,41 +970,3 @@ CREATE TABLE ocean_gis.gis_vector_publication_revision (
     PRIMARY KEY(publication_id,release_version)
 );
 COMMENT ON TABLE ocean_gis.gis_vector_publication_revision IS '已发布样式组合的不可变版本；共享发布记录的固定瓦片源';
--- =========================================================
--- WMTS/WMS/TMS 独立服务发布
--- =========================================================
-
-CREATE TABLE ocean_gis.gis_ogc_service (
-    id                  BIGINT       PRIMARY KEY,
-    service_code        VARCHAR(64)  NOT NULL,
-    protocol            VARCHAR(16)  NOT NULL,
-    service_name        VARCHAR(200) NOT NULL,
-    layer_name          VARCHAR(200) NOT NULL,
-    description         VARCHAR(500),
-    tile_set_id         BIGINT       NOT NULL REFERENCES ocean_gis.gis_tile_set(id) ON DELETE CASCADE,
-    source_task_id      BIGINT       NOT NULL REFERENCES ocean_gis.gis_processing_task(id) ON DELETE CASCADE,
-    data_set_id         BIGINT,
-    status              VARCHAR(20)  NOT NULL DEFAULT 'PUBLISHED',
-    min_zoom            INTEGER      NOT NULL,
-    max_zoom            INTEGER      NOT NULL,
-    target_crs          VARCHAR(32)  NOT NULL,
-    tile_matrix_set     VARCHAR(64)  NOT NULL,
-    output_format       VARCHAR(32)  NOT NULL,
-    tile_profile        VARCHAR(32)  NOT NULL,
-    publish_time        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uk_gis_ogc_service_code UNIQUE (service_code),
-    CONSTRAINT uk_gis_ogc_service_task_protocol UNIQUE (source_task_id, protocol),
-    CONSTRAINT ck_gis_ogc_service_protocol CHECK (protocol IN ('WMTS','WMS','TMS')),
-    CONSTRAINT ck_gis_ogc_service_status CHECK (status IN ('PUBLISHED','DISABLED')),
-    CONSTRAINT ck_gis_ogc_service_zoom CHECK (min_zoom >= 0 AND max_zoom >= min_zoom AND max_zoom <= 22)
-);
-CREATE INDEX idx_gis_ogc_service_protocol_status
-    ON ocean_gis.gis_ogc_service (protocol, status, publish_time DESC);
-CREATE INDEX idx_gis_ogc_service_data_set
-    ON ocean_gis.gis_ogc_service (data_set_id);
-COMMENT ON TABLE ocean_gis.gis_ogc_service IS 'WMTS、WMS、TMS 独立发布服务；与地形、影像、矢量发布记录互不依赖';
-COMMENT ON COLUMN ocean_gis.gis_ogc_service.service_code IS '后端生成的稳定编码，同时作为 OGC 请求的 LAYER 标识';
-COMMENT ON COLUMN ocean_gis.gis_ogc_service.layer_name IS '仅用于能力文档展示的图层名称，改名不影响服务链接';
-COMMENT ON COLUMN ocean_gis.gis_ogc_service.tile_set_id IS '发布时关联的已完成影像瓦片集';
-COMMENT ON COLUMN ocean_gis.gis_ogc_service.min_zoom IS '服务对外层级下界，发布时可覆盖切片层级但不得超出产物范围';
