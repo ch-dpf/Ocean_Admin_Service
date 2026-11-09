@@ -78,7 +78,7 @@ QUEUED、RUNNING 处理任务保护整个来源组及所有配件，任务提交
 
 代表点从文件所有图层的覆盖分块中选择：优先取最大面积面的内部点，否则取最长线的中点，否则使用点本身。面积、长度通过 geography 按平方米、米比较；同值按图层键（C排序）及分块序号选择。多区域、孔洞及跨日期变更线的面分块保持独立，不对经纬度直接平均。GeoJSON 当前只有包围范围，来源类型保留为 VECTOR_ENVELOPE，不能承诺点在真实要素内。
 
-单数据集地图接口 `GET /api/gis/dataSet/{id}/footprints` 一次返回该数据集所有已有可用轮廓及文件摘要。范围为 EPSG:4326 GeoJSON，保留 RASTER_FOOTPRINT 与 VECTOR_ENVELOPE 的区别。`simplifyTolerance` 默认0.001度，允许0至1的有限数值，0返回完整几何，大于0应用拓扑保持简化。该接口的 `filePoints` 为 null；普通数据集详情仍只返回摘要。列表与详情查询使用可重复读快照。
+单数据集地图接口 `GET /api/gis/dataSet/{id}/footprints` 返回已有可用文件图层的范围并集及文件摘要，不修改原始空间元数据。有范围时 EPSG:4326 GeoJSON FeatureCollection 只含一个数据集级 Feature，属性包含 `dataSetId`、`sourceFileCount`、`sourceLayerCount`、`extentKind`、`simplified`、`simplifyTolerance`；`extentKind` 为 RASTER_FOOTPRINT、VECTOR_ENVELOPE 或混合来源 MIXED。无范围时 features 为空，点线混合结果允许 GeometryCollection。`simplifyTolerance` 默认0.001度，允许0至1的有限数值；正值依次用于合并前简化、精度对齐和合并后简化，精度以下的孔洞或分块可能省略，但单个图层不会因精度对齐整体消失。0执行完整精度合并，复杂范围可能耗时很长。未新增数据库字段或缓存；普通详情仅返回摘要，详情查询使用可重复读快照。
 
 ## 2026-10-22 开发库矢量升级
 

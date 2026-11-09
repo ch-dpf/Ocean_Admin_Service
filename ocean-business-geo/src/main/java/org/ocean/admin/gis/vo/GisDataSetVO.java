@@ -61,7 +61,7 @@ public class GisDataSetVO {
     @Schema(description = "源状态为READY的未删除文件及其轮廓处理状态摘要；分页接口不加载", accessMode = Schema.AccessMode.READ_ONLY)
     private FileSummary fileSummary;
 
-    @Schema(description = "EPSG:4326 GeoJSON FeatureCollection；仅单数据集轮廓接口返回，其他查询为 null",
+    @Schema(description = "EPSG:4326 GeoJSON FeatureCollection；可用范围合并为一个数据集级要素，无范围时为空；仅轮廓接口返回",
             accessMode = Schema.AccessMode.READ_ONLY)
     private FootprintCollection footprints;
 
@@ -79,18 +79,17 @@ public class GisDataSetVO {
 
     public record FootprintFeature(String type, String id, JsonNode geometry, FootprintProperties properties) { }
 
-    public record FootprintProperties(Long fileId, String fileName, String layerKey, String extentKind,
-            @Schema(description = "是否应用拓扑保持简化，不表示顶点数必定减少") boolean simplified,
-            @Schema(description = "简化容差，单位为度；0表示完整几何") double simplifyTolerance) { }
+    public record FootprintProperties(Long dataSetId, long sourceFileCount, long sourceLayerCount,
+            @Schema(description = "来源范围类型：RASTER_FOOTPRINT、VECTOR_ENVELOPE 或 MIXED") String extentKind,
+            @Schema(description = "是否应用预览简化与精度对齐；小于预览精度的孔洞或分块可能消失") boolean simplified,
+            @Schema(description = "预览简化容差及对齐网格大小，单位为度；0表示完整精度合并") double simplifyTolerance) { }
 
     /** 轮廓批量查询投影；数据库 GeoJSON 文本在业务层转换为 JSON 对象。 */
     @Data
     public static class FootprintRow {
-        private Long id;
         private Long dataSetId;
-        private Long fileId;
-        private String fileName;
-        private String layerKey;
+        private long sourceFileCount;
+        private long sourceLayerCount;
         private String extentKind;
         private String geoJson;
     }

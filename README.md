@@ -46,7 +46,22 @@ mvn -pl ocean-bootstrap -am spring-boot:run
 
 ## GIS 空间元数据与范围查询
 
-`GET /api/gis/dataSet/page` 仅接受 `current`、`size`、`categoryId`、`dataSetName`，返回数据集基本信息及文件数、文件组数、总大小，不查询或返回 `filePoints`，也不加载文件解析状态汇总。卡片按分类显示 `GET /api/gis/dataSet/thumbnails/{imagery|terrain|vector}.png` 提供的类型示意图，原图位于 GIS 模块的 `src/main/resources/static/dataset-thumbnails/`，浏览器缓存一天。示意图不代表数据集实际覆盖范围；查看真实范围时按需调用 `GET /api/gis/dataSet/{id}/footprints?simplifyTolerance=0`。本次移除了分页响应的点位字段，前后端需同步更新。
+`GET /api/gis/dataSet/page` 仅接受 `current`、`size`、`categoryId`、`dataSetName`，返回数据集基本信息及文件数、文件组数、总大小，不查询或返回 `filePoints`，也不加载文件解析状态汇总。卡片按分类显示 `GET /api/gis/dataSet/thumbnails/{imagery|terrain|vector}.png` 提供的类型示意图，原图位于 GIS 模块的 `src/main/resources/static/dataset-thumbnails/`，浏览器缓存一天。示意图不代表数据集实际覆盖范围；详情按需调用 `GET /api/gis/dataSet/{id}/footprints?simplifyTolerance=0.001`，返回合并后的概略范围。前后端需同步更新。
+
+范围接口仅合并未删除、源状态 READY 且元数据 COMPLETED 的文件图层。有范围时返回一个数据集级 GeoJSON Feature，属性为 `dataSetId`、`sourceFileCount`、`sourceLayerCount`、`extentKind`、`simplified` 和 `simplifyTolerance`；无范围时返回空 FeatureCollection。矢量仍表示包围范围，影像和地形表示有效像元范围，点线混合结果允许 GeometryCollection。详情同时提示待解析、失败文件数量。
+
+默认预览精度为 0.001 度：先拓扑保持简化、再按同等网格对齐、合并并再次简化，消除文件内部边界、重叠填色及细小拼接缝。该精度是各处理步骤的参数，不是最终边界偏差上限；细小孔洞或分块可能省略，单个文件图层不能因精度对齐而整体消失。源空间元数据保持完整；显式传 0 时执行完整精度并集，复杂轮廓可能耗时很长。未引入缓存，文件删除或元数据更新在下一次查询直接生效。
+
+2026-11-06 开发库实测（PostGIS 3.5.7 / GEOS 3.14.1，最终 Mapper SQL，每组首次执行后重复三次取中位数；大小仅统计未压缩几何 JSON，不包含属性或网络耗时）：
+
+| 数据 | 可用图层数 | 原几何 JSON | 合并预览 JSON | 合并预览查询中位耗时 |
+| --- | ---: | ---: | ---: | ---: |
+| 安徽 POI 矢量 | 665 | 122,519 B | 1,708 B | 93 ms |
+| 全球 90 米 DEM | 2,592 | 47,652,985 B | 87 B | 927 ms |
+| 国内部分省份影像 | 4 | 43,440,641 B | 260,344 B | 2,542 ms |
+| 全球 500 米影像 | 8 | 123,334 B | 86 B | 6.5 ms |
+
+省份影像完整精度直接合并触发 60 秒语句超时，GEOS 运算的中断存在延迟，不适合作为详情默认请求。验证覆盖 10 个真实数据集，以及两种容差下的相邻/重叠范围、孔洞、分离区域、跨经线、全球覆盖、点线混合、微小栅格与不可用文件过滤。另验证 0、0.001、0.13、0.7 度网格的世界边缘数据，精度对齐结果始终裁切到合法经纬度范围。
 
 上传或工作区扫描整批收口后，后台自动识别文件组，再进入 `EXTRACTING_METADATA`。文件组是业务管理和解析单位，单个独立文件也建立组；同一数据集可包含多个组，每个物理文件最多属于一个组。矢量组在同一次提取中生成可编辑图层与要素，所有图层 READY 后才计为解析成功。接入仍使用现有数据集、文件或工作区路径参数，不要求客户端提供分组清单。
 

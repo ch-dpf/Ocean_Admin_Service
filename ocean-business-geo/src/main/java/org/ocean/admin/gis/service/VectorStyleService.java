@@ -9,6 +9,7 @@ import org.ocean.admin.gis.entity.GisVectorGroup;
 import org.ocean.admin.gis.util.VectorTemplateRules;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ArrayNode;
 import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.util.VectorStyleRules;
 import org.ocean.admin.gis.vo.GisVectorVO;
@@ -20,6 +21,8 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
+import java.util.HashMap;
+import java.util.HashSet;
 
 /** 图层样式独立版本管理；所有写操作沿用图层锁，默认切换与方案修改原子提交。 */
 @Service
@@ -49,6 +52,140 @@ public class VectorStyleService {
         var scheme=mapper.scheme(id);
         if(scheme==null || !dataSetId.equals(scheme.getDataSetId())) throw error(HttpStatus.NOT_FOUND,"样式方案不存在");
         return schemeVO(scheme);
+    }
+
+    /** 外部文件仅携带分类规则，运行时分类和图层标识始终取自目标数据集。 */
+    @Transactional(rollbackFor = Exception.class)
+    public GisVectorVO.Scheme importScheme(Long dataSetId, GisVectorRequests.Style request) {
+        dataSetStyles.require(dataSetId, true);
+        if (request.name() == null || request.name().isBlank() || request.name().trim().length() > 100)
+            throw error(HttpStatus.BAD_REQUEST, "样式方案名称无效");
+        if (mapper.schemeOptions(dataSetId).stream().anyMatch(s -> s.getName().equals(request.name().trim())))
+            throw error(HttpStatus.CONFLICT, "已存在同名样式方案，请修改方案名称");
+        JsonNode file = request.definition();
+        if (file == null || !file.isObject() || !file.path("schemaVersion").isIntegralNumber()
+                || file.path("schemaVersion").decimalValue().compareTo(java.math.BigDecimal.ONE) != 0
+                || !"VECTOR_STYLE_RULES".equals(file.path("kind").asText())
+                || !file.path("groups").isArray() || file.path("groups").isEmpty() || file.path("groups").size() > 512
+                || json.writeValueAsBytes(file).length > 8 * 1024 * 1024)
+            throw error(HttpStatus.BAD_REQUEST, "请选择版本1的分类样式JSON文件，包含1至512个分类且不超过8MiB");
+        for (String key : file.propertyNames())
+            if (!List.of("schemaVersion", "kind", "name", "groups").contains(key))
+                throw error(HttpStatus.BAD_REQUEST, "样式文件包含不支持的字段: " + key);
+        if (file.has("name") && (!file.path("name").isString() || file.path("name").asText().isBlank()
+                || file.path("name").asText().length() > 100))
+            throw error(HttpStatus.BAD_REQUEST, "文件中的方案名称无效");
+
+        ObjectNode config = json.valueToTree(cartography(dataSetId));
+        ArrayNode styles = (ArrayNode) config.path("defaults").path("styles");
+        var styleIndexes = new HashMap<String, Integer>();
+        for (int i = 0; i < styles.size(); i++) styleIndexes.put(styles.get(i).path("id").asText(), i);
+        var groups = mapper.groups(dataSetId);
+        var importedGroups = new HashSet<Long>();
+        for (JsonNode entry : file.path("groups")) {
+            if (!entry.isObject() || !entry.path("name").isString() || entry.path("name").asText().isBlank()
+                    || entry.path("name").asText().length() > 200 || !entry.path("enabled").isBoolean()
+                    || !List.of("POINT", "LINE", "POLYGON").contains(entry.path("geometryType").asText())
+                    || !entry.path("style").isObject()
+                    || entry.has("override") && !entry.path("override").isObject()
+                    || !entry.path("geometryType").equals(entry.path("style").path("geometryType")))
+                throw error(HttpStatus.BAD_REQUEST, "分类须提供名称、几何类型、显隐及相同几何类型的完整样式");
+            for (String key : entry.propertyNames())
+                if (!List.of("name", "geometryType", "enabled", "style", "override").contains(key))
+                    throw error(HttpStatus.BAD_REQUEST, "分类包含不支持的字段: " + key);
+            String name = entry.path("name").asText().trim();
+            var matches = groups.stream().filter(g -> Boolean.TRUE.equals(g.getAssignable())
+                    && name.equals(g.getGroupName()) && entry.path("geometryType").asText().equals(g.getGeometryType())).toList();
+            if (matches.isEmpty()) throw error(HttpStatus.BAD_REQUEST, "当前数据集找不到分类: " + name);
+            if (matches.size() != 1) throw error(HttpStatus.BAD_REQUEST, "当前数据集存在同名同类型分类，无法确定关联: " + name);
+            var group = matches.getFirst();
+            if (!importedGroups.add(group.getId())) throw error(HttpStatus.BAD_REQUEST, "文件中分类重复: " + name);
+            String styleKey = group.getDefaultStyleKey();
+            if (styleKey == null) throw error(HttpStatus.CONFLICT, "当前分类缺少默认样式: " + name);
+            if (groups.stream().filter(g -> styleKey.equals(g.getDefaultStyleKey())).count() != 1)
+                throw error(HttpStatus.BAD_REQUEST, "分类与其他分类共用默认样式，请先分配独立样式: " + name);
+            Integer index = styleIndexes.get(styleKey);
+            if (index == null) throw error(HttpStatus.CONFLICT, "当前分类缺少默认样式: " + name);
+            ObjectNode importedStyle = (ObjectNode) entry.path("style").deepCopy();
+            validateImportedStyle(importedStyle, name);
+            importedStyle.put("id", styleKey);
+            styles.set(index, importedStyle);
+            ObjectNode groupConfig = (ObjectNode) config.path("groups").path(group.getGroupKey());
+            groupConfig.put("enabled", entry.path("enabled").asBoolean());
+            groupConfig.set("override", entry.has("override") ? entry.path("override").deepCopy() : json.createObjectNode());
+        }
+        // 新方案内的分类规则优先于原有图层自定义样式，不修改工作区中的图层配置。
+        for (var layer : mapper.dataSetLayers(dataSetId)) {
+            if (!importedGroups.contains(layer.getGroupId())) continue;
+            JsonNode layerConfig = config.path("layers").path(layer.getId().toString());
+            if (layerConfig.isObject()) {
+                ((ObjectNode) layerConfig).putNull("definition").put("configured", true);
+            }
+        }
+        config.put("hasFeatureOverrides", false);
+        ObjectNode definition = json.createObjectNode().put("schemaVersion", 1).put("kind", "VECTOR_STYLE_SCHEME");
+        definition.set("cartography", config);
+        definition.set("featureOverrides", json.createObjectNode());
+        return saveScheme(dataSetId, null, null, new GisVectorRequests.Scheme(request.name(), definition, null, null, null));
+    }
+
+    /** 补充外部文件的类型检查；符号、条件和比例尺语义复用方案校验。 */
+    private void validateImportedStyle(JsonNode style, String name) {
+        for (String key : style.propertyNames())
+            if (!List.of("geometryType", "enabled", "minZoom", "maxZoom", "renderOrder", "symbol", "labels",
+                    "zoomStops", "overrides", "renderRules").contains(key))
+                throw error(HttpStatus.BAD_REQUEST, "分类样式包含不支持的字段: " + name + "." + key);
+        if (!style.path("enabled").isBoolean() || !style.path("minZoom").isNumber() || !style.path("maxZoom").isNumber()
+                || !style.path("renderOrder").isNumber() || !Double.isFinite(style.path("renderOrder").asDouble())
+                || !style.path("symbol").isObject() || !style.path("overrides").isArray())
+            throw error(HttpStatus.BAD_REQUEST, "分类缺少完整样式: " + name);
+        JsonNode labels = style.path("labels");
+        if (!labels.isObject() || !labels.path("enabled").isBoolean() || !labels.path("minZoom").isNumber()
+                || !Double.isFinite(labels.path("minZoom").asDouble()) || labels.path("minZoom").asDouble() < 0
+                || labels.path("minZoom").asDouble() > 25 || !VectorTemplateRules.TILE_FIELDS.contains(labels.path("field").asText())
+                || labels.hasNonNull("fallbackField") && !VectorTemplateRules.TILE_FIELDS.contains(labels.path("fallbackField").asText()))
+            throw error(HttpStatus.BAD_REQUEST, "分类标注配置无效: " + name);
+        for (String color : List.of("color", "strokeColor"))
+            if (labels.has(color) && !labels.path(color).asText().matches("#[0-9a-fA-F]{6}"))
+                throw error(HttpStatus.BAD_REQUEST, "分类标注颜色无效: " + name);
+        if (labels.has("fontFamily") && (!labels.path("fontFamily").isString() || labels.path("fontFamily").asText().length() > 100)
+                || labels.has("fontWeight") && !List.of("normal", "bold").contains(labels.path("fontWeight").asText()))
+            throw error(HttpStatus.BAD_REQUEST, "分类标注字体无效: " + name);
+        for (String field : List.of("fontSize", "strokeWidth")) {
+            if (!labels.has(field)) continue;
+            JsonNode value = labels.path(field);
+            double min = field.equals("fontSize") ? 1 : 0, max = field.equals("fontSize") ? 64 : 12;
+            if (!value.isNumber() || !Double.isFinite(value.asDouble()) || value.asDouble() < min || value.asDouble() > max)
+                throw error(HttpStatus.BAD_REQUEST, "分类标注尺寸无效: " + name);
+        }
+        if (labels.has("fontSizeStops")) validateImportedStops(labels.path("fontSizeStops"), 1, 64, name);
+        var definitions = new java.util.ArrayList<JsonNode>();
+        definitions.add(style);
+        style.path("overrides").forEach(definitions::add);
+        for (var definition : definitions) {
+            if (!definition.has("zoomStops")) continue;
+            JsonNode stops = definition.path("zoomStops");
+            if (!stops.isObject()) throw error(HttpStatus.BAD_REQUEST, "层级插值须为对象: " + name);
+            for (String field : stops.propertyNames()) {
+                if (!List.of("width", "strokeWidth", "radius", "opacity", "strokeOpacity", "fillOpacity").contains(field))
+                    throw error(HttpStatus.BAD_REQUEST, "不支持的层级插值字段: " + name + "." + field);
+                validateImportedStops(stops.path(field), 0, field.endsWith("pacity") ? 1 : 12, name);
+            }
+        }
+    }
+
+    private void validateImportedStops(JsonNode stops, double min, double max, String name) {
+        if (!stops.isArray() || stops.isEmpty() || stops.size() > 64)
+            throw error(HttpStatus.BAD_REQUEST, "层级插值须包含1至64个节点: " + name);
+        double previous = -1;
+        for (var stop : stops) {
+            if (!stop.isArray() || stop.size() != 2 || !stop.get(0).isNumber() || !stop.get(1).isNumber()
+                    || !Double.isFinite(stop.get(0).asDouble()) || !Double.isFinite(stop.get(1).asDouble())
+                    || stop.get(0).asDouble() < 0 || stop.get(0).asDouble() > 25 || stop.get(0).asDouble() <= previous
+                    || stop.get(1).asDouble() < min || stop.get(1).asDouble() > max)
+                throw error(HttpStatus.BAD_REQUEST, "层级插值节点须按层级递增且数值有效: " + name);
+            previous = stop.get(0).asDouble();
+        }
     }
 
     @Transactional(rollbackFor=Exception.class)
