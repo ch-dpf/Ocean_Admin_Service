@@ -27,6 +27,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -54,12 +55,20 @@ public class GdalDatasetReader {
     private final GisProcessingProperties properties;
     private final ControlledWorkspaceResolver sources;
     private final ObjectMapper json;
+    private final GdalTileWorkerPool tileWorkers;
+    private final GdalTileWorkerPool mapWorkers;
 
-    public GdalDatasetReader(GisProcessingProperties properties, ControlledWorkspaceResolver sources, ObjectMapper json) {
+    public GdalDatasetReader(GisProcessingProperties properties, ControlledWorkspaceResolver sources, ObjectMapper json,
+                             GdalTileWorkerPool tileWorkers, org.ocean.admin.gis.config.VectorTileProperties limits) {
         this.properties = properties;
         this.sources = sources;
         this.json = json;
+        this.tileWorkers = tileWorkers;
+        this.mapWorkers = new GdalTileWorkerPool(properties, limits, json, 2);
     }
+
+    @jakarta.annotation.PreDestroy
+    public void closeMapWorkers() { mapWorkers.close(); }
 
     /** 原文件始终只读；临时文件随上下文关闭删除，提交前须再次核验所有源。 */
     public ReadContext prepare(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
@@ -169,8 +178,27 @@ public class GdalDatasetReader {
 
     /** 复用受限工作进程执行托管包操作，JNI 不进入服务 JVM。 */
     public JsonNode executePackage(ObjectNode request, Runnable heartbeat) {
+        if ("WMS_MAP".equals(request.path("packageOperation").asText())) {
+            return mapWorkers.execute(request, path -> {
+                try { return workerCommand(path); }
+                catch (IOException ex) { throw new IllegalStateException("无法构造地图工作进程", ex); }
+            });
+        }
+        if (Set.of("QUERY", "TILE", "WINDOW").contains(request.path("packageOperation").asText())) {
+            return tileWorkers.execute(request, path -> {
+                try { return workerCommand(path); }
+                catch (IOException ex) { throw new IllegalStateException("无法构造瓦片工作进程", ex); }
+            });
+        }
+        return executePackage(request, heartbeat, stage -> { });
+    }
+
+    /** 离线绘图使用独立进程，并把分块完成进度接入现有任务通道。 */
+    public JsonNode executePackage(ObjectNode request, Runnable heartbeat, Consumer<ProgressStage> progress) {
         try (var context = new ReadContext(heartbeat)) {
-            return executePackage(context, request, stage -> { });
+            if ("RASTER_TILES".equals(request.path("packageOperation").asText()))
+                context.timeout = Duration.ofSeconds(request.path("timeoutSeconds").asLong());
+            return executePackage(context, request, progress);
         } catch (IOException ex) { throw failure("PACKAGE_IO", "矢量包操作失败: " + ex.getMessage()); }
     }
 
@@ -247,6 +275,9 @@ public class GdalDatasetReader {
         if (heap == null || !heap.matches("[1-9][0-9]*[mMgG]")) throw failure("INVALID_GDAL_CONFIG", "GDAL 工作进程堆内存配置无效");
         command.add("-Xmx" + heap);
         command.add("-Dfile.encoding=UTF-8");
+        command.add("-Djava.awt.headless=true");
+        // GeoTools 的 EPSG 缓存按进程隔离，避免与主服务争用 Windows 文件映射。
+        command.add("-Djava.io.tmpdir=" + request.toAbsolutePath().getParent());
         command.add("-XX:-CreateCoredumpOnCrash");
         String nativePath = properties.getGdalNativeLibraryPath();
         if (nativePath != null && !nativePath.isBlank())
@@ -609,7 +640,34 @@ public class GdalDatasetReader {
         }
 
         public static void main(String[] args) throws IOException {
+            // 父进程按 UTF-8 读取协议，显式指定标准流编码，避免 Windows 系统编码破坏中文进度消息。
+            System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
+            System.setErr(new PrintStream(System.err, true, StandardCharsets.UTF_8));
             ObjectMapper mapper = new ObjectMapper();
+            if (args.length == 2 && "--serve".equals(args[1])) {
+                Path requestFile = Path.of(args[0]).toAbsolutePath().normalize();
+                boolean initialized = false;
+                try (var input = new java.io.BufferedReader(new java.io.InputStreamReader(System.in, StandardCharsets.UTF_8))) {
+                    String command;
+                    while ((command = input.readLine()) != null) {
+                        if (!"execute".equals(command)) throw new IOException("瓦片工作指令无效");
+                        ObjectNode response;
+                        try {
+                            if (!Files.isRegularFile(requestFile) || Files.isSymbolicLink(requestFile)
+                                    || Files.size(requestFile) > 16 * 1024 * 1024) throw new IOException("瓦片请求文件无效");
+                            JsonNode request = mapper.readTree(requestFile.toFile());
+                            if (!initialized) { initialize(request.path("version").asText()); initialized = true; }
+                            if (!Set.of("TILE", "QUERY", "WINDOW", "WMS_MAP").contains(request.path("packageOperation").asText()))
+                                throw new IOException("交互工作进程仅允许读取操作");
+                            response = GeoPackageStore.executeNative(request, requestFile.getParent(), mapper);
+                        } catch (Exception ex) { response = error(mapper, "PACKAGE_IO", ex.getMessage()); }
+                        mapper.writeValue(requestFile.resolveSibling("result.json").toFile(), response);
+                        System.out.println("complete");
+                        System.out.flush();
+                    }
+                }
+                return;
+            }
             if (args.length == 2 && args[0].equals("--check")) {
                 try {
                     initialize(args[1]);
@@ -755,7 +813,8 @@ public class GdalDatasetReader {
                         String filename = "vector-" + result.path("vectors").size() + ".geojson";
                         Path output = directory.resolve(filename);
                         Vector<String> arguments = new Vector<>(List.of("-f", "GeoJSON", "-t_srs", "EPSG:4326",
-                                "-s_srs", sourceCrs, "-lco", "RFC7946=YES", "-lco", "COORDINATE_PRECISION=15", "-preserve_fid", name));
+                                "-s_srs", sourceCrs, "-makevalid", "-lco", "RFC7946=YES", "-lco", "WRAPDATELINE=YES",
+                                "-lco", "COORDINATE_PRECISION=15", "-preserve_fid", name));
                         progress.accept(ProgressStage.indeterminate("NATIVE_VECTOR_CONVERSION", "Java GDAL 转换源图层: " + name));
                         VectorTranslateOptions translate = new VectorTranslateOptions(arguments);
                         ProgressCallback callback = callback("NATIVE_VECTOR_CONVERSION", "转换源图层: " + name);
@@ -777,6 +836,8 @@ public class GdalDatasetReader {
                         try { metadata.put("driver", sourceDriver.getShortName()); }
                         finally { sourceDriver.delete(); }
                         metadata.set("sourceLayer", description); metadata.set("readOptions", options); metadata.put("sourceCrs", sourceCrs);
+                        metadata.putObject("geometryProcessing").put("makeValid", true).put("wrapDateline", true)
+                                .put("outputStandard", "RFC7946").put("rawSnapshotUnchanged", true);
                         append("vectors", stableKey("layer", name), name, filename, parsedCrs, geometry.get("extent"), metadata);
                     } finally { layer.delete(); }
                 }

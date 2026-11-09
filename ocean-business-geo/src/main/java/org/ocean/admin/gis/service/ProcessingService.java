@@ -1,6 +1,8 @@
 package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.config.VectorTileProperties;
+import org.ocean.admin.gis.dto.GisVectorRequests;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
 import org.ocean.admin.gis.dto.GisManagedProcessingRequest;
 import org.ocean.admin.gis.dto.ImageryProcessingParameters;
@@ -18,6 +20,7 @@ import org.ocean.admin.gis.processing.GisProcessingWorkspace;
 import org.ocean.admin.gis.processing.GisSubmitProcessingCommand;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngine;
 import org.ocean.admin.gis.processing.engine.GisFileProcessingEngineRegistry;
+import org.ocean.admin.gis.processing.engine.VectorFileProcessingEngine;
 import org.ocean.admin.gis.processing.input.GisProcessingInputResolver;
 import org.ocean.admin.gis.processing.input.GisProcessingInputResolverRegistry;
 import org.ocean.admin.gis.util.FileUploadUtil;
@@ -34,7 +37,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-/** 三种输入来源共用的 GIS 切片任务编排。 */
+/** 文件与矢量工作数据共用的 GIS 切片任务编排。 */
 @Service
 @RequiredArgsConstructor
 public class ProcessingService {
@@ -50,6 +53,21 @@ public class ProcessingService {
     private final ProcessingWorker worker;
     private final ProcessingTaskLifecycleService taskLifecycle;
     private final ObjectMapper objectMapper;
+    private final VectorStyleService vectorStyles;
+    private final VectorTileProperties vectorLimits;
+
+    public GisBatchProcessingTaskVO submitVector(Long dataSetId, GisVectorRequests.TileBuild request, String outputFormat) {
+        var scheme = vectorStyles.scheme(dataSetId, request.schemeId());
+        if (scheme.version() != request.schemeVersion()) throw new IllegalArgumentException("样式方案已变化，请重新选择");
+        var parameters = new GisProcessingParameters.VectorProcessingParameters("EPSG:3857", "XYZ", outputFormat,
+                dataSetId, request.dataRevision(), request.minZoom(), request.maxZoom(), request.bounds(), objectMapper.valueToTree(scheme));
+        long tileCount = VectorFileProcessingEngine.tileRanges(parameters).stream()
+                .mapToLong(r -> (long) (r[2] - r[1] + 1) * (r[4] - r[3] + 1)).sum();
+        if (tileCount > vectorLimits.getMaxStaticTileCount())
+            throw new IllegalArgumentException("预计生成" + tileCount + "块瓦片，超过任务上限" + vectorLimits.getMaxStaticTileCount() + "，请缩小范围或层级");
+        return submit(new GisSubmitProcessingCommand(GisInputSourceType.VECTOR_RESOURCE, GisProcessingType.VECTOR,
+                request.taskName(), parameters, null, null, null, null));
+    }
 
     public GisBatchProcessingTaskVO submitBatch(GisCreateProcessingTaskRequest request,
             List<MultipartFile> files) {
@@ -121,6 +139,8 @@ public class ProcessingService {
 
     private GisBatchProcessingTaskVO submit(GisSubmitProcessingCommand command) {
         validateCommand(command);
+        if (command.processingType() == GisProcessingType.VECTOR && command.sourceType() != GisInputSourceType.VECTOR_RESOURCE)
+            throw new IllegalArgumentException("静态矢量切片须从制图工作区选择数据和已保存方案");
         GisFileProcessingEngine engine = engineRegistry.require(command.processingType());
         String taskNo = TaskNoGenerator.generateProcessingTaskNo(command.processingType());
         GisProcessingWorkspace workspace = storageService.taskWorkspace(
@@ -134,7 +154,10 @@ public class ProcessingService {
                     taskNo, command, workspace, prepared.inputs());
             taskLifecycle.dispatch(created.taskId(), taskNo, command.taskName().trim(),
                     prepared.inputs().size(), "GIS_" + command.processingType().name(),
-                    () -> worker.process(created.taskId()), "处理任务启动失败: ");
+                    () -> {
+                        if (command.processingType() == GisProcessingType.VECTOR) worker.processVector(created.taskId());
+                        else worker.process(created.taskId());
+                    }, "处理任务启动失败: ");
             return GisBatchProcessingTaskVO.builder()
                     .taskId(created.taskId())
                     .tileSetId(created.tileSetId())

@@ -14,6 +14,7 @@ import org.ocean.admin.platform.identity.service.AuthUserSessionService;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.server.ResponseStatusException;
 import java.util.Map;
 
 @RestController
@@ -66,6 +67,8 @@ public class AuthController {
             String token = request.get("token");
             boolean valid = authService.validateToken(token);
             return ResponseResult.success(valid);
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
             return ResponseResult.error("验证失败: " + e.getMessage());
         }

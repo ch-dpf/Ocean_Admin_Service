@@ -14,6 +14,8 @@ public class GisPublicationVO {
     private Long id;
     private String serviceCode;
     private String serviceName;
+    @Schema(description = "明确发布协议：WMS、MVT、TMS_WMTS、XYZ、TMS、TERRAIN")
+    private String serviceProtocol;
 
     @Schema(description = "发布类型：TERRAIN、IMAGERY、VECTOR")
     private GisProcessingType processingType;
@@ -39,14 +41,18 @@ public class GisPublicationVO {
     private Integer minZoom;
     private Integer maxZoom;
 
-    @Schema(description = "服务访问地址：地形为以 / 结尾的根地址，影像为包含 {z}/{x}/{y} 和格式后缀的瓦片模板")
+    @Schema(description = "服务访问地址：地形根地址、影像瓦片模板、动态矢量根地址或静态配图 WMTS 端点")
     private String serviceUrl;
 
-    @Schema(description = "服务描述文件地址，影像为 tilejson.json，地形为 layer.json")
+    @Schema(description = "服务描述地址：影像 TileJSON、地形 layer.json、矢量 manifest 或静态配图 WMTS 能力文档")
     private String descriptorUrl;
 
     @Schema(description = "瓦片访问模板；不适用的发布类型为空")
     private String tileUrlTemplate;
+
+    @Schema(description = "静态配图 TMS 图层描述地址；同一发布记录同时提供 WMTS")
+    private String tmsUrl;
+    private String tmsTileUrlTemplate;
 
     @Schema(description = "动态矢量发布的固定数据资源ID")
     private String vectorResourceId;

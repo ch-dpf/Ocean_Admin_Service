@@ -149,7 +149,7 @@ CREATE TABLE ocean_gis.gis_file_meta (
     file_group_id            BIGINT,
     member_path              VARCHAR(1000),
     ingest_outcome           VARCHAR(32) CHECK (ingest_outcome IN ('REGISTERED','DUPLICATE')),
-    vector_placement         VARCHAR(10) CHECK (vector_placement IN ('AUTO','UNKNOWN')),
+    vector_placement         VARCHAR(10) CHECK (vector_placement IN ('AUTO','UNKNOWN','X_LIGHT','X_DARK')),
     vector_dataset_style_id  BIGINT,
     original_name            VARCHAR(255)  NOT NULL,
     source_type              VARCHAR(20) NOT NULL DEFAULT 'UPLOAD' CHECK (source_type IN ('UPLOAD', 'WORKSPACE')),
@@ -353,11 +353,44 @@ CREATE TABLE ocean_gis.gis_vector_resource (
     checksum VARCHAR(64),
     definition JSONB NOT NULL DEFAULT '{}'::jsonb,
     create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CHECK (status='RETIRED' OR storage_type = 'POSTGIS' OR (storage_key IS NOT NULL AND checksum IS NOT NULL))
+    CHECK (status='RETIRED' OR storage_type = 'POSTGIS' OR
+        (storage_key IS NOT NULL AND (resource_kind='WORKING' OR checksum IS NOT NULL)))
 );
 CREATE UNIQUE INDEX uk_vector_source_snapshot ON ocean_gis.gis_vector_resource(source_file_id)
     WHERE resource_kind='SOURCE' AND status='READY';
 CREATE INDEX idx_vector_resource_dataset ON ocean_gis.gis_vector_resource(data_set_id,resource_kind,status);
+
+-- 变更记录同时承载工作包写入意图和瓦片失效范围，写入失败后可幂等恢复。
+CREATE TABLE ocean_gis.gis_vector_change (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    data_set_id BIGINT NOT NULL REFERENCES ocean_gis.gis_data_set(id) ON DELETE CASCADE,
+    resource_id BIGINT REFERENCES ocean_gis.gis_vector_resource(id),
+    request JSONB,
+    applied BOOLEAN NOT NULL DEFAULT true,
+    bounds public.geometry(Geometry,3857),
+    global_change BOOLEAN NOT NULL DEFAULT false,
+    transaction_id BIGINT NOT NULL DEFAULT txid_current(),
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (applied OR (resource_id IS NOT NULL AND request IS NOT NULL))
+);
+CREATE INDEX idx_vector_change_dataset ON ocean_gis.gis_vector_change(data_set_id,id);
+CREATE INDEX idx_vector_change_bounds ON ocean_gis.gis_vector_change USING GIST(data_set_id,bounds);
+CREATE INDEX idx_vector_change_pending ON ocean_gis.gis_vector_change(data_set_id,id) WHERE NOT applied;
+COMMENT ON TABLE ocean_gis.gis_vector_change IS '持久化矢量变更；空间范围覆盖修改前后几何，缓存按局部修订号读取';
+
+CREATE FUNCTION ocean_gis.record_vector_dataset_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.data_revision <> OLD.data_revision AND NOT EXISTS (
+        SELECT 1 FROM ocean_gis.gis_vector_change
+        WHERE data_set_id=NEW.data_set_id AND transaction_id=txid_current()
+    ) THEN
+        INSERT INTO ocean_gis.gis_vector_change(data_set_id,global_change) VALUES(NEW.data_set_id,true);
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_vector_dataset_change AFTER UPDATE OF data_revision
+    ON ocean_gis.gis_vector_dataset_style FOR EACH ROW EXECUTE FUNCTION ocean_gis.record_vector_dataset_change();
 
 CREATE TABLE ocean_gis.gis_vector_source_layer (
     id BIGINT PRIMARY KEY,
@@ -586,7 +619,7 @@ CREATE TABLE ocean_gis.gis_processing_task (
     CONSTRAINT ck_gis_processing_task_type
         CHECK (processing_type IN ('TERRAIN', 'IMAGERY', 'VECTOR')),
     CONSTRAINT ck_gis_processing_task_source
-        CHECK (source_type IN ('UPLOAD', 'WORKSPACE', 'MANAGED_FILE')),
+        CHECK (source_type IN ('UPLOAD', 'WORKSPACE', 'MANAGED_FILE', 'VECTOR_RESOURCE')),
     CONSTRAINT ck_gis_processing_task_schema_version
         CHECK (parameter_schema_version > 0),
     CONSTRAINT ck_gis_processing_task_counts
@@ -862,6 +895,7 @@ CREATE TABLE ocean_gis.gis_publication (
     id                  BIGINT       PRIMARY KEY,
     service_code        VARCHAR(64)  NOT NULL,
     service_name        VARCHAR(200) NOT NULL,
+    service_protocol    VARCHAR(20) NOT NULL,
     tile_set_id         BIGINT,
     vector_resource_id  BIGINT REFERENCES ocean_gis.gis_vector_resource(id),
     vector_definition   TEXT,
@@ -879,12 +913,16 @@ CREATE TABLE ocean_gis.gis_publication (
     CONSTRAINT ck_gis_publication_status
         CHECK (status IN ('PUBLISHED', 'DISABLED')),
     CONSTRAINT ck_gis_publication_source CHECK ((tile_set_id IS NOT NULL) <> (vector_resource_id IS NOT NULL)),
+    CONSTRAINT ck_gis_publication_protocol CHECK (
+        (vector_resource_id IS NOT NULL AND service_protocol IN ('MVT', 'WMS')) OR
+        (tile_set_id IS NOT NULL AND service_protocol IN ('TMS_WMTS', 'XYZ', 'TMS', 'TERRAIN'))),
     CONSTRAINT ck_gis_publication_deleted
         CHECK (deleted IN (0, 1))
 );
 
 COMMENT ON TABLE ocean_gis.gis_publication IS '静态瓦片集或固定矢量资源与样式组合的公开发布记录';
 COMMENT ON COLUMN ocean_gis.gis_publication.service_name IS '可重命名的服务名称';
+COMMENT ON COLUMN ocean_gis.gis_publication.service_protocol IS '发布协议；独立于成果格式和物理瓦片编号方案';
 COMMENT ON COLUMN ocean_gis.gis_publication.service_code IS '公开服务 URL 中使用的稳定编码';
 COMMENT ON COLUMN ocean_gis.gis_publication.tile_set_id IS '被发布的静态瓦片集 ID';
 

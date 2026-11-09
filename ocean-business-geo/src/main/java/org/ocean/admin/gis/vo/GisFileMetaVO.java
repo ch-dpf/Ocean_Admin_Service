@@ -36,7 +36,7 @@ public class GisFileMetaVO {
     private String relativePath;
     @Schema(description = "登记时的源文件修改时间，Unix 毫秒", accessMode = Schema.AccessMode.READ_ONLY)
     private Long sourceModifiedAt;
-    @Schema(description = "矢量归组方式", allowableValues = {"AUTO", "UNKNOWN"}, accessMode = Schema.AccessMode.READ_ONLY)
+    @Schema(description = "矢量归组方式", allowableValues = {"AUTO", "UNKNOWN", "X_LIGHT", "X_DARK"}, accessMode = Schema.AccessMode.READ_ONLY)
     private String vectorPlacement;
     @Schema(accessMode = Schema.AccessMode.READ_ONLY)
     private Long vectorDatasetStyleId;
@@ -113,7 +113,7 @@ public class GisFileMetaVO {
             @NotBlank @Size(max = 64) String workspaceCode,
             @NotBlank @Size(max = 1000) String relativePath,
             @Schema(description = "目录接入是否包含所有层级子目录，默认false", defaultValue = "false") Boolean includeSubdirectories,
-            @Pattern(regexp = "AUTO|UNKNOWN") String vectorPlacement) { }
+            @Pattern(regexp = "AUTO|UNKNOWN|X_LIGHT|X_DARK") String vectorPlacement) { }
 
     public record WorkspaceItem(Long fileMetaId, String relativePath, String status, String errorMessage) { }
 

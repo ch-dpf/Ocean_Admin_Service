@@ -16,3 +16,4 @@ logs/
 /deploy/docker/data/
 /deploy/docker/logs/
 /deploy/docker/backups/
+.runtime/

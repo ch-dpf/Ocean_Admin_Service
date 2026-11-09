@@ -14,6 +14,12 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties(prefix = "gis.vector.tiles")
 public class VectorTileProperties {
+    /** 单次静态矢量任务允许生成的瓦片数量上限。 */
+    @Positive
+    private long maxStaticTileCount = 50_000;
+    /** 静态栅格任务使用独立进程，允许较长运行时间，单位为秒。 */
+    @Min(60) @Max(86400)
+    private long staticRasterTimeoutSeconds = 21600;
     /** 单个压缩矢量瓦片允许的最大字节数。 */
     @Positive
     private int maxTileBytes = 2 * 1024 * 1024;
@@ -49,4 +55,8 @@ public class VectorTileProperties {
     /** 矢量瓦片本地缓存允许占用的最大字节数。 */
     @Positive
     private long maxLocalCacheBytes = 64L * 1024 * 1024;
+
+    /** 共享缓存只接收小瓦片；限制 Base64 编码后的实际 Redis 载荷。 */
+    @Min(1024) @Max(1048576)
+    private int maxRedisValueBytes = 256 * 1024;
 }

@@ -132,7 +132,7 @@ public class VectorStyleRules {
         }
     }
 
-    private boolean matchesFilter(JsonNode filter, JsonNode properties) {
+    public boolean matchesFilter(JsonNode filter, JsonNode properties) {
         if (filter == null || filter.isNull()) return true;
         String op = filter.path("op").asText();
         if ("and".equals(op)) {
@@ -174,13 +174,15 @@ public class VectorStyleRules {
         Set<String> names = switch (geometry) {
             case "POINT" -> Set.of("color", "radius", "opacity", "strokeColor", "strokeWidth");
             case "LINE" -> Set.of("color", "width", "opacity", "dashArray");
-            default -> Set.of("fillColor", "fillOpacity", "strokeColor", "strokeWidth", "strokeOpacity", "dashArray");
+            default -> Set.of("fillColor", "fillOpacity", "strokeColor", "strokeWidth", "strokeOpacity", "dashArray", "fillPattern");
         };
         fields(symbol, names, "symbol");
+        if (symbol.has("fillPattern") && !Set.of("none", "diagonal", "cross", "grid", "dots").contains(symbol.path("fillPattern").asText()))
+            throw invalid("填充纹理无效");
         ObjectNode result = (ObjectNode) symbol;
         if (symbol.has("dashArray")) {
             var dash = symbol.path("dashArray");
-            if (!dash.isArray() || dash.isEmpty() || dash.size() > 16) throw invalid("dashArray须为1至16项数组");
+            if (!dash.isArray() || dash.size() > 16) throw invalid("dashArray须为0至16项数组，空数组表示实线");
             for (var n : dash) if (!n.isNumber() || !Double.isFinite(n.asDouble()) || n.asDouble() <= 0 || n.asDouble() > 128) throw invalid("虚线长度无效");
         }
         if ("POLYGON".equals(geometry)) {

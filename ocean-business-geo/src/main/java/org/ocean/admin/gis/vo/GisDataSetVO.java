@@ -58,30 +58,12 @@ public class GisDataSetVO {
             accessMode = Schema.AccessMode.READ_ONLY)
     private Long totalSizeBytes;
 
-    @Schema(description = "源状态为READY的未删除文件及其轮廓处理状态摘要", accessMode = Schema.AccessMode.READ_ONLY)
+    @Schema(description = "源状态为READY的未删除文件及其轮廓处理状态摘要；分页接口不加载", accessMode = Schema.AccessMode.READ_ONLY)
     private FileSummary fileSummary;
-
-    @Schema(description = "分页接口直接返回已保存的文件代表点，每个可定位文件一个点；其他接口为 null",
-            accessMode = Schema.AccessMode.READ_ONLY)
-    private List<FilePoint> filePoints;
 
     @Schema(description = "EPSG:4326 GeoJSON FeatureCollection；仅单数据集轮廓接口返回，其他查询为 null",
             accessMode = Schema.AccessMode.READ_ONLY)
     private FootprintCollection footprints;
-
-    @Data
-    public static class FilePoint {
-        private Long dataSetId;
-        private Long fileId;
-        private String fileName;
-        @Schema(description = "经度，EPSG:4326")
-        private Double longitude;
-        @Schema(description = "纬度，EPSG:4326")
-        private Double latitude;
-        private String layerKey;
-        @Schema(description = "代表点来源范围类型；VECTOR_ENVELOPE 表示来自包围范围，不能保证位于真实矢量要素内")
-        private String extentKind;
-    }
 
     @Data
     public static class FileSummary {

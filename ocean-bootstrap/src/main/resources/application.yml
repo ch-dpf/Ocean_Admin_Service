@@ -38,7 +38,9 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       database: ${REDIS_DB:0}
-      timeout: 3s
+      timeout: ${REDIS_COMMAND_TIMEOUT:3s}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
+      client-name: ocean-auth
 
   # Flyway 迁移配置
   flyway:
@@ -53,6 +55,8 @@ logging:
   level:
     root: INFO
     org.ocean.admin: DEBUG
+    # 二进制瓦片和完整渲染策略的SQL参数日志会放大I/O与堆分配压力。
+    org.ocean.admin.gis.mapper.GisVectorMapper: INFO
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"
@@ -96,6 +100,7 @@ gis:
       tile-cache-ttl-seconds: ${GIS_VECTOR_TILE_CACHE_TTL_SECONDS:300}
       max-cached-tiles: ${GIS_VECTOR_TILE_MAX_CACHED:64}
       max-local-cache-bytes: ${GIS_VECTOR_TILE_LOCAL_CACHE_BYTES:67108864}
+      max-redis-value-bytes: ${GIS_VECTOR_TILE_REDIS_VALUE_BYTES:262144}
   upload:
     base-path: ${GIS_UPLOAD_BASE_PATH:gis/uploads}
     max-file-size: ${GIS_UPLOAD_MAX_FILE_SIZE:25GB}
@@ -133,6 +138,12 @@ gis:
       jar-path: ${GIS_TERRAIN_MAGO_JAR_PATH:ocean-business-geo/tools/mago/mago-3d-terrainer-1.14.2-release.jar}
       max-heap: ${GIS_TERRAIN_MAGO_MAX_HEAP:8g}
       process-timeout: ${GIS_TERRAIN_MAGO_PROCESS_TIMEOUT:72h}
+
+app:
+  redis:
+    request-queue-size: ${REDIS_REQUEST_QUEUE_SIZE:128}
+    progress-timeout: ${REDIS_PROGRESS_TIMEOUT:1s}
+    tile-timeout: ${REDIS_TILE_TIMEOUT:500ms}
 
 ocean:
   platform:

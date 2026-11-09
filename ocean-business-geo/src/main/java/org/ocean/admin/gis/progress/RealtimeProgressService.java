@@ -9,6 +9,7 @@ import org.ocean.admin.kernel.realtime.RealtimeEventPublisher;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
@@ -48,10 +49,11 @@ public class RealtimeProgressService {
     private final RealtimeEventPublisher publisher;
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
+    private volatile long redisRetryAfter;
 
     public RealtimeProgressService(ProgressSnapshotProvider provider,
             @Qualifier("gisRealtimeSsePublisher") RealtimeEventPublisher publisher,
-            StringRedisTemplate redis, ObjectMapper json) {
+            @Qualifier("progressRedisTemplate") StringRedisTemplate redis, ObjectMapper json) {
         this.provider = provider;
         this.publisher = publisher;
         this.redis = redis;
@@ -77,16 +79,30 @@ public class RealtimeProgressService {
                     resource == null ? new Resource("INGESTION", id, "/api/gis/progress/" + id) : resource,
                     null, LocalDateTime.now(), null, new Revision(1, 0));
         }
-        if (existing == null) {
-            if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(PREFIX + id, json.writeValueAsString(snapshot), ACTIVE_RETENTION)))
-                return query(id).handle();
-        } else redis.opsForValue().set(PREFIX + id, json.writeValueAsString(snapshot), ACTIVE_RETENTION);
+        if (System.nanoTime() < redisRetryAfter && durable(id)) return snapshot.handle();
+        boolean created = true;
+        try {
+            if (existing == null) {
+                created = Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(PREFIX + id, json.writeValueAsString(snapshot), ACTIVE_RETENTION));
+            } else redis.opsForValue().set(PREFIX + id, json.writeValueAsString(snapshot), ACTIVE_RETENTION);
+        } catch (DataAccessException ex) {
+            unavailable(id, ex);
+            return snapshot.handle();
+        }
+        if (!created) return query(id).handle();
         publish(snapshot, "gis.progress.created");
         return snapshot.handle();
     }
 
     public ProgressSnapshot get(String id) {
-        String value = redis.opsForValue().get(PREFIX + id);
+        if (System.nanoTime() < redisRetryAfter && durable(id)) return databaseSnapshot(id);
+        String value;
+        try {
+            value = redis.opsForValue().get(PREFIX + id);
+        } catch (DataAccessException ex) {
+            unavailable(id, ex);
+            return databaseSnapshot(id);
+        }
         return value == null ? null : json.readValue(value, ProgressSnapshot.class);
     }
 
@@ -94,22 +110,32 @@ public class RealtimeProgressService {
         validateId(id);
         ProgressSnapshot snapshot = get(id);
         if (snapshot != null) {
-            if (!snapshot.status().isTerminal()
-                    && !Set.of("GIS_UPLOAD", "GIS_WORKSPACE_IMPORT").contains(snapshot.type())) {
+            if (durable(id)) {
                 ProgressSnapshot authoritative = provider.load(id);
+                if (authoritative != null && authoritative.revision().epoch() > snapshot.revision().epoch()) {
+                    ProgressSnapshot repaired = change(id, old ->
+                            old.revision().epoch() < authoritative.revision().epoch() ? authoritative : old);
+                    return repaired == null ? authoritative : repaired;
+                }
                 if (authoritative != null && authoritative.status().isTerminal()
+                        && !snapshot.status().isTerminal()
                         && authoritative.revision().epoch() == snapshot.revision().epoch()) {
-                    update(snapshot.handle(), ProgressUpdate.summaryChanged(authoritative.summary()));
-                    return finish(snapshot.handle(), authoritative.status(), authoritative.error() == null
+                    ProgressSnapshot finished = finish(snapshot.handle(), authoritative.status(), authoritative.error() == null
                             ? "业务处理结束" : authoritative.error().message());
+                    return finished == null ? authoritative : finished;
                 }
             }
             return snapshot;
         }
         snapshot = provider.rebuild(id);
         if (snapshot == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "进度已过期，请查询文件接入结果");
-        redis.opsForValue().setIfAbsent(PREFIX + id, json.writeValueAsString(snapshot),
-                snapshot.status().isTerminal() ? RETENTION : ACTIVE_RETENTION);
+        try {
+            redis.opsForValue().setIfAbsent(PREFIX + id, json.writeValueAsString(snapshot),
+                    snapshot.status().isTerminal() ? RETENTION : ACTIVE_RETENTION);
+        } catch (DataAccessException ex) {
+            unavailable(id, ex);
+            return snapshot;
+        }
         return get(id);
     }
 
@@ -155,15 +181,29 @@ public class RealtimeProgressService {
     }
 
     private ProgressSnapshot change(String id, UnaryOperator<ProgressSnapshot> update) {
+        if (System.nanoTime() < redisRetryAfter && durable(id)) return null;
         for (int attempt = 0; attempt < 100; attempt++) {
-            String before = redis.opsForValue().get(PREFIX + id);
+            String before;
+            try {
+                before = redis.opsForValue().get(PREFIX + id);
+            } catch (DataAccessException ex) {
+                unavailable(id, ex);
+                return null;
+            }
             if (before == null) return null;
             ProgressSnapshot old = json.readValue(before, ProgressSnapshot.class);
             ProgressSnapshot next = update.apply(old);
             if (old == next) return old;
             long ttl = (next.status().isTerminal() ? RETENTION : ACTIVE_RETENTION).toMillis();
-            if (Long.valueOf(1).equals(redis.execute(CAS, List.of(PREFIX + id), before,
-                    json.writeValueAsString(next), Long.toString(ttl)))) {
+            Long changed;
+            try {
+                changed = redis.execute(CAS, List.of(PREFIX + id), before,
+                        json.writeValueAsString(next), Long.toString(ttl));
+            } catch (DataAccessException ex) {
+                unavailable(id, ex);
+                return null;
+            }
+            if (Long.valueOf(1).equals(changed)) {
                 publish(next, next.status().isTerminal() ? "gis.progress.finished" : "gis.progress.updated");
                 return next;
             }
@@ -197,13 +237,19 @@ public class RealtimeProgressService {
 
     public ProgressSnapshot finish(Handle handle, TaskStatus status, String message) {
         if (!status.isTerminal()) throw new IllegalArgumentException("结束进度必须指定终态");
+        // 中途通知可能丢失，处理/归档的最终计数必须取自已经提交的业务记录。
+        ProgressSnapshot authoritative = durable(handle.progressId()) ? provider.load(handle.progressId()) : null;
         return change(handle.progressId(), old -> {
+            if (authoritative != null && authoritative.status().isTerminal()
+                    && authoritative.revision().epoch() > old.revision().epoch()) return authoritative;
             if (old.status().isTerminal() || old.revision().epoch() != handle.epoch()) return old;
-            if (status != TaskStatus.FAILED && old.summary().processed() != old.summary().total())
+            ProgressSummary summary = authoritative != null && authoritative.status() == status
+                    && authoritative.revision().epoch() == handle.epoch() ? authoritative.summary() : old.summary();
+            if (status != TaskStatus.FAILED && summary.processed() != summary.total())
                 throw new IllegalStateException("仍有未处理项，不能结束进度");
             return new ProgressSnapshot(old.progressId(), old.correlationId(), old.type(), old.category(), old.title(), status,
-                    Overall.of(old.summary().processed() == old.summary().total() ? Integer.valueOf(100) : old.overall().percent()),
-                    ProgressStage.indeterminate(status.name(), message), old.metrics(), List.of(), old.summary(), old.resource(),
+                    Overall.of(summary.processed() == summary.total() ? Integer.valueOf(100) : old.overall().percent()),
+                    ProgressStage.indeterminate(status.name(), message), old.metrics(), List.of(), summary, old.resource(),
                     status == TaskStatus.COMPLETED ? null : new ErrorInfo("BUSINESS_FAILURE", message),
                     old.startedAt(), LocalDateTime.now(), nextRevision(old));
         });
@@ -301,6 +347,25 @@ public class RealtimeProgressService {
     }
 
     private Revision nextRevision(ProgressSnapshot snapshot) { return new Revision(snapshot.revision().epoch(), snapshot.revision().sequence() + 1); }
+    private boolean durable(String id) {
+        return id.startsWith("imagery_") || id.startsWith("terrain_") || id.startsWith("vector_") || id.startsWith("archive_");
+    }
+
+    private ProgressSnapshot databaseSnapshot(String id) {
+        ProgressSnapshot snapshot = provider.load(id);
+        // 终态补查需要推进持久化版本，否则序号0会被客户端已有的中间进度覆盖。
+        // 运行中的任务只读取，不改变执行线程持有的版本。
+        return snapshot != null && snapshot.status().isTerminal() ? provider.rebuild(id) : snapshot;
+    }
+
+    /** 仅隔离有数据库权威记录的通知故障；上传状态和执行租约仍要求Redis成功。 */
+    private void unavailable(String id, DataAccessException ex) {
+        if (!durable(id)) throw ex;
+        long now = System.nanoTime();
+        if (now >= redisRetryAfter) log.warn("Redis进度读写失败，暂停投影5秒；任务继续执行，补查使用数据库: progressId={}, cause={}",
+                id, ex.getClass().getSimpleName());
+        redisRetryAfter = now + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+    }
     private void publish(ProgressSnapshot snapshot, String type) {
         publisher.publish(EventMessage.create(type, "ocean.gis", "progress/" + snapshot.progressId(), snapshot.correlationId(), snapshot));
     }

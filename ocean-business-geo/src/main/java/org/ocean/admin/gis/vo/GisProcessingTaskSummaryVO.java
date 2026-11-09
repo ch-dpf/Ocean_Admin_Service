@@ -18,6 +18,9 @@ public class GisProcessingTaskSummaryVO {
     @Schema(description = "处理类型：TERRAIN、IMAGERY、VECTOR")
     private GisProcessingType processingType;
 
+    @Schema(description = "成果格式，如 PNG、MVT 或 QUANTIZED_MESH")
+    private String outputFormat;
+
     @Schema(description = "输入来源：UPLOAD、WORKSPACE、MANAGED_FILE")
     private GisInputSourceType sourceType;
 

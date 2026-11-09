@@ -17,6 +17,7 @@ public class GisPublication {
     private Long id;
     private String serviceCode;
     private String serviceName;
+    private String serviceProtocol;
     private Long tileSetId;
     private Long vectorResourceId;
     private String vectorDefinition;

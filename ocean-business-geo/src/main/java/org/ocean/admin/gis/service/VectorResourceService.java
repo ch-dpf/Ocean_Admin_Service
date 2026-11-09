@@ -18,6 +18,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -35,22 +36,128 @@ public class VectorResourceService {
     private final VectorRenderPlanner planner;
     private final org.ocean.admin.gis.util.VectorTileEncoder encoder;
 
+    public Path workingInput(long id) throws IOException { return store.path(id + ".ndjson"); }
+
+    public void importWorking(long id, GisFileMeta source, List<GisVectorLayer> layers,
+                              Runnable guard, Runnable heartbeat) throws IOException {
+        ObjectNode definition = workingDefinition(source.getDataSetId());
+        definition.set("layers", json.valueToTree(layers));
+        boolean registered = false;
+        try {
+            JsonNode result = store.build(id, definition, heartbeat);
+            var resource = resource(id, source.getDataSetId(), source.getId(), "WORKING", definition);
+            transactions.executeWithoutResult(tx -> {
+                guard.run();
+                rollbackCleanup(id);
+                mapper.insertResource(resource);
+                layers.forEach(layer -> mapper.assignResource(layer.getId(), id));
+                updateStatistics(result);
+            });
+            registered = true;
+        } finally {
+            Files.deleteIfExists(store.path(id + ".ndjson"));
+            Files.deleteIfExists(store.path(id + ".partial"));
+            if (!registered) Files.deleteIfExists(store.path(id + ".gpkg"));
+        }
+    }
+
+    private ObjectNode workingDefinition(Long dataSetId) {
+        var definition = json.createObjectNode();
+        definition.set("tilePolicy", planner.policy(styles.require(dataSetId, false)));
+        definition.set("groups", json.valueToTree(mapper.groups(dataSetId)));
+        definition.set("layers", json.valueToTree(mapper.dataSetLayers(dataSetId)));
+        return definition;
+    }
+
+    private void updateStatistics(JsonNode result) {
+        for (JsonNode layer : result.path("layers")) {
+            JsonNode extent = layer.get("extent");
+            mapper.updatePackageLayer(layer.path("id").asLong(), layer.path("count").asLong(),
+                    extent == null ? null : json.writeValueAsString(extent), json.writeValueAsString(layer.path("types")));
+        }
+    }
+
+    /** 写入意图先随 PostgreSQL 事务提交，工作包以操作号幂等应用；失败记录留待重试。 */
+    public void edit(GisVectorLayer source, GisVectorFeature before, GisVectorFeature after) {
+        requireEditable(source);
+        boolean packaged = source.getResourceId() != null && "GPKG".equals(require(source.getResourceId()).getStorageType());
+        ObjectNode request = null;
+        if (packaged) {
+            request = json.createObjectNode().put("sourceLayerId", source.getId())
+                    .put("featureId", after == null ? before.getId() : after.getId())
+                    .put("expectedVersion", before == null ? 0 : before.getVersion()).put("delete", after == null);
+            request.set("definition", workingDefinition(source.getDataSetId()));
+            if (after != null) request.set("feature", json.valueToTree(after));
+        }
+        mapper.recordFeatureChange(source.getDataSetId(), packaged ? source.getResourceId() : null,
+                request == null ? null : json.writeValueAsString(request), !packaged,
+                before == null ? null : before.getGeometryJson(), after == null ? null : after.getGeometryJson());
+        if (packaged) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { finishPending(source.getDataSetId(), true); }
+            });
+        }
+    }
+
+    /** 改挂分类会改变层级过滤和保边规则，显示表必须与新分类一起修订。 */
+    public void rebuildLayer(GisVectorLayer layer) {
+        if (layer.getResourceId() == null || !"GPKG".equals(require(layer.getResourceId()).getStorageType())) return;
+        ObjectNode request = json.createObjectNode().put("refreshLayerId", layer.getId());
+        request.set("definition", workingDefinition(layer.getDataSetId()));
+        mapper.recordFeatureChange(layer.getDataSetId(),layer.getResourceId(),json.writeValueAsString(request),false,
+                layer.getGeographicExtent(), null);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() { finishPending(layer.getDataSetId(), true); }
+        });
+    }
+
+    public void finishPending(Long dataSetId) { finishPending(dataSetId, false); }
+
+    private void finishPending(Long dataSetId, boolean afterCommit) {
+        if (!afterCommit && mapper.pendingChanges(dataSetId).isEmpty()) return;
+        var tx = new TransactionTemplate(transactions.getTransactionManager());
+        if (afterCommit || TransactionSynchronizationManager.isCurrentTransactionReadOnly())
+            tx.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        tx.executeWithoutResult(status -> {
+            if (mapper.lockDataSetStyle(dataSetId) == null) return;
+            for (var change : mapper.pendingChanges(dataSetId)) {
+                var resource = require(change.resourceId());
+                try {
+                    JsonNode result = store.edit(resource.getStorageKey(), change.id(), json.readTree(change.requestJson()));
+                    updateStatistics(result);
+                    mapper.touchWorkingResource(resource.getId(), Files.size(store.path(resource.getStorageKey())));
+                    mapper.completeChange(change.id());
+                } catch (IOException | RuntimeException ex) {
+                    throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "要素修改已登记，工作包写入尚未完成，请稍后重试读取", ex);
+                }
+            }
+        });
+    }
+
     public byte[] tile(Long dataSetId, GisVectorResource frozen, int z, int x, int y, int maxBytes) throws IOException {
         JsonNode definition = frozen == null ? null : json.readTree(frozen.getDefinitionJson());
         if (frozen != null) return store.tile(frozen.getStorageKey(),definition,z,x,y,maxBytes);
         JsonNode policy = planner.policy(styles.require(dataSetId, false));
         var tile = encoder.begin(z, x, y, policy, maxBytes);
-        List<GisVectorLayer> layers = mapper.dataSetLayers(dataSetId);
-        if (!layers.isEmpty() && layers.getFirst().getResourceId() != null
-                && layers.stream().allMatch(layer -> layers.getFirst().getResourceId().equals(layer.getResourceId()))) {
-            var shared = require(layers.getFirst().getResourceId());
-            if ("GPKG".equals(shared.getStorageType())) {
-                var current = json.createObjectNode();
-                current.set("tilePolicy", policy);
-                current.set("layers", json.valueToTree(layers));
-                current.set("groups", json.valueToTree(mapper.groups(dataSetId)));
-                return store.tile(shared.getStorageKey(), current, z, x, y, maxBytes);
+        List<GisVectorLayer> layers = mapper.tileLayers(dataSetId,tile.bbox());
+        if (layers.isEmpty()) return tile.finish();
+        var resourceMap = mapper.resources(dataSetId).stream().collect(java.util.stream.Collectors.toMap(GisVectorResource::getId, value -> value));
+        var packages = new java.util.LinkedHashMap<Long, java.util.List<GisVectorLayer>>();
+        boolean allPackaged = !layers.isEmpty();
+        for (var layer : layers) {
+            if (layer.getResourceId() == null || !"GPKG".equals(resourceMap.get(layer.getResourceId()).getStorageType())) { allPackaged = false; break; }
+            packages.computeIfAbsent(layer.getResourceId(), ignored -> new java.util.ArrayList<>()).add(layer);
+        }
+        if (allPackaged) {
+            var sources = json.createArrayNode();
+            for (var entry : packages.entrySet()) {
+                var source = sources.addObject().put("input", store.path(resourceMap.get(entry.getKey()).getStorageKey()).toString());
+                source.set("layers", json.valueToTree(entry.getValue()));
             }
+            ObjectNode current = json.createObjectNode();
+            current.set("tilePolicy", policy);
+            current.set("groups", json.valueToTree(mapper.groups(dataSetId)));
+            return store.tile(sources, current, z, x, y, maxBytes);
         }
         var groups = new java.util.HashMap<Long,String>();
         mapper.groups(dataSetId).forEach(group -> groups.put(group.getId(),group.getGroupKey()));
@@ -161,6 +268,7 @@ public class VectorResourceService {
     }
 
     public List<GisVectorFeature> features(GisVectorLayer layer, long after, int limit, double[] bbox, Long fid) throws IOException {
+        finishPending(layer.getDataSetId());
         if (layer.getResourceId() == null || "POSTGIS".equals(require(layer.getResourceId()).getStorageType())) {
             if (fid != null) {
                 var feature = mapper.feature(layer.getId(), fid);
@@ -176,14 +284,15 @@ public class VectorResourceService {
     }
 
     public void requireEditable(GisVectorLayer layer) {
-        if (layer.getResourceId() != null && "GPKG".equals(require(layer.getResourceId()).getStorageType()))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "当前为只读GPKG，请先显式转入PostGIS编辑存储");
+        if (layer.getResourceId() != null && !"WORKING".equals(require(layer.getResourceId()).getResourceKind()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "原始快照与发布快照不可编辑");
     }
 
     /** 所有编辑与转换均持有数据集样式行锁，复制期间不会混入不同的数据版本。 */
     @Transactional(rollbackFor = Exception.class)
     public GisVectorResource convert(Long dataSetId, String target, String ifMatch) throws IOException {
         var state = styles.require(dataSetId, true);
+        finishPending(dataSetId);
         VectorDataSetStyleService.requireMatch(ifMatch, "\"storage-" + dataSetId + "-" + state.getDataRevision() + "\"");
         if (!Set.of("GPKG", "POSTGIS").contains(target)) throw new IllegalArgumentException("存储类型须为GPKG或POSTGIS");
         List<GisVectorLayer> layers = mapper.dataSetLayers(dataSetId);
@@ -219,7 +328,14 @@ public class VectorResourceService {
     /** 固定整个数据集的要素及分类契约；样式单独保存在发布绑定中。 */
     @Transactional(rollbackFor = Exception.class)
     public GisVectorResource freeze(Long dataSetId, String kind) throws IOException {
+        return freeze(dataSetId, kind, () -> { }, stage -> { });
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public GisVectorResource freeze(Long dataSetId, String kind, Runnable heartbeat,
+                                    Consumer<ProgressStage> progress) throws IOException {
         var state = styles.require(dataSetId, true);
+        finishPending(dataSetId);
         var definition = json.createObjectNode();
         definition.set("map", json.valueToTree(planner.definition(state)));
         definition.set("tilePolicy", planner.policy(state));
@@ -232,12 +348,38 @@ public class VectorResourceService {
         }
         long id = IdWorker.getId();
         rollbackCleanup(id);
-        try (var writer = Files.newBufferedWriter(store.path(id + ".ndjson"))) {
-            forEachBatch(layers, batch -> {
-                for (var feature : batch) { writer.write(json.writeValueAsString(feature)); writer.newLine(); }
-            });
+        // 单个工作包已具备完整显示表和 RTree；分类与显示契约一致时不再逐要素导出、重建。
+        GisVectorResource source = layers.getFirst().getResourceId() == null ? null : require(layers.getFirst().getResourceId());
+        boolean copyPackage = source != null && "GPKG".equals(source.getStorageType())
+                && layers.stream().allMatch(layer -> source.getId().equals(layer.getResourceId()));
+        if (copyPackage) {
+            JsonNode sourceDefinition = json.readTree(source.getDefinitionJson());
+            copyPackage = definition.path("tilePolicy").equals(sourceDefinition.path("tilePolicy"));
+            for (var layer : layers) {
+                boolean sameLayer = false;
+                for (JsonNode original : sourceDefinition.path("layers")) {
+                    if (original.path("id").asLong() == layer.getId()
+                            && original.path("groupId").asLong() == layer.getGroupId()
+                            && original.path("geometryType").asText().equals(layer.getGeometryType())) {
+                        sameLayer = true;
+                        break;
+                    }
+                }
+                if (!sameLayer) { copyPackage = false; break; }
+            }
         }
-        store.build(id, layerNodes, () -> { });
+        if (copyPackage) {
+            store.install(store.path(source.getStorageKey()), id, heartbeat, progress);
+        } else {
+            progress.accept(ProgressStage.indeterminate("VECTOR_SNAPSHOT", "合并工作资源并建立显示索引"));
+            try (var writer = Files.newBufferedWriter(store.path(id + ".ndjson"))) {
+                forEachBatch(layers, batch -> {
+                    heartbeat.run();
+                    for (var feature : batch) { writer.write(json.writeValueAsString(feature)); writer.newLine(); }
+                });
+            }
+            store.build(id, definition, heartbeat);
+        }
         var resource = resource(id, dataSetId, null, kind, definition);
         resource.setDataVersion(state.getDataRevision()); mapper.insertResource(resource);
         return require(id);

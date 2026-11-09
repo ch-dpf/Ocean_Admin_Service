@@ -52,13 +52,17 @@ public class VectorDataSetStyleService {
         snapshot.setDefinitionJson(json.writeValueAsString(definition));
         snapshot.setTemplateChecksum(digest(bytes));
         if (mapper.insertDataSetStyle(snapshot) != 1) throw new IllegalStateException("样式快照创建失败");
+        createGroups(snapshot, definition);
+    }
+
+    private void createGroups(GisVectorDataSetStyle snapshot, tools.jackson.databind.JsonNode definition) {
         Map<String, Long> ids = new HashMap<>();
         for (var g : definition.path("groups")) ids.put(g.path("id").asText(), IdWorker.getId());
         List<GisVectorGroup> groups = new ArrayList<>();
         for (var node : definition.path("groups")) {
             var group = new GisVectorGroup();
             group.setId(ids.get(node.path("id").asText()));
-            group.setDataSetId(dataSetId);
+            group.setDataSetId(snapshot.getDataSetId());
             group.setDatasetStyleId(snapshot.getId());
             group.setParentId(ids.get(node.path("parentId").asText(null)));
             group.setGroupKey(node.path("id").asText());
@@ -79,6 +83,55 @@ public class VectorDataSetStyleService {
         var s = lock ? mapper.lockDataSetStyle(dataSetId) : mapper.dataSetStyle(dataSetId);
         if (s == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "矢量数据集缺少样式快照或不可用；存量初始化须单独执行");
         return s;
+    }
+
+    /** 首次接入固定一套完整模板，不把不同业务规则合并到同一数据集。 */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public GisVectorDataSetStyle preparePlacement(Long dataSetId, String placement) {
+        var snapshot = require(dataSetId, true);
+        String templateId = templateIdForPlacement(placement);
+        if (templateId.equals(snapshot.getTemplateId())) return snapshot;
+        ensureTemplateCanChange(snapshot);
+        String resource = "cn-vector-default".equals(templateId) ? "vector/style.json" : "vector/" + templateId + ".json";
+        byte[] bytes;
+        try (var input = new ClassPathResource(resource).getInputStream()) {
+            bytes = input.readAllBytes();
+        } catch (IOException ex) {
+            throw new IllegalStateException("所选业务分类规则不可读", ex);
+        }
+        var definition = (tools.jackson.databind.node.ObjectNode) json.readTree(bytes);
+        rules.compile(definition);
+        snapshot.setTemplateId(templateId);
+        snapshot.setTemplateVersion(definition.path("templateVersion").asInt());
+        snapshot.setCartographyJson(json.writeValueAsString(definition.remove("cartography")));
+        snapshot.setDefinitionJson(json.writeValueAsString(definition));
+        snapshot.setTemplateChecksum(digest(bytes));
+        mapper.deleteDataSetGroups(dataSetId);
+        if (mapper.replaceDataSetRules(snapshot) != 1) throw new IllegalStateException("业务分类规则初始化失败");
+        createGroups(snapshot, definition);
+        return snapshot;
+    }
+
+    /** 接收文件前检查模板一致性；登记事务中会持锁再次检查。 */
+    public void validatePlacement(Long dataSetId, String placement) {
+        var snapshot = require(dataSetId, false);
+        if (!templateIdForPlacement(placement).equals(snapshot.getTemplateId())) ensureTemplateCanChange(snapshot);
+    }
+
+    private String templateIdForPlacement(String placement) {
+        return switch (placement) {
+            case "AUTO", "UNKNOWN" -> "cn-vector-default";
+            case "X_LIGHT" -> "x-institute-light";
+            case "X_DARK" -> "x-institute-dark";
+            default -> throw new IllegalArgumentException("不支持的图层业务分类");
+        };
+    }
+
+    private void ensureTemplateCanChange(GisVectorDataSetStyle snapshot) {
+        if (mapper.hasPlacementReferences(snapshot.getDataSetId())) {
+            String name = json.readTree(snapshot.getDefinitionJson()).path("name").asText(snapshot.getTemplateId());
+            throw new IllegalArgumentException("该数据集已使用“" + name + "”，请沿用当前业务分类；其他规则请接入独立数据集");
+        }
     }
 
     public VectorTemplateRules.Compiled compile(GisVectorDataSetStyle snapshot) {

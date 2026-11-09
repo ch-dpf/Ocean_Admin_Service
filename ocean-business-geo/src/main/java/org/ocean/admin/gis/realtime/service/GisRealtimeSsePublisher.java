@@ -9,6 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.kernel.realtime.EventMessage;
 import org.ocean.admin.kernel.realtime.RealtimeEventPublisher;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -53,11 +55,12 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
     private final long connectionTimeoutMillis;
     private final ConcurrentHashMap<String, Connection> connections = new ConcurrentHashMap<>();
     private final AtomicBoolean stopped = new AtomicBoolean();
+    private volatile long relayRetryAfter;
     private final ThreadPoolExecutor sendExecutor;
     private final ThreadPoolExecutor completionExecutor;
     private final ScheduledExecutorService maintenance;
 
-    public GisRealtimeSsePublisher(ObjectMapper objectMapper, StringRedisTemplate redis,
+    public GisRealtimeSsePublisher(ObjectMapper objectMapper, @Qualifier("progressRedisTemplate") StringRedisTemplate redis,
             @Value("${ocean.gis.realtime.sse.max-connections:256}") int maxConnections,
             @Value("${ocean.gis.realtime.sse.max-pending-messages:64}") int maxPendingMessages,
             @Value("${ocean.gis.realtime.sse.max-pending-bytes:524288}") long maxPendingBytes,
@@ -145,7 +148,14 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
 
     @Override
     public void publish(EventMessage<?> message) {
-        if (!stopped.get()) redis.convertAndSend(CHANNEL, objectMapper.writeValueAsString(message));
+        if (stopped.get() || System.nanoTime() < relayRetryAfter) return;
+        try {
+            redis.convertAndSend(CHANNEL, objectMapper.writeValueAsString(message));
+        } catch (DataAccessException ex) {
+            relayRetryAfter = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            log.warn("GIS事件广播失败，暂停广播5秒，客户端可补查业务状态: type={}, cause={}",
+                    message.type(), ex.getClass().getSimpleName());
+        }
     }
 
     private void publishLocal(String json) {
