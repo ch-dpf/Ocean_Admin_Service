@@ -27,20 +27,52 @@
         ) chosen
     </select>
     <select id="selectDataSetFootprints" resultType="org.ocean.admin.gis.vo.GisDataSetVO$FootprintRow">
-        SELECT sm.id, fm.data_set_id, fm.id AS file_id, fm.original_name AS file_name,
-               sm.layer_key, sm.extent_kind,
-               ST_AsGeoJSON(ST_ForcePolygonCCW(
+        <!-- 先减少复杂栅格轮廓的坐标，再对齐预览精度；物化避免昂贵的几何处理被重复执行。 -->
+        WITH source AS MATERIALIZED (
+            SELECT fm.data_set_id, fm.id AS file_id, sm.extent_kind,
                    <choose>
                        <when test="tolerance > 0">ST_SimplifyPreserveTopology(sm.geographic_extent, #{tolerance})</when>
                        <otherwise>sm.geographic_extent</otherwise>
+                   </choose> AS geographic_extent
+            FROM ocean_gis.gis_file_spatial_metadata sm
+            JOIN ocean_gis.gis_file_meta fm ON fm.id = sm.file_meta_id
+            WHERE fm.deleted = 0 AND fm.file_status = 'READY' AND fm.metadata_status = 'COMPLETED'
+              AND fm.data_set_id IN
+            <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ), prepared AS MATERIALIZED (
+            SELECT source.*,
+                   <choose>
+                       <when test="tolerance > 0">ST_ReducePrecision(geographic_extent, #{tolerance})</when>
+                       <otherwise>geographic_extent</otherwise>
+                   </choose> AS preview_extent
+            FROM source
+        ), bounded AS (
+            SELECT prepared.*,
+                   <!-- 任意预览网格可能将经纬度极值舍入到世界范围外，只裁切这些越界结果。 -->
+                   CASE WHEN ST_XMin(Box3D(preview_extent)) &lt; -180 OR ST_XMax(Box3D(preview_extent)) &gt; 180
+                             OR ST_YMin(Box3D(preview_extent)) &lt; -90 OR ST_YMax(Box3D(preview_extent)) &gt; 90
+                        THEN ST_Intersection(preview_extent, ST_MakeEnvelope(-180, -90, 180, 90, 4326))
+                        ELSE preview_extent
+                   END AS bounded_extent
+            FROM prepared
+        ), merged AS (
+            SELECT data_set_id, COUNT(DISTINCT file_id) AS source_file_count,
+                   COUNT(*) AS source_layer_count,
+                   CASE WHEN COUNT(DISTINCT extent_kind) = 1 THEN MIN(extent_kind) ELSE 'MIXED' END AS extent_kind,
+                   <!-- 微小范围不能因精度对齐而整体消失；点、线和面均参与并集。 -->
+                   ST_Union(CASE WHEN ST_IsEmpty(bounded_extent) THEN geographic_extent ELSE bounded_extent END) AS geographic_extent
+            FROM bounded
+            GROUP BY data_set_id
+        )
+        SELECT data_set_id, source_file_count, source_layer_count, extent_kind,
+               ST_AsGeoJSON(ST_ForcePolygonCCW(
+                   <choose>
+                       <when test="tolerance > 0">ST_SimplifyPreserveTopology(geographic_extent, #{tolerance})</when>
+                       <otherwise>geographic_extent</otherwise>
                    </choose>
                ), 15, 0) AS geo_json
-        FROM ocean_gis.gis_file_spatial_metadata sm
-        JOIN ocean_gis.gis_file_meta fm ON fm.id = sm.file_meta_id
-        WHERE fm.deleted = 0 AND fm.file_status = 'READY' AND fm.metadata_status = 'COMPLETED'
-          AND fm.data_set_id IN
-        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
-        ORDER BY fm.data_set_id, fm.id, sm.layer_key
+        FROM merged
+        ORDER BY data_set_id
     </select>
     <sql id="eligible">
         deleted = 0 AND file_status = 'READY'

@@ -294,9 +294,9 @@ public class DataSetService {
         List<Long> ids = records.stream().map(GisDataSetVO::getId).toList();
         Map<Long, GisDataSetVO.FileSummary> summaries = gisFileMetaMapper.selectDataSetFileSummaries(ids).stream()
                 .collect(Collectors.toMap(GisDataSetVO.FileSummary::getDataSetId, item -> item));
-        Map<Long, List<GisDataSetVO.FootprintRow>> footprints = includeFootprints
+        Map<Long, GisDataSetVO.FootprintRow> footprints = includeFootprints
                 ? spatialMetadataMapper.selectDataSetFootprints(ids, tolerance).stream()
-                    .collect(Collectors.groupingBy(GisDataSetVO.FootprintRow::getDataSetId))
+                    .collect(Collectors.toMap(GisDataSetVO.FootprintRow::getDataSetId, item -> item))
                 : Map.of();
         for (GisDataSetVO record : records) {
             GisDataSetVO.FileSummary summary = summaries.get(record.getId());
@@ -306,12 +306,12 @@ public class DataSetService {
             }
             record.setFileSummary(summary);
             if (includeFootprints) {
-                List<GisDataSetVO.FootprintFeature> features = footprints.getOrDefault(record.getId(), List.of()).stream()
-                        .map(row -> new GisDataSetVO.FootprintFeature("Feature", row.getId().toString(),
+                GisDataSetVO.FootprintRow row = footprints.get(record.getId());
+                List<GisDataSetVO.FootprintFeature> features = row == null ? List.of() : List.of(
+                        new GisDataSetVO.FootprintFeature("Feature", "dataset-" + record.getId(),
                                 objectMapper.readTree(row.getGeoJson()),
-                                new GisDataSetVO.FootprintProperties(row.getFileId(), row.getFileName(), row.getLayerKey(),
-                                        row.getExtentKind(), tolerance > 0, tolerance)))
-                        .toList();
+                                new GisDataSetVO.FootprintProperties(record.getId(), row.getSourceFileCount(),
+                                        row.getSourceLayerCount(), row.getExtentKind(), tolerance > 0, tolerance)));
                 record.setFootprints(new GisDataSetVO.FootprintCollection("FeatureCollection", features));
             }
         }

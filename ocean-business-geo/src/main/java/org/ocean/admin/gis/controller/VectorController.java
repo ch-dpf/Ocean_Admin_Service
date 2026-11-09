@@ -79,6 +79,12 @@ public class VectorController {
         return ResponseResult.success(styles.saveScheme(dataSetId,null,null,request));
     }
 
+    @PostMapping("/datasets/{dataSetId}/style-schemes/import")
+    @Operation(summary="从外部分类样式JSON创建独立方案")
+    public ResponseResult<?> importScheme(@PathVariable Long dataSetId, @Valid @RequestBody GisVectorRequests.Style request) {
+        return ResponseResult.success(styles.importScheme(dataSetId, request));
+    }
+
     @PutMapping("/datasets/{dataSetId}/style-schemes/{id}")
     public ResponseResult<?> updateScheme(@PathVariable Long dataSetId,@PathVariable Long id,
             @RequestHeader(value="If-Match",required=false) String ifMatch,@Valid @RequestBody GisVectorRequests.Scheme request) {

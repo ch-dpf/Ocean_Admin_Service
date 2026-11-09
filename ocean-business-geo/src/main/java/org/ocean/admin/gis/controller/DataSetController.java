@@ -87,10 +87,10 @@ public class DataSetController {
     }
 
     @GetMapping("/{id}/footprints")
-    @Operation(summary = "获取数据集详情（覆盖轮廓）")
+    @Operation(summary = "获取数据集详情（合并覆盖范围）", description = "返回数据集级范围并集；矢量为包围范围，栅格为有效像元范围。预览精度以下的细缝、孔洞或分块可能消失")
     public ResponseResult<GisDataSetVO> getDatasetFootprints(
             @PathVariable Long id,
-            @Parameter(description = "拓扑保持简化容差，单位为度，范围0至1；0返回完整几何")
+            @Parameter(description = "预览简化容差及精度对齐网格，单位为度，范围0至1；默认0.001。0执行完整精度合并，复杂轮廓可能耗时较长")
             @RequestParam(defaultValue = "0.001") double simplifyTolerance) {
         return ResponseResult.success(dataSetService.getDatasetFootprints(id, simplifyTolerance));
     }
