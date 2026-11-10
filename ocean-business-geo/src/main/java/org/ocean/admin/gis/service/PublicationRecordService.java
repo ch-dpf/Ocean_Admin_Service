@@ -40,8 +40,8 @@ public class PublicationRecordService {
 
     public PageResult<List<GisPublication>> getPublicationPage(
             GisProcessingType processingType, Integer current, Integer size, String serviceCode,
-            String status, Long dataSetId, LocalDateTime publishTimeStart,
-            LocalDateTime publishTimeEnd) {
+            String status, Long dataSetId, Long sourceTaskId,
+            LocalDateTime publishTimeStart, LocalDateTime publishTimeEnd) {
         long currentPage = current == null || current < 1 ? 1L : current;
         long pageSize = size == null || size < 1 ? 10L : Math.min(size, 100);
         String normalizedCode = upperTrimToNull(serviceCode);
@@ -57,6 +57,7 @@ public class PublicationRecordService {
                 .like(normalizedCode != null, GisPublication::getServiceCode, normalizedCode)
                 .eq(normalizedStatus != null, GisPublication::getStatus, normalizedStatus)
                 .eq(dataSetId != null, GisPublication::getDataSetId, dataSetId)
+                .eq(sourceTaskId != null, GisPublication::getSourceTaskId, sourceTaskId)
                 .ge(publishTimeStart != null, GisPublication::getPublishTime, publishTimeStart)
                 .le(publishTimeEnd != null, GisPublication::getPublishTime, publishTimeEnd)
                 .orderByDesc(GisPublication::getPublishTime);

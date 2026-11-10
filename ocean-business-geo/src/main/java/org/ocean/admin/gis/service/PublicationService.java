@@ -63,11 +63,11 @@ public class PublicationService {
 
     public PageResult<List<GisPublicationVO>> getPublicationPage(
             Integer current, Integer size, String processingType, String serviceCode,
-            String status, Long dataSetId, LocalDateTime publishTimeStart,
-            LocalDateTime publishTimeEnd) {
+            String status, Long dataSetId, Long sourceTaskId,
+            LocalDateTime publishTimeStart, LocalDateTime publishTimeEnd) {
         PageResult<List<GisPublication>> page = recordService.getPublicationPage(
                 normalizeProcessingType(processingType), current, size, serviceCode,
-                status, dataSetId, publishTimeStart, publishTimeEnd);
+                status, dataSetId, sourceTaskId, publishTimeStart, publishTimeEnd);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(),
                 page.getRecords().stream().map(this::toVO).toList());
     }

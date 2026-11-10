@@ -72,13 +72,14 @@ public class PublicationController {
             @Parameter(description = "发布状态：PUBLISHED、DISABLED")
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long dataSetId,
+            @RequestParam(required = false) Long sourceTaskId,
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
             @RequestParam(required = false) LocalDateTime publishTimeStart,
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
             @RequestParam(required = false) LocalDateTime publishTimeEnd) {
         return ResponseResult.success(publicationService.getPublicationPage(
                 current, size, processingType, serviceCode, status, dataSetId,
-                publishTimeStart, publishTimeEnd));
+                sourceTaskId, publishTimeStart, publishTimeEnd));
     }
 
     @PostMapping("/{processingType}/{sourceTaskId}/publish")
