@@ -5,17 +5,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** 统一发布记录可声明的对外服务协议。 */
+/** 统一发布记录可声明的对外服务协议；本版不提供 WFS 与 XYZ。 */
 public enum OgcProtocol {
 
     WMS,
     WMTS,
-    TMS,
-    WFS,
-    XYZ;
+    TMS;
 
-    public static final Set<OgcProtocol> IMAGERY = Set.of(WMS, WMTS, TMS, XYZ);
-    public static final Set<OgcProtocol> VECTOR = Set.of(WMS, WMTS, TMS, WFS, XYZ);
+    public static final Set<OgcProtocol> IMAGERY = Set.of(WMS, WMTS, TMS);
+    public static final Set<OgcProtocol> VECTOR = Set.of(WMS, WMTS, TMS);
 
     /** 解析并校验请求中的协议名称。 */
     public static OgcProtocol parse(String value) {

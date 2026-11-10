@@ -74,7 +74,7 @@ public class WfsService {
     /** 生成 GetCapabilities 文档。 */
     public String capabilitiesXml() {
         return WfsXmlWriter.capabilities(
-                recordService.buildPublicUrl("/gis/wfs"), catalog.listVector(OgcProtocol.WFS));
+                recordService.buildPublicUrl("/gis/wfs"), List.of());
     }
 
     /** 生成 OWS ExceptionReport 文档。 */
@@ -168,7 +168,7 @@ public class WfsService {
     private List<PublicationLayer.VectorLayer> layersOf(
             List<String> typeNames) {
         if (typeNames.isEmpty()) {
-            return catalog.listVector(OgcProtocol.WFS);
+            return List.of();
         }
         List<PublicationLayer.VectorLayer> layers = new ArrayList<>();
         for (String typeName : typeNames) {

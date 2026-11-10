@@ -56,6 +56,11 @@ public class PublicationCatalog {
             if (publication.getTileSetId() == null) {
                 continue;
             }
+            // 矢量静态 PNG 任务的 WMS 读取任务 GPKG，不读已切好的 PNG 瓦片。
+            if (protocol == OgcProtocol.WMS
+                    && "VECTOR".equalsIgnoreCase(publication.getProcessingType())) {
+                continue;
+            }
             PublicationLayer.RasterLayer layer = loadRaster(publication);
             if (layer != null) {
                 layers.add(layer);
@@ -70,6 +75,10 @@ public class PublicationCatalog {
         if (publication == null || publication.getTileSetId() == null) {
             return null;
         }
+        if (protocol == OgcProtocol.WMS
+                && "VECTOR".equalsIgnoreCase(publication.getProcessingType())) {
+            return null;
+        }
         return loadRaster(publication);
     }
 
@@ -77,9 +86,6 @@ public class PublicationCatalog {
     public List<PublicationLayer.VectorLayer> listVector(OgcProtocol protocol) {
         List<PublicationLayer.VectorLayer> layers = new ArrayList<>();
         for (GisPublication publication : listPublished(protocol)) {
-            if (publication.getVectorResourceId() == null) {
-                continue;
-            }
             PublicationLayer.VectorLayer layer = loadVector(publication, null);
             if (layer != null) {
                 layers.add(layer);
@@ -88,17 +94,27 @@ public class PublicationCatalog {
         return layers;
     }
 
-    /** 按服务编码加载动态矢量图层，styleId 为空时使用发布默认样式。 */
+    /** 按服务编码加载矢量图层；静态 PNG 任务在 WMS 下读取任务 GPKG。 */
     public PublicationLayer.VectorLayer loadVector(String serviceCode, String styleId) {
         GisPublication publication = selectPublished(serviceCode, null);
-        if (publication == null || publication.getVectorResourceId() == null) {
+        if (publication == null) {
             return null;
         }
-        return loadVector(publication, styleId);
+        if (publication.getVectorResourceId() != null) {
+            return loadVector(publication, styleId);
+        }
+        if ("VECTOR".equalsIgnoreCase(publication.getProcessingType())
+                && publication.getTileSetId() != null) {
+            return loadTaskVectorLayer(publication);
+        }
+        return null;
     }
 
     /** 动态矢量服务在两种受支持矩阵集下各生成一个瓦片视图。 */
     public List<PublicationLayer.VectorLayerView> listVectorViews(OgcProtocol protocol) {
+        if (protocol == OgcProtocol.WMTS || protocol == OgcProtocol.TMS) {
+            return List.of();
+        }
         List<PublicationLayer.VectorLayerView> views = new ArrayList<>();
         for (PublicationLayer.VectorLayer layer : listVector(protocol)) {
             int minZoom = layer.contract().path("map").path("minZoom").asInt(0);
@@ -234,11 +250,34 @@ public class PublicationCatalog {
                     .toLowerCase(Locale.ROOT);
             String extension = format.startsWith("jpeg") || format.startsWith("jpg") ? "jpg" : "png";
             String mediaType = "jpg".equals(extension) ? "image/jpeg" : "image/png";
-            int minZoom = descriptor.path("minzoom").asInt(descriptor.path("minZoom")
+            int minZoom = descriptor.path("minZoom").asInt(descriptor.path("minzoom")
                     .asInt(tileSet.getMinZoom() == null ? 0 : tileSet.getMinZoom()));
-            int maxZoom = descriptor.path("maxzoom").asInt(descriptor.path("maxZoom")
+            int maxZoom = descriptor.path("maxZoom").asInt(descriptor.path("maxzoom")
                     .asInt(tileSet.getMaxZoom() == null ? 0 : tileSet.getMaxZoom()));
             double[] bounds = boundsOf(descriptor, publication);
+            String gpkg = null;
+            JsonNode taskDefinition = null;
+            JsonNode taskScheme = null;
+            if ("VECTOR".equalsIgnoreCase(publication.getProcessingType())) {
+                Path temp = storageService.resolveTiles(tileSet.getOutputKey())
+                        .getParent().resolve("temp");
+                Path sourceGpkg = temp.resolve("source.gpkg");
+                Path sourceJson = temp.resolve("source.json");
+                if (Files.isRegularFile(sourceGpkg) && Files.isRegularFile(sourceJson)) {
+                    gpkg = sourceGpkg.toString();
+                    taskDefinition = objectMapper.readTree(sourceJson.toFile());
+                    JsonNode scheme = descriptor.path("scheme");
+                    if (scheme.isObject()) {
+                        taskScheme = scheme;
+                    } else {
+                        Path style = storageService.resolveTiles(tileSet.getOutputKey())
+                                .resolve("style.json");
+                        if (Files.isRegularFile(style)) {
+                            taskScheme = objectMapper.readTree(style.toFile());
+                        }
+                    }
+                }
+            }
             return new PublicationLayer.RasterLayer(publication.getServiceCode(),
                     publication.getServiceName(), publication.getLayerName(),
                     publication.getTitle(), publication.getAbstractText(),
@@ -246,7 +285,7 @@ public class PublicationCatalog {
                     extension, mediaType,
                     publication.getMinZoom() == null ? minZoom : publication.getMinZoom(),
                     publication.getMaxZoom() == null ? maxZoom : publication.getMaxZoom(),
-                    bounds, tileSet);
+                    bounds, tileSet, gpkg, taskDefinition, taskScheme);
         } catch (RuntimeException ex) {
             log.debug("[OGC] 跳过不可用静态图层 {}: {}", publication.getServiceCode(), ex.getMessage());
             return null;
@@ -255,11 +294,10 @@ public class PublicationCatalog {
 
     private Path chooseDescriptor(GisTileSet tileSet) {
         Path root = storageService.resolveTiles(tileSet.getOutputKey());
-        Path tileJson = root.resolve("tilejson.json");
-        if (Files.isRegularFile(tileJson)) {
-            return tileJson;
+        if (tileSet.getTileType() == org.ocean.admin.gis.processing.GisProcessingType.VECTOR) {
+            return root.resolve("manifest.json");
         }
-        return root.resolve("manifest.json");
+        return root.resolve("tilejson.json");
     }
 
     private double[] boundsOf(JsonNode descriptor, GisPublication publication) {
@@ -288,6 +326,11 @@ public class PublicationCatalog {
     }
 
     private PublicationLayer.VectorLayer loadVector(GisPublication publication, String styleId) {
+        if (publication.getVectorResourceId() == null
+                && "VECTOR".equalsIgnoreCase(publication.getProcessingType())
+                && publication.getTileSetId() != null) {
+            return loadTaskVectorLayer(publication);
+        }
         try {
             GisVectorResource resource = vectorMapper.resource(publication.getVectorResourceId());
             if (resource == null || !READY.equals(resource.getStatus())
@@ -329,6 +372,62 @@ public class PublicationCatalog {
                     binding, contract, scheme, cartography, List.copyOf(styles), chosenId);
         } catch (RuntimeException ex) {
             log.debug("[OGC][VECTOR] 跳过不可用图层 {}: {}", publication.getServiceCode(), ex.getMessage());
+            return null;
+        }
+    }
+
+    /** 矢量静态 PNG 任务的 WMS 图层：读取整个任务的 source.gpkg、source.json 和发布样式。 */
+    private PublicationLayer.VectorLayer loadTaskVectorLayer(GisPublication publication) {
+        GisTileSet tileSet = tileSetMapper.selectById(publication.getTileSetId());
+        if (tileSet == null || !READY.equals(tileSet.getTileSetStatus())) {
+            return null;
+        }
+        Path root = storageService.resolveTiles(tileSet.getOutputKey())
+                .getParent().resolve("temp");
+        Path sourceGpkg = root.resolve("source.gpkg");
+        Path sourceJson = root.resolve("source.json");
+        if (!Files.isRegularFile(sourceGpkg) || !Files.isRegularFile(sourceJson)) {
+            return null;
+        }
+        try {
+            JsonNode contract = objectMapper.readTree(sourceJson.toFile());
+            if (!contract.path("layers").isArray() || contract.path("layers").isEmpty()) {
+                return null;
+            }
+            Path style = storageService.resolveTiles(tileSet.getOutputKey())
+                    .resolve("style.json");
+            if (!Files.isRegularFile(style)) {
+                return null;
+            }
+            JsonNode scheme = objectMapper.readTree(style.toFile());
+            JsonNode cartography = scheme.path("definition").path("cartography");
+            if (!cartography.path("groups").isObject()
+                    || !cartography.path("layers").isObject()
+                    || !cartography.path("defaults").path("styles").isArray()) {
+                return null;
+            }
+            GisVectorResource resource = new GisVectorResource();
+            resource.setId(publication.getSourceTaskId());
+            resource.setStorageKey(sourceGpkg.toString());
+            resource.setStorageType("GPKG");
+            resource.setStatus(READY);
+            resource.setDefinitionJson(contract.toString());
+            PublicationLayer.StyleOption option = new PublicationLayer.StyleOption(
+                    scheme.path("id").asText(publication.getStyleId()),
+                    scheme.path("name").asText("默认配图方案"));
+            List<PublicationLayer.StyleOption> styles = List.of(option);
+            JsonNode binding = objectMapper.createObjectNode()
+                    .put("defaultStyleId", option.id())
+                    .put("releaseVersion", "task-" + publication.getSourceTaskId());
+            return new PublicationLayer.VectorLayer(publication.getServiceCode(),
+                    publication.getServiceName(), publication.getLayerName(),
+                    publication.getTitle(), publication.getAbstractText(),
+                    publication.getKeywords(), binding.path("releaseVersion").asText(),
+                    resource, parseBounds(publication.getBoundsWgs84Json(), WORLD_BOUNDS.clone()),
+                    binding, contract, scheme, cartography, styles, option.id());
+        } catch (RuntimeException ex) {
+            log.debug("[OGC][WMS] 任务 GPKG 不可用 {}: {}",
+                    publication.getServiceCode(), ex.getMessage());
             return null;
         }
     }

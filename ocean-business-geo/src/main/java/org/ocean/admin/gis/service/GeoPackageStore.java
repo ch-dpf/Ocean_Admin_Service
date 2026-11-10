@@ -38,11 +38,21 @@ public class GeoPackageStore {
         return root;
     }
 
+    /** 托管 GPKG 的物理存储；任务工作区 GPKG 使用绝对路径并校验位于处理根目录内。 */
     public Path path(String key) throws IOException {
-        if (key == null || !key.matches("[0-9]+\\.(gpkg|ndjson|partial)"))
+        if (key == null || key.isBlank()) {
             throw new IllegalArgumentException("矢量存储键无效");
-        Path path = root().resolve(key);
-        if (Files.isSymbolicLink(path)) throw new IllegalArgumentException("矢量存储不能是符号链接");
+        }
+        Path path = Path.of(key).toAbsolutePath().normalize();
+        if (!path.startsWith(Path.of(properties.getBasePath()).toAbsolutePath().normalize())) {
+            if (!key.matches("[0-9]+\\.(gpkg|ndjson|partial)")) {
+                throw new IllegalArgumentException("矢量存储键无效");
+            }
+            path = root().resolve(key);
+        }
+        if (Files.isSymbolicLink(path)) {
+            throw new IllegalArgumentException("矢量存储不能是符号链接");
+        }
         return path;
     }
 

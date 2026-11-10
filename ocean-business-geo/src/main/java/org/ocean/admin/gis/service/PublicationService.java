@@ -109,9 +109,6 @@ public class PublicationService {
         GisTileSet tileSet = tileSetMapper.selectByTaskId(task.getId());
         boolean dynamicVector = processingType == GisProcessingType.VECTOR
                 && (tileSet == null || !"PNG".equalsIgnoreCase(tileSet.getOutputFormat()));
-        if (!dynamicVector && protocols.contains(OgcProtocol.WFS)) {
-            throw new IllegalArgumentException("静态瓦片产物不支持 WFS；请取消 WFS 或发布动态矢量服务");
-        }
         GisVectorResource resource = null;
         String vectorDefinition = null;
         JsonNode descriptor = null;
@@ -435,17 +432,6 @@ public class PublicationService {
                     tileUrlTemplates.put("TMS", recordService.buildPublicUrl("/gis/tms/1.0.0/" + code
                             + "@WebMercatorQuad@png" + (processingType == GisProcessingType.VECTOR ? "@vector" : "")
                             + "/{z}/{x}/{y}.png"));
-                }
-                case WFS -> {
-                    serviceUrls.put("WFS", recordService.buildPublicUrl("/gis/wfs"));
-                    capabilitiesUrls.put("WFS", recordService.buildPublicUrl(
-                            "/gis/wfs?SERVICE=WFS&REQUEST=GetCapabilities"));
-                }
-                case XYZ -> {
-                    String xyz = recordService.buildPublicUrl(
-                            "/gis/publications/" + processingType.name() + "/" + code);
-                    serviceUrls.put("XYZ", xyz);
-                    tileUrlTemplates.put("XYZ", xyz + "/{z}/{x}/{y}.png");
                 }
             }
         }

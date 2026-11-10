@@ -27,7 +27,10 @@ public final class PublicationLayer {
             int minZoom,
             int maxZoom,
             double[] wgs84Bounds,
-            GisTileSet tileSet) {
+            GisTileSet tileSet,
+            String taskGpkgPath,
+            JsonNode taskDefinition,
+            JsonNode taskScheme) {
     }
 
     /** 动态矢量发布记录对应的冻结 GPKG 图层。 */
