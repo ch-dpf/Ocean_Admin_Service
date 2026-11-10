@@ -35,7 +35,7 @@ public class VectorStyleResolver {
     }
 
     /** 按层级整理所有启用图层的固定样式；被禁用或层级不匹配的图层不在结果中。 */
-    public StyleContext resolve(PublishedVectorCatalog.PublishedVectorLayer layer, double zoom) {
+    public StyleContext resolve(PublicationLayer.VectorLayer layer, double zoom) {
         JsonNode groups = layer.cartography().path("groups");
         JsonNode layerConfigs = layer.cartography().path("layers");
         JsonNode featureOverrides = layer.scheme().path("definition").path("featureOverrides");

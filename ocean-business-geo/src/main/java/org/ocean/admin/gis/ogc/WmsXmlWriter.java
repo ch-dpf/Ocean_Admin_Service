@@ -30,8 +30,8 @@ public final class WmsXmlWriter {
      * @param layers     已发布图层列表
      */
     public static String capabilities(String serviceUrl,
-            List<PublishedImageryCatalog.PublishedLayer> layers,
-            List<PublishedVectorCatalog.PublishedVectorLayer> vectorLayers) {
+            List<PublicationLayer.RasterLayer> layers,
+            List<PublicationLayer.VectorLayer> vectorLayers) {
         String baseUrl = stripTrailingSlash(serviceUrl);
         StringWriter buffer = new StringWriter();
         XMLStreamWriter writer = null;
@@ -106,8 +106,8 @@ public final class WmsXmlWriter {
     }
 
     private static void writeCapability(XMLStreamWriter writer, String baseUrl,
-            List<PublishedImageryCatalog.PublishedLayer> layers,
-            List<PublishedVectorCatalog.PublishedVectorLayer> vectorLayers)
+            List<PublicationLayer.RasterLayer> layers,
+            List<PublicationLayer.VectorLayer> vectorLayers)
             throws XMLStreamException {
         writer.writeStartElement("", "Capability", NAMESPACE);
 
@@ -127,10 +127,10 @@ public final class WmsXmlWriter {
         writeText(writer, "Title", "Ocean Admin Root Layer");
         writeSupportedCrs(writer);
 
-        for (PublishedImageryCatalog.PublishedLayer layer : layers) {
+        for (PublicationLayer.RasterLayer layer : layers) {
             writeLayer(writer, layer);
         }
-        for (PublishedVectorCatalog.PublishedVectorLayer layer : vectorLayers) {
+        for (PublicationLayer.VectorLayer layer : vectorLayers) {
             writeVectorLayer(writer, layer);
         }
 
@@ -140,7 +140,7 @@ public final class WmsXmlWriter {
 
     /** 矢量图层使用发布样式方案作为 WMS Style；文件组已在该图层内合并渲染。 */
     private static void writeVectorLayer(XMLStreamWriter writer,
-            PublishedVectorCatalog.PublishedVectorLayer layer) throws XMLStreamException {
+            PublicationLayer.VectorLayer layer) throws XMLStreamException {
         writer.writeStartElement("", "Layer", NAMESPACE);
         writer.writeAttribute("queryable", "1");
         writeText(writer, "Name", layer.serviceCode());
@@ -160,7 +160,7 @@ public final class WmsXmlWriter {
         writeBoundingBox(writer, "EPSG:3857", b[0] * 20037508.342789244 / 180d,
                 projectMercatorY(b[1]), b[2] * 20037508.342789244 / 180d,
                 projectMercatorY(b[3]));
-        for (PublishedVectorCatalog.StyleOption style : layer.styles()) {
+        for (PublicationLayer.StyleOption style : layer.styles()) {
             writer.writeStartElement("", "Style", NAMESPACE);
             if (style.id().equals(layer.styleId())) {
                 writer.writeAttribute("isDefault", "true");
@@ -204,7 +204,7 @@ public final class WmsXmlWriter {
     }
 
     private static void writeLayer(XMLStreamWriter writer,
-            PublishedImageryCatalog.PublishedLayer layer) throws XMLStreamException {
+            PublicationLayer.RasterLayer layer) throws XMLStreamException {
         writer.writeStartElement("", "Layer", NAMESPACE);
         writer.writeAttribute("queryable", "1");
         writeText(writer, "Name", layer.serviceCode());
@@ -265,7 +265,7 @@ public final class WmsXmlWriter {
     }
 
     /** 能力文档展示名优先使用发布时填写的图层名称，缺失时回退服务编码。 */
-    private static String catalogTitle(PublishedImageryCatalog.PublishedLayer layer) {
+    private static String catalogTitle(PublicationLayer.RasterLayer layer) {
         String title = layer.layerName();
         return title == null || title.isBlank() ? layer.serviceCode() : title;
     }

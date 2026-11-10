@@ -33,8 +33,8 @@ public final class WmtsXmlWriter {
      * @param layers     已启用图层
      */
     public static String capabilities(String serviceUrl,
-            List<PublishedImageryCatalog.PublishedLayer> layers,
-            List<PublishedVectorCatalog.VectorLayerView> vectorLayers) {
+            List<PublicationLayer.RasterLayer> layers,
+            List<PublicationLayer.VectorLayerView> vectorLayers) {
         String baseUrl = stripTrailingSlash(serviceUrl);
         StringWriter buffer = new StringWriter();
         XMLStreamWriter writer = null;
@@ -148,11 +148,11 @@ public final class WmtsXmlWriter {
     }
 
     private static void writeContents(XMLStreamWriter writer, String baseUrl,
-            List<PublishedImageryCatalog.PublishedLayer> layers,
-            List<PublishedVectorCatalog.VectorLayerView> vectorLayers)
+            List<PublicationLayer.RasterLayer> layers,
+            List<PublicationLayer.VectorLayerView> vectorLayers)
             throws XMLStreamException {
         writer.writeStartElement("", "Contents", NAMESPACE);
-        for (PublishedImageryCatalog.PublishedLayer layer : layers) {
+        for (PublicationLayer.RasterLayer layer : layers) {
             writeLayer(writer, baseUrl, layer);
         }
         writeVectorLayers(writer, baseUrl, vectorLayers);
@@ -164,18 +164,18 @@ public final class WmtsXmlWriter {
 
     /** 动态矢量图层同时提供两种矩阵集，能力文档声明其引用过的矩阵集。 */
     private static List<TileMatrixSetDefinition> usedMatrixSets(
-            List<PublishedImageryCatalog.PublishedLayer> layers,
-            List<PublishedVectorCatalog.VectorLayerView> vectorLayers) {
+            List<PublicationLayer.RasterLayer> layers,
+            List<PublicationLayer.VectorLayerView> vectorLayers) {
         if (layers.isEmpty() && vectorLayers.isEmpty()) {
             return List.of(TileMatrixSetDefinition.values());
         }
         List<TileMatrixSetDefinition> used = new ArrayList<>();
-        for (PublishedImageryCatalog.PublishedLayer layer : layers) {
+        for (PublicationLayer.RasterLayer layer : layers) {
             if (!used.contains(layer.matrixSet())) {
                 used.add(layer.matrixSet());
             }
         }
-        for (PublishedVectorCatalog.VectorLayerView layer : vectorLayers) {
+        for (PublicationLayer.VectorLayerView layer : vectorLayers) {
             if (!used.contains(layer.matrixSet())) {
                 used.add(layer.matrixSet());
             }
@@ -188,7 +188,7 @@ public final class WmtsXmlWriter {
      * Style、Format、TileMatrixSetLink、ResourceURL。
      */
     private static void writeLayer(XMLStreamWriter writer, String baseUrl,
-            PublishedImageryCatalog.PublishedLayer layer) throws XMLStreamException {
+            PublicationLayer.RasterLayer layer) throws XMLStreamException {
         writer.writeStartElement("", "Layer", NAMESPACE);
         writeOwsText(writer, "Title", catalogTitle(layer));
         writeOwsText(writer, "Identifier", layer.serviceCode());
@@ -218,22 +218,22 @@ public final class WmtsXmlWriter {
 
     /** 同一矢量服务按服务编码只输出一个 Layer，两种矩阵集都挂到 TileMatrixSetLink。 */
     private static void writeVectorLayers(XMLStreamWriter writer, String baseUrl,
-            List<PublishedVectorCatalog.VectorLayerView> vectorLayers)
+            List<PublicationLayer.VectorLayerView> vectorLayers)
             throws XMLStreamException {
-        Map<String, List<PublishedVectorCatalog.VectorLayerView>> grouped = new LinkedHashMap<>();
-        for (PublishedVectorCatalog.VectorLayerView view : vectorLayers) {
+        Map<String, List<PublicationLayer.VectorLayerView>> grouped = new LinkedHashMap<>();
+        for (PublicationLayer.VectorLayerView view : vectorLayers) {
             grouped.computeIfAbsent(view.serviceCode(), key -> new ArrayList<>()).add(view);
         }
-        for (Map.Entry<String, List<PublishedVectorCatalog.VectorLayerView>> entry : grouped.entrySet()) {
+        for (Map.Entry<String, List<PublicationLayer.VectorLayerView>> entry : grouped.entrySet()) {
             writeVectorLayer(writer, baseUrl, entry.getKey(), entry.getValue());
         }
     }
 
     /** 矢量图层标识使用服务编码，矩阵集由 TileMatrixSetLink 声明。 */
     private static void writeVectorLayer(XMLStreamWriter writer, String baseUrl,
-            String identifier, List<PublishedVectorCatalog.VectorLayerView> views)
+            String identifier, List<PublicationLayer.VectorLayerView> views)
             throws XMLStreamException {
-        PublishedVectorCatalog.VectorLayerView first = views.getFirst();
+        PublicationLayer.VectorLayerView first = views.getFirst();
         writer.writeStartElement("", "Layer", NAMESPACE);
         writeOwsText(writer, "Title", first.title());
         writeOwsText(writer, "Identifier", identifier);
@@ -244,7 +244,7 @@ public final class WmtsXmlWriter {
         writeOwsText(writer, "UpperCorner",
                 first.wgs84Bounds()[2] + " " + first.wgs84Bounds()[3]);
         writer.writeEndElement();
-        for (PublishedVectorCatalog.StyleOption style : first.styles()) {
+        for (PublicationLayer.StyleOption style : first.styles()) {
             writer.writeStartElement("", "Style", NAMESPACE);
             writer.writeAttribute("isDefault",
                     Boolean.toString(style.id().equals(first.defaultStyleId())));
@@ -255,7 +255,7 @@ public final class WmtsXmlWriter {
         writer.writeStartElement("", "Format", NAMESPACE);
         writer.writeCharacters(first.mediaType());
         writer.writeEndElement();
-        for (PublishedVectorCatalog.VectorLayerView view : views) {
+        for (PublicationLayer.VectorLayerView view : views) {
             writeVectorMatrixSetLink(writer, view);
             writer.writeStartElement("", "ResourceURL", NAMESPACE);
             writer.writeAttribute("format", view.mediaType());
@@ -269,7 +269,7 @@ public final class WmtsXmlWriter {
     }
 
     private static void writeVectorMatrixSetLink(XMLStreamWriter writer,
-            PublishedVectorCatalog.VectorLayerView layer) throws XMLStreamException {
+            PublicationLayer.VectorLayerView layer) throws XMLStreamException {
         writer.writeStartElement("", "TileMatrixSetLink", NAMESPACE);
         writeText(writer, "", NAMESPACE, "TileMatrixSet", layer.matrixSet().id());
         writer.writeStartElement("", "TileMatrixSetLimits", NAMESPACE);
@@ -293,7 +293,7 @@ public final class WmtsXmlWriter {
     }
 
     private static void writeBoundingBox(XMLStreamWriter writer,
-            PublishedImageryCatalog.PublishedLayer layer) throws XMLStreamException {
+            PublicationLayer.RasterLayer layer) throws XMLStreamException {
         double[] bounds = layer.wgs84Bounds();
         writer.writeStartElement("ows", "WGS84BoundingBox", OWS_NAMESPACE);
         writeOwsText(writer, "LowerCorner", bounds[0] + " " + bounds[1]);
@@ -302,7 +302,7 @@ public final class WmtsXmlWriter {
     }
 
     private static void writeTileMatrixSetLink(XMLStreamWriter writer,
-            PublishedImageryCatalog.PublishedLayer layer) throws XMLStreamException {
+            PublicationLayer.RasterLayer layer) throws XMLStreamException {
         writer.writeStartElement("", "TileMatrixSetLink", NAMESPACE);
         writer.writeStartElement("", "TileMatrixSet", NAMESPACE);
         writer.writeCharacters(layer.matrixSet().id());
@@ -325,7 +325,7 @@ public final class WmtsXmlWriter {
 
     /** 按图层地理范围收窄矩阵集，提示客户端只请求实际有数据的瓦片。 */
     private static void writeMatrixLimits(XMLStreamWriter writer,
-            PublishedImageryCatalog.PublishedLayer layer, int zoom) throws XMLStreamException {
+            PublicationLayer.RasterLayer layer, int zoom) throws XMLStreamException {
         TileMatrixSetDefinition.MatrixLimits limits =
                 layer.matrixSet().limits(zoom, layer.wgs84Bounds());
         writer.writeStartElement("", "TileMatrixLimits", NAMESPACE);
@@ -380,7 +380,7 @@ public final class WmtsXmlWriter {
     }
 
     /** 能力文档展示名优先使用发布时填写的图层名称，缺失时回退服务编码。 */
-    private static String catalogTitle(PublishedImageryCatalog.PublishedLayer layer) {
+    private static String catalogTitle(PublicationLayer.RasterLayer layer) {
         String title = layer.layerName();
         return title == null || title.isBlank() ? layer.serviceCode() : title;
     }

@@ -3,11 +3,11 @@ package org.ocean.admin.gis.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
-import org.springframework.web.bind.annotation.RequestBody;
+import lombok.RequiredArgsConstructor;
+import org.ocean.admin.gis.dto.UnifiedPublicationRequest;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.service.PublicationService;
 import org.ocean.admin.gis.vo.GisPublicationVO;
@@ -20,49 +20,30 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** GIS 服务发布的统一管理入口。 */
+/** GIS 统一多协议发布管理入口。 */
 @RestController
 @RequestMapping("/api/gis/publications")
-@Tag(name = "GIS服务发布", description = "地形、影像、动态矢量和静态配图服务的统一发布管理")
+@Tag(name = "GIS服务发布", description = "按已完成任务发布影像、地形和矢量多协议服务")
 @RequiredArgsConstructor
 public class PublicationController {
 
     private final PublicationService publicationService;
-    private final org.ocean.admin.gis.service.VectorPublicationService vectors;
-
-    @PostMapping("/VECTOR/publish")
-    @Operation(summary="发布动态矢量瓦片及所选多套样式")
-    @OperationLog(module="GIS_PUBLICATION",type=OperationType.SUBMIT,description="发布动态矢量服务")
-    public ResponseResult<?> publishVector(@Valid @RequestBody org.ocean.admin.gis.dto.GisVectorRequests.Publish request) throws java.io.IOException {
-        return ResponseResult.success(vectors.publish(request));
-    }
-
-    @PostMapping("/VECTOR/wms/publish")
-    @Operation(summary="按固定数据与样式版本发布动态 WMS 服务")
-    @OperationLog(module="GIS_PUBLICATION",type=OperationType.SUBMIT,description="发布动态 WMS 服务")
-    public ResponseResult<?> publishWms(@Valid @RequestBody org.ocean.admin.gis.dto.GisVectorRequests.Publish request) throws java.io.IOException {
-        return ResponseResult.success(vectors.publish(request, "WMS"));
-    }
-
-    @PutMapping("/VECTOR/{serviceCode}/styles")
-    @Operation(summary="更新发布样式组合，复用原瓦片版本")
-    public ResponseResult<?> updateVectorStyles(@PathVariable String serviceCode,
-            @org.springframework.web.bind.annotation.RequestHeader(value="If-Match",required=false) String ifMatch,
-            @Valid @RequestBody org.ocean.admin.gis.dto.GisVectorRequests.Publish request) {
-        return ResponseResult.success(vectors.updateStyles(serviceCode,request,ifMatch));
-    }
 
     /** 发布和重命名共用的服务名称请求。 */
     public record ServiceNameRequest(@NotBlank @Size(max = 200) String serviceName) {
         public ServiceNameRequest {
-            if (serviceName != null) serviceName = serviceName.strip();
+            if (serviceName != null) {
+                serviceName = serviceName.strip();
+            }
         }
     }
 
@@ -91,34 +72,31 @@ public class PublicationController {
             @Parameter(description = "发布状态：PUBLISHED、DISABLED")
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long dataSetId,
-            @Parameter(description = "发布开始时间，ISO 日期时间格式")
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime publishTimeStart,
-            @Parameter(description = "发布结束时间，ISO 日期时间格式")
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime publishTimeEnd) {
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            @RequestParam(required = false) LocalDateTime publishTimeStart,
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            @RequestParam(required = false) LocalDateTime publishTimeEnd) {
         return ResponseResult.success(publicationService.getPublicationPage(
                 current, size, processingType, serviceCode, status, dataSetId,
                 publishTimeStart, publishTimeEnd));
     }
 
     @PostMapping("/{processingType}/{sourceTaskId}/publish")
-    @Operation(summary = "发布已完成的瓦片任务")
+    @Operation(summary = "按所选协议集合发布已完成的任务产物")
     @OperationLog(module = "GIS_PUBLICATION", type = OperationType.SUBMIT,
-            description = "发布GIS瓦片服务", recordResponse = true)
+            description = "发布统一多协议 GIS 服务", recordResponse = true)
     public ResponseResult<GisPublicationVO> publish(
-            @Parameter(description = "发布类型：TERRAIN、IMAGERY 或 VECTOR（静态 PNG）")
+            @Parameter(description = "发布类型：TERRAIN、IMAGERY 或 VECTOR")
             @PathVariable GisProcessingType processingType,
             @PathVariable Long sourceTaskId,
-            @Valid @RequestBody ServiceNameRequest request) {
+            @Valid @RequestBody UnifiedPublicationRequest request) throws IOException {
         return ResponseResult.success("GIS服务发布成功",
-                publicationService.publish(processingType, sourceTaskId, request.serviceName()));
+                publicationService.publish(processingType, sourceTaskId, request));
     }
 
     @GetMapping("/{processingType}/{serviceCode}")
     @Operation(summary = "查询GIS发布信息")
     public ResponseResult<GisPublicationVO> get(
-            @Parameter(description = "发布类型：TERRAIN、IMAGERY 或 VECTOR（静态 PNG）")
             @PathVariable GisProcessingType processingType,
             @PathVariable String serviceCode) {
         return ResponseResult.success(publicationService.get(processingType, serviceCode));
@@ -127,9 +105,8 @@ public class PublicationController {
     @PutMapping("/{processingType}/{serviceCode}/disable")
     @Operation(summary = "停用GIS服务")
     @OperationLog(module = "GIS_PUBLICATION", type = OperationType.CANCEL,
-            description = "停用GIS瓦片服务", recordResponse = true)
+            description = "停用GIS服务", recordResponse = true)
     public ResponseResult<GisPublicationVO> disable(
-            @Parameter(description = "发布类型：TERRAIN、IMAGERY 或 VECTOR（静态 PNG）")
             @PathVariable GisProcessingType processingType,
             @PathVariable String serviceCode) {
         return ResponseResult.success("GIS服务已停用",

@@ -28,7 +28,7 @@ public final class WfsXmlWriter {
 
     /** 生成 GetCapabilities 响应；每个已发布矢量服务对应一个 FeatureType。 */
     public static String capabilities(String serviceUrl,
-            List<PublishedVectorCatalog.PublishedVectorLayer> layers) {
+            List<PublicationLayer.VectorLayer> layers) {
         String baseUrl = stripTrailingSlash(serviceUrl);
         StringWriter buffer = new StringWriter();
         XMLStreamWriter writer = null;
@@ -67,7 +67,7 @@ public final class WfsXmlWriter {
      * 字段与几何，其余属性通过 {@code xs:any} 放行；客户端以 GeoJSON 取要素为准。</p>
      */
     public static String describeFeatureType(
-            List<PublishedVectorCatalog.PublishedVectorLayer> layers) {
+            List<PublicationLayer.VectorLayer> layers) {
         StringWriter buffer = new StringWriter();
         XMLStreamWriter writer = null;
         try {
@@ -94,7 +94,7 @@ public final class WfsXmlWriter {
             writer.writeEndElement(); // sequence
             writer.writeEndElement(); // complexType
 
-            for (PublishedVectorCatalog.PublishedVectorLayer layer : layers) {
+            for (PublicationLayer.VectorLayer layer : layers) {
                 writer.writeStartElement("xs", "element", XS_NAMESPACE);
                 writer.writeAttribute("name", layer.serviceCode());
                 writer.writeAttribute("type", "VectorFeatureType");
@@ -184,10 +184,10 @@ public final class WfsXmlWriter {
     }
 
     private static void writeFeatureTypeList(XMLStreamWriter writer,
-            List<PublishedVectorCatalog.PublishedVectorLayer> layers)
+            List<PublicationLayer.VectorLayer> layers)
             throws XMLStreamException {
         writer.writeStartElement("wfs", "FeatureTypeList", NAMESPACE);
-        for (PublishedVectorCatalog.PublishedVectorLayer layer : layers) {
+        for (PublicationLayer.VectorLayer layer : layers) {
             writer.writeStartElement("wfs", "FeatureType", NAMESPACE);
             writeWfsText(writer, "Name", layer.serviceCode());
             writeWfsText(writer, "Title", layer.serviceName());

@@ -17,8 +17,25 @@ public class GisPublicationVO {
     @Schema(description = "明确发布协议：WMS、MVT、TMS_WMTS、XYZ、TMS、TERRAIN")
     private String serviceProtocol;
 
+    @Schema(description = "本次发布支持的协议集合：WMS、WMTS、TMS、WFS、XYZ")
+    private java.util.List<String> protocols;
+
     @Schema(description = "发布类型：TERRAIN、IMAGERY、VECTOR")
     private GisProcessingType processingType;
+
+    private String layerName;
+    private String title;
+    private String abstractText;
+    private String keywords;
+    private String defaultCrs;
+    private java.util.List<String> supportedCrs;
+    private java.util.List<String> tileMatrixSets;
+    private java.util.List<Double> boundsWgs84;
+    private String styleId;
+    private String styleName;
+    private java.util.Map<String, String> capabilitiesUrls;
+    private java.util.Map<String, String> serviceUrls;
+    private java.util.Map<String, String> tileUrlTemplates;
 
     private Long tileSetId;
     private Long sourceTaskId;
@@ -56,6 +73,7 @@ public class GisPublicationVO {
 
     @Schema(description = "动态矢量发布的固定数据资源ID")
     private String vectorResourceId;
+    private String vectorDefinition;
     private String releaseVersion;
     private String defaultStyleId;
     private tools.jackson.databind.JsonNode styles;

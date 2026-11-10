@@ -13,6 +13,6 @@ public interface GisPublicationMapper extends BaseMapper<GisPublication> {
 
     @org.apache.ibatis.annotations.Select("SELECT definition::text FROM ocean_gis.gis_vector_publication_revision WHERE publication_id=#{id} AND release_version=#{version}")
     String vectorRevision(@Param("id") Long id,@Param("version") String version);
-    @Delete("DELETE FROM ocean_gis.gis_publication WHERE tile_set_id = #{tileSetId}")
-    int deleteByTileSetPermanently(@Param("tileSetId") Long tileSetId);
+    @Delete("DELETE FROM ocean_gis.gis_publication WHERE source_task_id = #{taskId}")
+    int deleteByTaskPermanently(@Param("taskId") Long taskId);
 }

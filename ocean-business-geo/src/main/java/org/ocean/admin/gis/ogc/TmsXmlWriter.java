@@ -28,8 +28,8 @@ public final class TmsXmlWriter {
      * @param layers  已发布图层
      */
     public static String tileMapService(String baseUrl,
-            List<PublishedImageryCatalog.PublishedLayer> layers,
-            List<PublishedVectorCatalog.VectorLayerView> vectorLayers) {
+            List<PublicationLayer.RasterLayer> layers,
+            List<PublicationLayer.VectorLayerView> vectorLayers) {
         String root = stripTrailingSlash(baseUrl);
         StringWriter buffer = new StringWriter();
         XMLStreamWriter writer = null;
@@ -43,7 +43,7 @@ public final class TmsXmlWriter {
             writeText(writer, "Abstract", "Ocean Admin 已发布栅格瓦片服务 (TMS 1.0.0)");
 
             writer.writeStartElement("TileMaps");
-            for (PublishedImageryCatalog.PublishedLayer layer : layers) {
+            for (PublicationLayer.RasterLayer layer : layers) {
                 writer.writeStartElement("TileMap");
                 writer.writeAttribute("title", layer.serviceCode());
                 writer.writeAttribute("srs", layer.matrixSet().tmsSrs());
@@ -51,7 +51,7 @@ public final class TmsXmlWriter {
                 writer.writeAttribute("href", tileMapHref(root, layer));
                 writer.writeEndElement(); // TileMap
             }
-            for (PublishedVectorCatalog.VectorLayerView layer : vectorLayers) {
+            for (PublicationLayer.VectorLayerView layer : vectorLayers) {
                 writer.writeStartElement("TileMap");
                 writer.writeAttribute("title", vectorSpec(layer));
                 writer.writeAttribute("srs", layer.matrixSet().tmsSrs());
@@ -81,7 +81,7 @@ public final class TmsXmlWriter {
      * @param baseUrl 服务根地址，如 {@code http://host:8090/gis/tms/1.0.0}
      * @param layer   已发布图层
      */
-    public static String tileMap(String baseUrl, PublishedImageryCatalog.PublishedLayer layer) {
+    public static String tileMap(String baseUrl, PublicationLayer.RasterLayer layer) {
         return tileMap(baseUrl, layer.serviceCode(), catalogTitle(layer),
                 layer.matrixSet(), layer.wgs84Bounds(), layer.mediaType(),
                 layer.extension(), layer.minZoom(), layer.maxZoom(),
@@ -90,7 +90,7 @@ public final class TmsXmlWriter {
 
     /** 矢量 TileMap 文档；参数与影像一致，取图地址由动态渲染器消费。 */
     public static String tileMap(String baseUrl,
-            PublishedVectorCatalog.VectorLayerView layer) {
+            PublicationLayer.VectorLayerView layer) {
         return tileMap(baseUrl, vectorSpec(layer), layer.title(),
                 layer.matrixSet(), layer.wgs84Bounds(), layer.mediaType(),
                 layer.extension(), layer.minZoom(), layer.maxZoom(),
@@ -160,17 +160,17 @@ public final class TmsXmlWriter {
     /**
      * TileMap 在地址中的标识：{@code 服务编码@矩阵集@格式}，与 GeoServer 的写法一致。
      */
-    static String spec(PublishedImageryCatalog.PublishedLayer layer) {
+    static String spec(PublicationLayer.RasterLayer layer) {
         return layer.serviceCode() + "@" + layer.matrixSet().id() + "@" + layer.extension();
     }
 
     /** 矢量 TileMap 标识：{@code 服务编码@矩阵集@格式@vector}。 */
-    static String vectorSpec(PublishedVectorCatalog.VectorLayerView layer) {
+    static String vectorSpec(PublicationLayer.VectorLayerView layer) {
         return layer.serviceCode() + "@" + layer.matrixSet().id()
                 + "@" + layer.extension() + "@vector";
     }
 
-    private static String tileMapHref(String root, PublishedImageryCatalog.PublishedLayer layer) {
+    private static String tileMapHref(String root, PublicationLayer.RasterLayer layer) {
         return root + "/" + spec(layer);
     }
 
@@ -192,7 +192,7 @@ public final class TmsXmlWriter {
     }
 
     /** 能力文档展示名优先使用发布时填写的图层名称，缺失时回退服务编码。 */
-    private static String catalogTitle(PublishedImageryCatalog.PublishedLayer layer) {
+    private static String catalogTitle(PublicationLayer.RasterLayer layer) {
         String title = layer.layerName();
         return title == null || title.isBlank() ? layer.serviceCode() : title;
     }

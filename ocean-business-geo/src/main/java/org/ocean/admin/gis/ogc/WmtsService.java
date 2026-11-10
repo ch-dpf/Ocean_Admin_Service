@@ -1,7 +1,6 @@
 package org.ocean.admin.gis.ogc;
 
 import org.ocean.admin.gis.service.PublicationRecordService;
-import org.ocean.admin.gis.service.OgcServicePublicationService;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -18,21 +17,15 @@ public class WmtsService {
     private static final String SERVICE_TYPE = "WMTS";
     private static final String VERSION = "1.0.0";
 
-    private final PublishedImageryCatalog catalog;
-    private final PublishedVectorCatalog vectorCatalog;
+    private final PublicationCatalog catalog;
     private final VectorTileRenderer vectorTileRenderer;
-    private final OgcServicePublicationService publicationService;
     private final PublicationRecordService recordService;
 
-    public WmtsService(PublishedImageryCatalog catalog,
-            PublishedVectorCatalog vectorCatalog,
+    public WmtsService(PublicationCatalog catalog,
             VectorTileRenderer vectorTileRenderer,
-            OgcServicePublicationService publicationService,
             PublicationRecordService recordService) {
         this.catalog = catalog;
-        this.vectorCatalog = vectorCatalog;
         this.vectorTileRenderer = vectorTileRenderer;
-        this.publicationService = publicationService;
         this.recordService = recordService;
     }
 
@@ -52,7 +45,7 @@ public class WmtsService {
     /** GetTile 先按矢量图层标识解析，未命中再走已生成影像瓦片文件。 */
     private WmtsReply getTile(Map<String, String> parameters) {
         String layer = required(parameters.get("layer"), "LAYER");
-        PublishedVectorCatalog.VectorLayerView view = vectorView(layer,
+        PublicationLayer.VectorLayerView view = vectorView(layer,
                 parameters.get("tilematrixset"));
         if (view == null) {
             return tileReply(resolveTile(
@@ -68,20 +61,20 @@ public class WmtsService {
     }
 
     /** KVP 的 LAYER 可用服务编码简写，具体矩阵集由 TILEMATRIXSET 决定；REST 可带 @矩阵集 后缀。 */
-    private PublishedVectorCatalog.VectorLayerView vectorView(String layer,
+    private PublicationLayer.VectorLayerView vectorView(String layer,
             String matrixSetId) {
         if (matrixSetId != null && !matrixSetId.isBlank()) {
             String[] parts = layer.split("@", -1);
             if (parts.length == 2 && parts[1].equalsIgnoreCase(matrixSetId.trim())) {
                 layer = parts[0];
             }
-            return vectorCatalog.findView(layer, matrixSetId);
+            return catalog.findView(layer, matrixSetId);
         }
-        return vectorCatalog.findView(layer);
+        return catalog.findView(layer);
     }
 
     /** 校验矢量瓦片参数并交给动态光栅渲染器。 */
-    private WmtsReply vectorTile(PublishedVectorCatalog.VectorLayerView view,
+    private WmtsReply vectorTile(PublicationLayer.VectorLayerView view,
             String style, String tileMatrixSet, String tileMatrix,
             String tileRow, String tileCol, String format, String protocol) {
         String chosenStyle = style == null || style.isBlank()
@@ -143,7 +136,7 @@ public class WmtsService {
         String format = "jpg".equals(extension) || "jpeg".equals(extension)
                 ? "image/jpeg" : "image/" + extension;
         String layerId = layer.contains("@") ? layer : layer + "@" + tileMatrixSet;
-        PublishedVectorCatalog.VectorLayerView view = vectorCatalog.findView(layerId);
+        PublicationLayer.VectorLayerView view = catalog.findView(layerId);
         if (view != null) {
             return vectorTile(view, style, tileMatrixSet, tileMatrix, tileRow, tileCol,
                     format, "WMTS");
@@ -158,7 +151,7 @@ public class WmtsService {
     public String capabilitiesXml() {
         return WmtsXmlWriter.capabilities(
                 recordService.buildPublicUrl("/gis/wmts"),
-                catalog.listPublished(OgcProtocol.WMTS), vectorCatalog.listViews());
+                catalog.listRaster(OgcProtocol.WMTS), catalog.listVectorViews(OgcProtocol.WMTS));
     }
 
     /** 生成 OGC ExceptionReport 文档。 */
@@ -168,11 +161,11 @@ public class WmtsService {
     }
 
     /** 解析图层；服务不存在、已停用或元数据非法时抛出 OGC 参数异常。 */
-    public PublishedImageryCatalog.PublishedLayer requireLayer(String layer) {
+    public PublicationLayer.RasterLayer requireLayer(String layer) {
         if (layer == null || layer.isBlank()) {
             throw new OgcException("MissingParameterValue", "LAYER", "缺少 LAYER 参数");
         }
-        PublishedImageryCatalog.PublishedLayer published = catalog.load(layer.trim(), OgcProtocol.WMTS);
+        PublicationLayer.RasterLayer published = catalog.loadRaster(layer.trim(), OgcProtocol.WMTS);
         if (published == null) {
             throw new OgcException("InvalidParameterValue", "LAYER", "图层不存在或已停用: " + layer);
         }
@@ -184,7 +177,7 @@ public class WmtsService {
      *
      * <p>行列与层级均先按图层矩阵集校验，再换算为切片存储剖面下的行号。</p>
      */
-    public TileResource resolveTile(PublishedImageryCatalog.PublishedLayer layer,
+    public TileResource resolveTile(PublicationLayer.RasterLayer layer,
             String style, String tileMatrixSet, String tileMatrix,
             String tileRow, String tileCol, String format) {
         requireStyle(layer, style);
@@ -209,7 +202,7 @@ public class WmtsService {
         int storageRow = matrixSet.storageRow(layer.tileProfile(), zoom, row);
         String relativePath = zoom + "/" + col + "/" + storageRow + "." + extension;
         try {
-            Path file = publicationService.resolveTileFile(
+            Path file = catalog.resolveTileFile(
                     layer.serviceCode(), OgcProtocol.WMTS, relativePath);
             return new TileResource(file, layer.mediaType());
         } catch (IllegalArgumentException | IllegalStateException ex) {
@@ -244,7 +237,7 @@ public class WmtsService {
         return parameters;
     }
 
-    private void requireStyle(PublishedImageryCatalog.PublishedLayer layer, String style) {
+    private void requireStyle(PublicationLayer.RasterLayer layer, String style) {
         String normalized = style == null || style.isBlank() ? DEFAULT_STYLE : style.trim();
         if (!DEFAULT_STYLE.equalsIgnoreCase(normalized)) {
             throw new OgcException("InvalidParameterValue", "STYLE",
@@ -252,7 +245,7 @@ public class WmtsService {
         }
     }
 
-    private void requireMatrixSet(PublishedImageryCatalog.PublishedLayer layer, String tileMatrixSet) {
+    private void requireMatrixSet(PublicationLayer.RasterLayer layer, String tileMatrixSet) {
         if (tileMatrixSet == null || tileMatrixSet.isBlank()) {
             throw new OgcException("MissingParameterValue", "TILEMATRIXSET",
                     "缺少 TILEMATRIXSET 参数");
@@ -263,7 +256,7 @@ public class WmtsService {
         }
     }
 
-    private String requireFormat(PublishedImageryCatalog.PublishedLayer layer, String format) {
+    private String requireFormat(PublicationLayer.RasterLayer layer, String format) {
         if (format == null || format.isBlank()) {
             throw new OgcException("MissingParameterValue", "FORMAT", "缺少 FORMAT 参数");
         }

@@ -4,7 +4,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.referencing.CRS;
-import org.ocean.admin.gis.service.OgcServicePublicationService;
 import org.ocean.admin.gis.service.PublicationRecordService;
 import org.springframework.stereotype.Service;
 
@@ -38,29 +37,23 @@ public class WmsService {
     private static final String INFO_JSON = WmsInfoWriter.JSON;
     private static final int MAX_BUFFER = 20;
 
-    private final PublishedImageryCatalog catalog;
-    private final PublishedVectorCatalog vectorCatalog;
+    private final PublicationCatalog catalog;
     private final PublicationRecordService recordService;
-    private final OgcServicePublicationService publicationService;
     private final WmsSourceResolver sourceResolver;
     private final WmsRasterRenderer rasterRenderer;
     private final VectorMapRenderer vectorRenderer;
     private final WmsPixelSampler pixelSampler;
     private final WmsInfoWriter infoWriter;
 
-    public WmsService(PublishedImageryCatalog catalog,
-            PublishedVectorCatalog vectorCatalog,
+    public WmsService(PublicationCatalog catalog,
             PublicationRecordService recordService,
-            OgcServicePublicationService publicationService,
             WmsSourceResolver sourceResolver,
             WmsRasterRenderer rasterRenderer,
             VectorMapRenderer vectorRenderer,
             WmsPixelSampler pixelSampler,
             WmsInfoWriter infoWriter) {
         this.catalog = catalog;
-        this.vectorCatalog = vectorCatalog;
         this.recordService = recordService;
-        this.publicationService = publicationService;
         this.sourceResolver = sourceResolver;
         this.rasterRenderer = rasterRenderer;
         this.vectorRenderer = vectorRenderer;
@@ -86,7 +79,7 @@ public class WmsService {
     public String capabilitiesXml() {
         return WmsXmlWriter.capabilities(
                 recordService.buildPublicUrl("/gis/wms"),
-                catalog.listPublished(OgcProtocol.WMS), vectorCatalog.listPublished());
+                catalog.listRaster(OgcProtocol.WMS), catalog.listVector(OgcProtocol.WMS));
     }
 
     /** 生成 WMS 异常报告文档。 */
@@ -157,11 +150,11 @@ public class WmsService {
 
         List<WmsInfoWriter.FeatureInfo> features = new ArrayList<>();
         for (String layerCode : request.queryLayers()) {
-            if (vectorCatalog.load(layerCode, null) != null) {
+            if (catalog.loadVector(layerCode, null) != null) {
                 // WFS 提供矢量要素属性查询；WMS 的矢量图层不做像元采样
                 continue;
             }
-            PublishedImageryCatalog.PublishedLayer published = requirePublishedLayer(
+            PublicationLayer.RasterLayer published = requirePublishedLayer(
                     layerCode, "QUERY_LAYERS");
             LayerSources layer = resolveSources(layerCode, "QUERY_LAYERS");
             WmsPixelSampler.BandSample sample = layer.sources().isEmpty() ? null
@@ -201,8 +194,8 @@ public class WmsService {
                 // 多图层按请求顺序叠放，后画的在前
                 for (int index = 0; index < request.layers().size(); index++) {
                     String layerCode = request.layers().get(index);
-                    PublishedImageryCatalog.PublishedLayer raster =
-                            catalog.load(layerCode, OgcProtocol.WMS);
+                    PublicationLayer.RasterLayer raster =
+                            catalog.loadRaster(layerCode, OgcProtocol.WMS);
                     if (raster != null) {
                         LayerSources sources = resolveSources(layerCode, "LAYERS");
                         if (sources.sources().isEmpty()) {
@@ -217,8 +210,8 @@ public class WmsService {
                         continue;
                     }
                     String style = styleAt(request.styles(), index, layerCode);
-                    PublishedVectorCatalog.PublishedVectorLayer vector =
-                            vectorCatalog.load(layerCode, style);
+                    PublicationLayer.VectorLayer vector =
+                            catalog.loadVector(layerCode, style);
                     if (vector == null) {
                         throw new OgcException("LayerNotDefined", "LAYERS",
                                 "图层不存在或已停用: " + layerCode);
@@ -246,7 +239,7 @@ public class WmsService {
     }
 
     /** 把已发布影像图层的 WGS84 范围变换到请求坐标系，供源 GeoTIFF 窗口读取。 */
-    private ReferencedEnvelope boundsOf(PublishedImageryCatalog.PublishedLayer layer,
+    private ReferencedEnvelope boundsOf(PublicationLayer.RasterLayer layer,
             WmsMapRequest request) {
         try {
             CoordinateReferenceSystem targetCrs = decodeCrs(request.crs());
@@ -272,7 +265,7 @@ public class WmsService {
         if (style.isEmpty() || DEFAULT_STYLE.equalsIgnoreCase(style)) {
             return null;
         }
-        PublishedVectorCatalog.PublishedVectorLayer layer = vectorCatalog.load(layerCode, style);
+        PublicationLayer.VectorLayer layer = catalog.loadVector(layerCode, style);
         if (layer == null) {
             throw new OgcException("StyleNotDefined", "STYLES",
                     "图层 " + layerCode + " 不支持样式: " + style);
@@ -304,9 +297,9 @@ public class WmsService {
     }
 
     /** 校验图层已发布且元数据可读，返回对外元数据。 */
-    private PublishedImageryCatalog.PublishedLayer requirePublishedLayer(
+    private PublicationLayer.RasterLayer requirePublishedLayer(
             String layerCode, String locator) {
-        PublishedImageryCatalog.PublishedLayer published = catalog.load(layerCode, OgcProtocol.WMS);
+        PublicationLayer.RasterLayer published = catalog.loadRaster(layerCode, OgcProtocol.WMS);
         if (published == null) {
             throw new OgcException("LayerNotDefined", locator,
                     "图层不存在或已停用: " + layerCode);
@@ -317,7 +310,7 @@ public class WmsService {
     /** 定位图层的源 GeoTIFF；源文件全部不可用时返回空列表，由调用方决定降级方式。 */
     private LayerSources resolveSources(String layerCode, String locator) {
         try {
-            var tileSet = publicationService.publishedTileSet(layerCode, OgcProtocol.WMS);
+            var tileSet = catalog.publishedTileSet(layerCode, OgcProtocol.WMS);
             if (tileSet == null) {
                 throw new OgcException("LayerNotDefined", locator,
                         "图层不存在或已停用: " + layerCode);

@@ -41,12 +41,12 @@ public class WfsService {
     private static final double MERCATOR_R = 20037508.342789244;
     private static final double MAX_LAT = 85.05112877980659;
 
-    private final PublishedVectorCatalog catalog;
+    private final PublicationCatalog catalog;
     private final GeoPackageStore store;
     private final PublicationRecordService recordService;
     private final ObjectMapper objectMapper;
 
-    public WfsService(PublishedVectorCatalog catalog, GeoPackageStore store,
+    public WfsService(PublicationCatalog catalog, GeoPackageStore store,
             PublicationRecordService recordService, ObjectMapper objectMapper) {
         this.catalog = catalog;
         this.store = store;
@@ -74,7 +74,7 @@ public class WfsService {
     /** 生成 GetCapabilities 文档。 */
     public String capabilitiesXml() {
         return WfsXmlWriter.capabilities(
-                recordService.buildPublicUrl("/gis/wfs"), catalog.listPublished());
+                recordService.buildPublicUrl("/gis/wfs"), catalog.listVector(OgcProtocol.WFS));
     }
 
     /** 生成 OWS ExceptionReport 文档。 */
@@ -85,7 +85,7 @@ public class WfsService {
 
     /** 按范围、类型和条数输出 GeoJSON FeatureCollection。 */
     private WfsReply getFeature(Map<String, String> parameters) {
-        List<PublishedVectorCatalog.PublishedVectorLayer> layers =
+        List<PublicationLayer.VectorLayer> layers =
                 layersOf(types(parameters, "TYPENAMES"));
         String outputFormat = requireOutputFormat(parameters.get("outputformat"));
         Crs crs = parseCrs(parameters.get("srsname"));
@@ -104,7 +104,7 @@ public class WfsService {
             crsNode.putObject("properties").put("name", crs.urn());
         }
         ArrayNode features = root.putArray("features");
-        for (PublishedVectorCatalog.PublishedVectorLayer layer : layers) {
+        for (PublicationLayer.VectorLayer layer : layers) {
             appendFeatures(features, layer, bbox, crs, startIndex, count);
             if (features.size() >= count) {
                 break;
@@ -118,7 +118,7 @@ public class WfsService {
     }
 
     private void appendFeatures(ArrayNode output,
-            PublishedVectorCatalog.PublishedVectorLayer layer, double[] bbox,
+            PublicationLayer.VectorLayer layer, double[] bbox,
             Crs crs, int startIndex, int count) {
         Map<Long, String> layerNames = new LinkedHashMap<>();
         for (JsonNode frozen : layer.layers()) {
@@ -150,7 +150,7 @@ public class WfsService {
     }
 
     /** 使用同一个冻结 GPKG 窗口查询，多个文件组的图层一次读取。 */
-    private JsonNode query(PublishedVectorCatalog.PublishedVectorLayer layer,
+    private JsonNode query(PublicationLayer.VectorLayer layer,
             double[] wgs84Bounds, int limit) {
         List<Long> layerIds = new ArrayList<>();
         for (JsonNode frozen : layer.layers()) {
@@ -165,14 +165,14 @@ public class WfsService {
         }
     }
 
-    private List<PublishedVectorCatalog.PublishedVectorLayer> layersOf(
+    private List<PublicationLayer.VectorLayer> layersOf(
             List<String> typeNames) {
         if (typeNames.isEmpty()) {
-            return catalog.listPublished();
+            return catalog.listVector(OgcProtocol.WFS);
         }
-        List<PublishedVectorCatalog.PublishedVectorLayer> layers = new ArrayList<>();
+        List<PublicationLayer.VectorLayer> layers = new ArrayList<>();
         for (String typeName : typeNames) {
-            PublishedVectorCatalog.PublishedVectorLayer layer = catalog.load(typeName);
+            PublicationLayer.VectorLayer layer = catalog.loadVector(typeName, null);
             if (layer == null) {
                 throw new WmtsService.OgcException("InvalidParameterValue", "TYPENAMES",
                         "要素类型不存在或已停用: " + typeName);

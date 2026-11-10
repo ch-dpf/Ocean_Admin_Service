@@ -1,23 +1,50 @@
 package org.ocean.admin.gis.ogc;
 
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
-/** OGC 服务协议类型；一条独立发布记录只对应一种协议。 */
+/** 统一发布记录可声明的对外服务协议。 */
 public enum OgcProtocol {
 
-    WMTS,
     WMS,
-    TMS;
+    WMTS,
+    TMS,
+    WFS,
+    XYZ;
+
+    public static final Set<OgcProtocol> IMAGERY = Set.of(WMS, WMTS, TMS, XYZ);
+    public static final Set<OgcProtocol> VECTOR = Set.of(WMS, WMTS, TMS, WFS, XYZ);
 
     /** 解析并校验请求中的协议名称。 */
     public static OgcProtocol parse(String value) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("服务类型不能为空");
+            throw new IllegalArgumentException("服务协议不能为空");
         }
         try {
             return valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("服务类型只能为 WMTS、WMS 或 TMS", ex);
+            throw new IllegalArgumentException("不支持的服务协议: " + value, ex);
         }
+    }
+
+    /** 按原始数据类别校验协议集合，返回去重的协议集合。 */
+    public static Set<OgcProtocol> validate(String processingType, List<String> values) {
+        if (values == null || values.isEmpty()) {
+            throw new IllegalArgumentException("至少需要选择一个服务协议");
+        }
+        Set<OgcProtocol> allowed = "VECTOR".equalsIgnoreCase(processingType)
+                ? VECTOR : IMAGERY;
+        Set<OgcProtocol> protocols = new LinkedHashSet<>();
+        for (String value : values) {
+            OgcProtocol protocol = parse(value);
+            if (!allowed.contains(protocol)) {
+                throw new IllegalArgumentException(
+                        processingType + " 不支持服务协议: " + protocol);
+            }
+            protocols.add(protocol);
+        }
+        return protocols;
     }
 }

@@ -60,14 +60,8 @@ public class PublicationRecordService {
                 .ge(publishTimeStart != null, GisPublication::getPublishTime, publishTimeStart)
                 .le(publishTimeEnd != null, GisPublication::getPublishTime, publishTimeEnd)
                 .orderByDesc(GisPublication::getPublishTime);
-        if (processingType == GisProcessingType.VECTOR) {
-            query.and(source -> source.isNotNull(GisPublication::getVectorResourceId)
-                    .or().inSql(GisPublication::getTileSetId,
-                            "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = 'VECTOR'"));
-        } else if (processingType != null) {
-            query.inSql(GisPublication::getTileSetId,
-                    "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = '"
-                            + processingType.name() + "'");
+        if (processingType != null) {
+            query.eq(GisPublication::getProcessingType, processingType.name());
         }
         Page<GisPublication> page = publicationMapper.selectPage(
                 new Page<>(currentPage, pageSize), query);
@@ -79,13 +73,7 @@ public class PublicationRecordService {
         GisPublication publication = publicationMapper.selectOne(
                 new LambdaQueryWrapper<GisPublication>()
                         .eq(GisPublication::getServiceCode, serviceCode)
-                        .and(source -> {
-                            source.inSql(GisPublication::getTileSetId,
-                                    "SELECT id FROM ocean_gis.gis_tile_set WHERE tile_type = '"
-                                            + processingType.name() + "'");
-                            if (processingType == GisProcessingType.VECTOR)
-                                source.or().isNotNull(GisPublication::getVectorResourceId);
-                        }));
+                        .eq(GisPublication::getProcessingType, processingType.name()));
         if (publication == null) {
             throw new IllegalArgumentException(
                     processingType.name() + "发布服务不存在: " + serviceCode);
@@ -103,38 +91,22 @@ public class PublicationRecordService {
                 .eq(GisPublication::getTileSetId, tileSet.getId()));
     }
 
+    /** 统一发布记录的保存入口；同一任务只保留一条有效记录。 */
     @Transactional(rollbackFor = Exception.class)
-    public GisPublication publish(
-            GisTileSet tileSet, String initialServiceCode, String displayName, String serviceName) {
-        String normalizedName = normalizeServiceName(serviceName);
-        GisPublication publication = publicationMapper.selectOne(
+    public GisPublication saveUnified(GisPublication publication) {
+        GisPublication existing = publicationMapper.selectOne(
                 new LambdaQueryWrapper<GisPublication>()
-                        .eq(GisPublication::getTileSetId, tileSet.getId()));
-        if (publication != null && PUBLISHED.equals(publication.getStatus())) {
+                        .eq(GisPublication::getSourceTaskId, publication.getSourceTaskId()));
+        if (existing == null) {
+            if (publicationMapper.insert(publication) != 1) {
+                throw new IllegalStateException("统一发布记录保存失败");
+            }
             return publication;
         }
-        LocalDateTime now = LocalDateTime.now();
-        if (publication == null) {
-            publication = new GisPublication();
-            publication.setServiceCode(initialServiceCode);
-            publication.setTileSetId(tileSet.getId());
-            publication.setServiceProtocol(switch (tileSet.getTileType()) {
-                case VECTOR -> "TMS_WMTS";
-                case TERRAIN -> "TERRAIN";
-                case IMAGERY -> tileSet.getTileProfile();
-            });
-            publication.setDataSetId(commonDataSetId(tileSet.getTaskId()));
-            publication.setDeleted(0);
-        }
-        publication.setServiceName(normalizedName);
-        publication.setStatus(PUBLISHED);
-        publication.setPublishTime(now);
-        publication.setUpdateTime(now);
-        int affected = publication.getId() == null
-                ? publicationMapper.insert(publication)
-                : publicationMapper.updateById(publication);
-        if (affected != 1) {
-            throw new IllegalStateException(displayName + "发布记录保存失败");
+        publication.setId(existing.getId());
+        publication.setServiceCode(existing.getServiceCode());
+        if (publicationMapper.updateById(publication) != 1) {
+            throw new IllegalStateException("统一发布记录更新失败");
         }
         return publication;
     }
@@ -196,6 +168,10 @@ public class PublicationRecordService {
             throw new IllegalStateException("发布记录关联的瓦片集不存在");
         }
         return tileSet;
+    }
+
+    public String publicBaseUrl() {
+        return publicBaseUrl;
     }
 
     public String buildPublicUrl(String relativePath) {
