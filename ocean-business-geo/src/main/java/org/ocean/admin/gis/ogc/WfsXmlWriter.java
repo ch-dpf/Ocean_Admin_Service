@@ -23,6 +23,20 @@ public final class WfsXmlWriter {
     private static final String DEFAULT_CRS = "urn:ogc:def:crs:OGC:1.3:CRS84";
     private static final String MERCATOR_CRS = "urn:ogc:def:crs:EPSG::3857";
 
+    /** 能力文档标题优先使用 Title，其次 LayerName，最后回退服务编码。 */
+    private static String displayTitle(String title, String layerName, String serviceCode) {
+        if (title != null && !title.isBlank()) return title;
+        if (layerName != null && !layerName.isBlank()) return layerName;
+        return serviceCode;
+    }
+
+    /** 能力文档摘要优先使用 Abstract；缺失时用关键字或服务编码兜底。 */
+    private static String displayAbstract(String abstractText, String keywords, String serviceCode) {
+        if (abstractText != null && !abstractText.isBlank()) return abstractText;
+        if (keywords != null && !keywords.isBlank()) return "关键字: " + keywords;
+        return "已发布矢量数据集的全部冻结图层: " + serviceCode;
+    }
+
     private WfsXmlWriter() {
     }
 
@@ -190,9 +204,9 @@ public final class WfsXmlWriter {
         for (PublicationLayer.VectorLayer layer : layers) {
             writer.writeStartElement("wfs", "FeatureType", NAMESPACE);
             writeWfsText(writer, "Name", layer.serviceCode());
-            writeWfsText(writer, "Title", layer.serviceName());
+            writeWfsText(writer, "Title", displayTitle(layer.title(), layer.layerName(), layer.serviceCode()));
             writeWfsText(writer, "Abstract",
-                    "已发布矢量数据集的全部冻结图层: " + layer.serviceCode());
+                    displayAbstract(layer.abstractText(), layer.keywords(), layer.serviceCode()));
             writeWfsText(writer, "DefaultCRS", DEFAULT_CRS);
             writeWfsText(writer, "OtherCRS", MERCATOR_CRS);
             double[] bounds = layer.wgs84Bounds();

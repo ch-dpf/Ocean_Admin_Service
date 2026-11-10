@@ -107,9 +107,11 @@ public class PublicationCatalog {
                 continue;
             }
             for (TileMatrixSetDefinition matrixSet : TileMatrixSetDefinition.values()) {
-                views.add(new PublicationLayer.VectorLayerView(layer.serviceCode(), layer.serviceName(),
-                        layer.wgs84Bounds(), minZoom, maxZoom, "png", "image/png",
-                        matrixSet, layer.styles(), layer.styleId(), layer.releaseVersion()));
+                views.add(new PublicationLayer.VectorLayerView(layer.serviceCode(),
+                        layer.serviceName(), layer.layerName(), layer.title(),
+                        layer.abstractText(), layer.keywords(), layer.wgs84Bounds(),
+                        minZoom, maxZoom, "png", "image/png", matrixSet,
+                        layer.styles(), layer.styleId(), layer.releaseVersion()));
             }
         }
         return List.copyOf(views);
@@ -238,8 +240,10 @@ public class PublicationCatalog {
                     .asInt(tileSet.getMaxZoom() == null ? 0 : tileSet.getMaxZoom()));
             double[] bounds = boundsOf(descriptor, publication);
             return new PublicationLayer.RasterLayer(publication.getServiceCode(),
-                    publication.getServiceName(), publication.getLayerName(), matrixSet,
-                    tileSet.getTileProfile(), extension, mediaType,
+                    publication.getServiceName(), publication.getLayerName(),
+                    publication.getTitle(), publication.getAbstractText(),
+                    publication.getKeywords(), matrixSet, tileSet.getTileProfile(),
+                    extension, mediaType,
                     publication.getMinZoom() == null ? minZoom : publication.getMinZoom(),
                     publication.getMaxZoom() == null ? maxZoom : publication.getMaxZoom(),
                     bounds, tileSet);
@@ -319,7 +323,8 @@ public class PublicationCatalog {
             }
             return new PublicationLayer.VectorLayer(publication.getServiceCode(),
                     publication.getServiceName(), publication.getLayerName(),
-                    binding.path("releaseVersion").asText(), resource,
+                    publication.getTitle(), publication.getAbstractText(),
+                    publication.getKeywords(), binding.path("releaseVersion").asText(), resource,
                     parseBounds(publication.getBoundsWgs84Json(), vectorBounds(publication.getDataSetId())),
                     binding, contract, scheme, cartography, List.copyOf(styles), chosenId);
         } catch (RuntimeException ex) {

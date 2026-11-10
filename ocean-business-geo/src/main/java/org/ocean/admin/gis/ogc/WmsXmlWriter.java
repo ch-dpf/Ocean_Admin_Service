@@ -144,8 +144,8 @@ public final class WmsXmlWriter {
         writer.writeStartElement("", "Layer", NAMESPACE);
         writer.writeAttribute("queryable", "1");
         writeText(writer, "Name", layer.serviceCode());
-        writeText(writer, "Title", layer.serviceName());
-        writeText(writer, "Abstract", "已发布矢量服务（全部文件组合并渲染）: " + layer.serviceCode());
+        writeText(writer, "Title", displayTitle(layer.title(), layer.layerName(), layer.serviceCode()));
+        writeText(writer, "Abstract", displayAbstract(layer.abstractText(), layer.keywords(), layer.serviceCode()));
         writeSupportedCrs(writer);
 
         double[] b = layer.wgs84Bounds();
@@ -208,8 +208,8 @@ public final class WmsXmlWriter {
         writer.writeStartElement("", "Layer", NAMESPACE);
         writer.writeAttribute("queryable", "1");
         writeText(writer, "Name", layer.serviceCode());
-        writeText(writer, "Title", catalogTitle(layer));
-        writeText(writer, "Abstract", "已发布 OGC 服务: " + layer.serviceCode());
+        writeText(writer, "Title", displayTitle(layer.title(), layer.layerName(), layer.serviceCode()));
+        writeText(writer, "Abstract", displayAbstract(layer.abstractText(), layer.keywords(), layer.serviceCode()));
         writeSupportedCrs(writer);
 
         double[] b = layer.wgs84Bounds();
@@ -262,6 +262,20 @@ public final class WmsXmlWriter {
         writer.writeStartElement("", localName, NAMESPACE);
         writer.writeCharacters(value == null ? "" : value);
         writer.writeEndElement();
+    }
+
+    /** 能力文档标题优先使用 Title，其次 LayerName，最后回退服务编码。 */
+    private static String displayTitle(String title, String layerName, String serviceCode) {
+        if (title != null && !title.isBlank()) return title;
+        if (layerName != null && !layerName.isBlank()) return layerName;
+        return serviceCode;
+    }
+
+    /** 能力文档摘要优先使用 Abstract；缺失时用关键字或服务编码兜底。 */
+    private static String displayAbstract(String abstractText, String keywords, String serviceCode) {
+        if (abstractText != null && !abstractText.isBlank()) return abstractText;
+        if (keywords != null && !keywords.isBlank()) return "关键字: " + keywords;
+        return "已发布 OGC 服务: " + serviceCode;
     }
 
     /** 能力文档展示名优先使用发布时填写的图层名称，缺失时回退服务编码。 */

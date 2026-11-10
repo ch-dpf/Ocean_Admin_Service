@@ -83,7 +83,28 @@ public class PublicationService {
         if (!"COMPLETED".equals(task.getTaskStatus().name())) {
             throw new IllegalStateException("只有 COMPLETED 状态的任务可以发布");
         }
-        Set<OgcProtocol> protocols = OgcProtocol.validate(processingType.name(), request.protocols());
+        Set<OgcProtocol> requested = OgcProtocol.validate(processingType.name(), request.protocols());
+        GisPublication existing = publicationMapper.selectOne(
+                new LambdaQueryWrapper<GisPublication>()
+                        .eq(GisPublication::getSourceTaskId, task.getId()));
+        if (existing != null) {
+            Set<OgcProtocol> already = new LinkedHashSet<>();
+            for (String protocol : readStringList(existing.getProtocolsJson())) {
+                try {
+                    already.add(OgcProtocol.parse(protocol));
+                } catch (RuntimeException ignored) {
+                    // 旧记录中的未知协议忽略，不影响新协议追加
+                }
+            }
+            Set<OgcProtocol> added = new LinkedHashSet<>(requested);
+            added.removeAll(already);
+            if (added.isEmpty()) {
+                throw new IllegalArgumentException("所选协议均已发布，不要再重复发布");
+            }
+            already.addAll(added);
+            requested = already;
+        }
+        Set<OgcProtocol> protocols = requested;
         Long dataSetId = commonDataSetId(task.getId());
         GisTileSet tileSet = tileSetMapper.selectByTaskId(task.getId());
         boolean dynamicVector = processingType == GisProcessingType.VECTOR
@@ -115,7 +136,7 @@ public class PublicationService {
             throw new IllegalArgumentException("服务层级范围不合法");
         }
 
-        String serviceCode = serviceCode(processingType);
+        String serviceCode = existing == null ? serviceCode(processingType) : existing.getServiceCode();
         Map<String, String> serviceUrls = new LinkedHashMap<>();
         Map<String, String> capabilitiesUrls = new LinkedHashMap<>();
         Map<String, String> tileUrlTemplates = new LinkedHashMap<>();
@@ -412,8 +433,8 @@ public class PublicationService {
                     serviceUrls.put("TMS", recordService.buildPublicUrl("/gis/tms/1.0.0"));
                     capabilitiesUrls.put("TMS", recordService.buildPublicUrl("/gis/tms/1.0.0"));
                     tileUrlTemplates.put("TMS", recordService.buildPublicUrl("/gis/tms/1.0.0/" + code
-                            + "@WebMercatorQuad@png@" + (processingType == GisProcessingType.VECTOR ? "vector/" : "")
-                            + "{z}/{x}/{y}.png"));
+                            + "@WebMercatorQuad@png" + (processingType == GisProcessingType.VECTOR ? "@vector" : "")
+                            + "/{z}/{x}/{y}.png"));
                 }
                 case WFS -> {
                     serviceUrls.put("WFS", recordService.buildPublicUrl("/gis/wfs"));

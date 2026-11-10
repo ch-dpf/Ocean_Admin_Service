@@ -190,8 +190,9 @@ public final class WmtsXmlWriter {
     private static void writeLayer(XMLStreamWriter writer, String baseUrl,
             PublicationLayer.RasterLayer layer) throws XMLStreamException {
         writer.writeStartElement("", "Layer", NAMESPACE);
-        writeOwsText(writer, "Title", catalogTitle(layer));
+        writeOwsText(writer, "Title", displayTitle(layer.title(), layer.layerName(), layer.serviceCode()));
         writeOwsText(writer, "Identifier", layer.serviceCode());
+        writeOwsText(writer, "Abstract", displayAbstract(layer.abstractText(), layer.keywords(), layer.serviceCode()));
         writeBoundingBox(writer, layer);
 
         writer.writeStartElement("", "Style", NAMESPACE);
@@ -235,9 +236,9 @@ public final class WmtsXmlWriter {
             throws XMLStreamException {
         PublicationLayer.VectorLayerView first = views.getFirst();
         writer.writeStartElement("", "Layer", NAMESPACE);
-        writeOwsText(writer, "Title", first.title());
+        writeOwsText(writer, "Title", displayTitle(first.title(), first.layerName(), first.serviceCode()));
         writeOwsText(writer, "Identifier", identifier);
-        writeOwsText(writer, "Abstract", "已发布矢量服务的动态栅格瓦片");
+        writeOwsText(writer, "Abstract", displayAbstract(first.abstractText(), first.keywords(), identifier));
         writer.writeStartElement("ows", "WGS84BoundingBox", OWS_NAMESPACE);
         writeOwsText(writer, "LowerCorner",
                 first.wgs84Bounds()[0] + " " + first.wgs84Bounds()[1]);
@@ -377,6 +378,20 @@ public final class WmtsXmlWriter {
         writer.writeStartElement(prefix, localName, namespace);
         writer.writeCharacters(value == null ? "" : value);
         writer.writeEndElement();
+    }
+
+    /** 能力文档标题优先使用 Title，其次 LayerName，最后回退服务编码。 */
+    private static String displayTitle(String title, String layerName, String serviceCode) {
+        if (title != null && !title.isBlank()) return title;
+        if (layerName != null && !layerName.isBlank()) return layerName;
+        return serviceCode;
+    }
+
+    /** 能力文档摘要优先使用 Abstract；缺失时用关键字或服务编码兜底。 */
+    private static String displayAbstract(String abstractText, String keywords, String serviceCode) {
+        if (abstractText != null && !abstractText.isBlank()) return abstractText;
+        if (keywords != null && !keywords.isBlank()) return "关键字: " + keywords;
+        return "已发布 OGC 服务: " + serviceCode;
     }
 
     /** 能力文档展示名优先使用发布时填写的图层名称，缺失时回退服务编码。 */

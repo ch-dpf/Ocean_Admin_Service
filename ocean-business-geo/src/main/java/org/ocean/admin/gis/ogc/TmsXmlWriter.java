@@ -82,24 +82,25 @@ public final class TmsXmlWriter {
      * @param layer   已发布图层
      */
     public static String tileMap(String baseUrl, PublicationLayer.RasterLayer layer) {
-        return tileMap(baseUrl, layer.serviceCode(), catalogTitle(layer),
-                layer.matrixSet(), layer.wgs84Bounds(), layer.mediaType(),
-                layer.extension(), layer.minZoom(), layer.maxZoom(),
-                spec(layer));
+        return tileMap(baseUrl, layer.serviceCode(), displayTitle(layer.title(), layer.layerName(), layer.serviceCode()),
+                layer.abstractText(), layer.keywords(), layer.matrixSet(),
+                layer.wgs84Bounds(), layer.mediaType(), layer.extension(),
+                layer.minZoom(), layer.maxZoom(), spec(layer));
     }
 
     /** 矢量 TileMap 文档；参数与影像一致，取图地址由动态渲染器消费。 */
     public static String tileMap(String baseUrl,
             PublicationLayer.VectorLayerView layer) {
-        return tileMap(baseUrl, vectorSpec(layer), layer.title(),
-                layer.matrixSet(), layer.wgs84Bounds(), layer.mediaType(),
-                layer.extension(), layer.minZoom(), layer.maxZoom(),
-                vectorSpec(layer));
+        return tileMap(baseUrl, vectorSpec(layer), displayTitle(layer.title(), layer.layerName(), layer.serviceCode()),
+                layer.abstractText(), layer.keywords(), layer.matrixSet(),
+                layer.wgs84Bounds(), layer.mediaType(), layer.extension(),
+                layer.minZoom(), layer.maxZoom(), vectorSpec(layer));
     }
 
     private static String tileMap(String baseUrl, String identifier, String title,
-            TileMatrixSetDefinition matrixSet, double[] wgs84Bounds,
-            String mediaType, String extension, int minZoom, int maxZoom, String hrefSuffix) {
+            String abstractText, String keywords, TileMatrixSetDefinition matrixSet,
+            double[] wgs84Bounds, String mediaType, String extension,
+            int minZoom, int maxZoom, String hrefSuffix) {
         String root = stripTrailingSlash(baseUrl);
         double[] bounds = matrixSet.targetBounds(wgs84Bounds);
         StringWriter buffer = new StringWriter();
@@ -112,7 +113,7 @@ public final class TmsXmlWriter {
             writer.writeAttribute("tilemapservice", root);
 
             writeText(writer, "Title", title);
-            writeText(writer, "Abstract", "已发布 OGC 服务: " + identifier);
+            writeText(writer, "Abstract", displayAbstract(abstractText, keywords, identifier));
             writeText(writer, "SRS", matrixSet.tmsSrs());
 
             writer.writeStartElement("BoundingBox");
@@ -189,6 +190,20 @@ public final class TmsXmlWriter {
         writer.writeStartElement(localName);
         writer.writeCharacters(value == null ? "" : value);
         writer.writeEndElement();
+    }
+
+    /** 能力文档标题优先使用 Title，其次 LayerName，最后回退服务编码。 */
+    private static String displayTitle(String title, String layerName, String serviceCode) {
+        if (title != null && !title.isBlank()) return title;
+        if (layerName != null && !layerName.isBlank()) return layerName;
+        return serviceCode;
+    }
+
+    /** 能力文档摘要优先使用 Abstract；缺失时用关键字或服务编码兜底。 */
+    private static String displayAbstract(String abstractText, String keywords, String serviceCode) {
+        if (abstractText != null && !abstractText.isBlank()) return abstractText;
+        if (keywords != null && !keywords.isBlank()) return "关键字: " + keywords;
+        return "已发布 OGC 服务: " + serviceCode;
     }
 
     /** 能力文档展示名优先使用发布时填写的图层名称，缺失时回退服务编码。 */
