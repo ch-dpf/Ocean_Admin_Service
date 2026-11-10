@@ -32,11 +32,11 @@ public class VectorMapRenderer {
     private static final double MERCATOR_R = 20037508.342789244;
     private static final double MAX_LAT = 85.05112877980659;
 
-    private final PublishedVectorCatalog catalog;
+    private final PublicationCatalog catalog;
     private final GeoPackageStore store;
     private final VectorStyleResolver styleResolver;
 
-    public VectorMapRenderer(PublishedVectorCatalog catalog, GeoPackageStore store,
+    public VectorMapRenderer(PublicationCatalog catalog, GeoPackageStore store,
             VectorStyleResolver styleResolver) {
         this.catalog = catalog;
         this.store = store;
@@ -51,8 +51,8 @@ public class VectorMapRenderer {
      * @param styleId 请求的样式方案 ID，为空时取默认样式
      */
     public void draw(Graphics2D graphics, RenderWindow window,
-            PublishedVectorCatalog.PublishedVectorLayer layer, String styleId) {
-        PublishedVectorCatalog.PublishedVectorLayer chosen = styleId == null || styleId.isBlank()
+            PublicationLayer.VectorLayer layer, String styleId) {
+        PublicationLayer.VectorLayer chosen = styleId == null || styleId.isBlank()
                 || layer.styleId().equals(styleId) ? layer : reload(layer, styleId);
         if (chosen == null) {
             return;
@@ -93,9 +93,9 @@ public class VectorMapRenderer {
 
     /** 样式方案切换失败时由调用方给出明确异常，不在渲染阶段静默出空白图。 */
 
-    private PublishedVectorCatalog.PublishedVectorLayer reload(
-            PublishedVectorCatalog.PublishedVectorLayer layer, String styleId) {
-        return catalog.load(layer.serviceCode(), styleId);
+    private PublicationLayer.VectorLayer reload(
+            PublicationLayer.VectorLayer layer, String styleId) {
+        return catalog.loadVector(layer.serviceCode(), styleId);
     }
 
     private void drawFeature(Graphics2D graphics, RenderWindow window,

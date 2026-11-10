@@ -427,7 +427,9 @@ GPKG 适合分散只读存储，不保证任意数据量和并发下都优于 Po
 
 独立样式方案使用 `/api/gis/vector/datasets/{id}/style-schemes`：GET列表、POST创建，`/{schemeId}` GET详情、PUT修改、DELETE删除。创建时传 `{"name":"标准图"}` 可复制当前完整制图配置；也可提供 `definition`。修改和删除携带详情返回的 `"scheme-{id}-{version}"` If-Match。方案结构为 `{"schemaVersion":1,"kind":"VECTOR_STYLE_SCHEME","cartography":{…},"featureOverrides":{…}}`，其中 cartography 包含 defaults、groups、layers；只描述显示，不能修改瓦片生成策略。
 
-发布接口：`POST /api/gis/publications/VECTOR/publish`：
+发布入口统一为 `POST /api/gis/publications/{processingType}/{sourceTaskId}/publish`。影像任务和矢量静态 PNG 切片任务可发布 `WMS / WMTS / TMS`；本版暂不提供 WFS 与 XYZ。矢量静态 PNG 任务的 WMTS/TMS 读取已生成瓦片，WMS 读取任务 GPKG 动态渲染。
+
+**动态矢量发布请求**
 
 ```json
 {
@@ -439,6 +441,8 @@ GPKG 适合分散只读存储，不保证任意数据量和并发下都优于 Po
 ```
 
 发布至少选择一套样式，默认样式必须属于所选方案。服务固定当时的数据版本及每套样式的内容；同一工作数据版本的多个发布共用同一个不可变 GPKG 资源。之后编辑工作要素、修改/删除草稿样式或释放原文件，都不改变已经发布的内容。
+
+统一 OGC 验证：发布响应中的 `serviceCode` 形如 `VEC_...`。访问 `/gis/wms?SERVICE=WMS&REQUEST=GetCapabilities`、`/gis/wmts?SERVICE=WMTS&REQUEST=GetCapabilities` 和 `/gis/tms/1.0.0` 确认出现该编码；WMTS/TMS 返回已生成的静态 PNG 瓦片，WMS 从任务 GPKG 动态渲染 PNG。完整测试步骤见 `docs/云海平台--地理信息基础数据处理子平台 v0.0.1 使用手册.md`。
 
 | 公开资源 | 路径 |
 | --- | --- |

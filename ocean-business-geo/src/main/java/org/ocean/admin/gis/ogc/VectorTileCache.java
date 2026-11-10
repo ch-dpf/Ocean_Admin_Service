@@ -1,6 +1,6 @@
 package org.ocean.admin.gis.ogc;
 
-import org.ocean.admin.gis.ogc.PublishedVectorCatalog.VectorLayerView;
+import org.ocean.admin.gis.ogc.PublicationLayer.VectorLayerView;
 import org.springframework.stereotype.Service;
 
 import java.awt.image.BufferedImage;

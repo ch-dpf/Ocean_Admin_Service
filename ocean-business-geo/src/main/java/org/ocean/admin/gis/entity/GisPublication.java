@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -18,6 +19,37 @@ public class GisPublication {
     private String serviceCode;
     private String serviceName;
     private String serviceProtocol;
+    @TableField("protocols")
+    private String protocolsJson;
+    private Long sourceTaskId;
+    private String processingType;
+    private String layerName;
+    private String title;
+    @TableField("abstract")
+    private String abstractText;
+    private String keywords;
+    private String defaultCrs;
+    @TableField("supported_crs")
+    private String supportedCrsJson;
+    @TableField("tile_matrix_sets")
+    private String tileMatrixSetsJson;
+    private Integer minZoom;
+    private Integer maxZoom;
+    private String targetCrs;
+    private String tileMatrixSet;
+    private String outputFormat;
+    private String tileProfile;
+    @TableField("bounds_wgs84")
+    private String boundsWgs84Json;
+    private String styleId;
+    private String styleName;
+    private String publicBaseUrl;
+    @TableField("capabilities_urls")
+    private String capabilitiesUrlsJson;
+    @TableField("service_urls")
+    private String serviceUrlsJson;
+    @TableField("tile_url_templates")
+    private String tileUrlTemplatesJson;
     private Long tileSetId;
     private Long vectorResourceId;
     private String vectorDefinition;

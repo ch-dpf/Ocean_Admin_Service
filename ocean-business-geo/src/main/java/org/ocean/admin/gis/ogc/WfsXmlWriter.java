@@ -23,12 +23,26 @@ public final class WfsXmlWriter {
     private static final String DEFAULT_CRS = "urn:ogc:def:crs:OGC:1.3:CRS84";
     private static final String MERCATOR_CRS = "urn:ogc:def:crs:EPSG::3857";
 
+    /** 能力文档标题优先使用 Title，其次 LayerName，最后回退服务编码。 */
+    private static String displayTitle(String title, String layerName, String serviceCode) {
+        if (title != null && !title.isBlank()) return title;
+        if (layerName != null && !layerName.isBlank()) return layerName;
+        return serviceCode;
+    }
+
+    /** 能力文档摘要优先使用 Abstract；缺失时用关键字或服务编码兜底。 */
+    private static String displayAbstract(String abstractText, String keywords, String serviceCode) {
+        if (abstractText != null && !abstractText.isBlank()) return abstractText;
+        if (keywords != null && !keywords.isBlank()) return "关键字: " + keywords;
+        return "已发布矢量数据集的全部冻结图层: " + serviceCode;
+    }
+
     private WfsXmlWriter() {
     }
 
     /** 生成 GetCapabilities 响应；每个已发布矢量服务对应一个 FeatureType。 */
     public static String capabilities(String serviceUrl,
-            List<PublishedVectorCatalog.PublishedVectorLayer> layers) {
+            List<PublicationLayer.VectorLayer> layers) {
         String baseUrl = stripTrailingSlash(serviceUrl);
         StringWriter buffer = new StringWriter();
         XMLStreamWriter writer = null;
@@ -67,7 +81,7 @@ public final class WfsXmlWriter {
      * 字段与几何，其余属性通过 {@code xs:any} 放行；客户端以 GeoJSON 取要素为准。</p>
      */
     public static String describeFeatureType(
-            List<PublishedVectorCatalog.PublishedVectorLayer> layers) {
+            List<PublicationLayer.VectorLayer> layers) {
         StringWriter buffer = new StringWriter();
         XMLStreamWriter writer = null;
         try {
@@ -94,7 +108,7 @@ public final class WfsXmlWriter {
             writer.writeEndElement(); // sequence
             writer.writeEndElement(); // complexType
 
-            for (PublishedVectorCatalog.PublishedVectorLayer layer : layers) {
+            for (PublicationLayer.VectorLayer layer : layers) {
                 writer.writeStartElement("xs", "element", XS_NAMESPACE);
                 writer.writeAttribute("name", layer.serviceCode());
                 writer.writeAttribute("type", "VectorFeatureType");
@@ -184,15 +198,15 @@ public final class WfsXmlWriter {
     }
 
     private static void writeFeatureTypeList(XMLStreamWriter writer,
-            List<PublishedVectorCatalog.PublishedVectorLayer> layers)
+            List<PublicationLayer.VectorLayer> layers)
             throws XMLStreamException {
         writer.writeStartElement("wfs", "FeatureTypeList", NAMESPACE);
-        for (PublishedVectorCatalog.PublishedVectorLayer layer : layers) {
+        for (PublicationLayer.VectorLayer layer : layers) {
             writer.writeStartElement("wfs", "FeatureType", NAMESPACE);
             writeWfsText(writer, "Name", layer.serviceCode());
-            writeWfsText(writer, "Title", layer.serviceName());
+            writeWfsText(writer, "Title", displayTitle(layer.title(), layer.layerName(), layer.serviceCode()));
             writeWfsText(writer, "Abstract",
-                    "已发布矢量数据集的全部冻结图层: " + layer.serviceCode());
+                    displayAbstract(layer.abstractText(), layer.keywords(), layer.serviceCode()));
             writeWfsText(writer, "DefaultCRS", DEFAULT_CRS);
             writeWfsText(writer, "OtherCRS", MERCATOR_CRS);
             double[] bounds = layer.wgs84Bounds();

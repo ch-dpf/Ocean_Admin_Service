@@ -1,6 +1,6 @@
 package org.ocean.admin.gis.ogc;
 
-import org.ocean.admin.gis.ogc.PublishedVectorCatalog.VectorLayerView;
+import org.ocean.admin.gis.ogc.PublicationLayer.VectorLayerView;
 import org.springframework.stereotype.Service;
 
 import java.awt.Graphics2D;
@@ -19,11 +19,11 @@ public class VectorTileRenderer {
     /** 并发渲染上限，避免大量瓦片请求同时启动 GDAL 工作进程。 */
     private static final Semaphore SLOTS = new Semaphore(4, true);
 
-    private final PublishedVectorCatalog catalog;
+    private final PublicationCatalog catalog;
     private final VectorMapRenderer mapRenderer;
     private final VectorTileCache cache;
 
-    public VectorTileRenderer(PublishedVectorCatalog catalog,
+    public VectorTileRenderer(PublicationCatalog catalog,
             VectorMapRenderer mapRenderer, VectorTileCache cache) {
         this.catalog = catalog;
         this.mapRenderer = mapRenderer;
@@ -62,8 +62,8 @@ public class VectorTileRenderer {
             if (cached != null) {
                 return cached;
             }
-            PublishedVectorCatalog.PublishedVectorLayer layer =
-                    catalog.load(view.serviceCode(), chosenStyle);
+            PublicationLayer.VectorLayer layer =
+                    catalog.loadVector(view.serviceCode(), chosenStyle);
             if (layer == null) {
                 throw new IllegalArgumentException("图层或样式不存在或已停用: " + view.serviceCode());
             }

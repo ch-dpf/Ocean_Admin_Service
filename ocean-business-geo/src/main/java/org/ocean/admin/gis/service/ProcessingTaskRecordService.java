@@ -116,7 +116,7 @@ public class ProcessingTaskRecordService {
             throw new IllegalStateException("处理任务关联的瓦片集不存在");
         }
         if (publicationMapper.selectCount(new LambdaQueryWrapper<GisPublication>()
-                .eq(GisPublication::getTileSetId, tileSet.getId())
+                .eq(GisPublication::getSourceTaskId, taskId)
                 .eq(GisPublication::getStatus, PublicationRecordService.PUBLISHED)) > 0) {
             throw new IllegalStateException("任务存在已发布服务，请先停用服务后再删除");
         }
@@ -127,7 +127,7 @@ public class ProcessingTaskRecordService {
         // 文件系统不参与数据库事务；清理失败保留记录并返回错误，允许再次清理。
         storageService.deleteTaskArtifacts(task, tileSet, archives);
         archiveMapper.deleteByTaskPermanently(taskId);
-        publicationMapper.deleteByTileSetPermanently(tileSet.getId());
+        publicationMapper.deleteByTaskPermanently(taskId);
         inputMapper.delete(new LambdaQueryWrapper<GisProcessingInput>()
                 .eq(GisProcessingInput::getTaskId, taskId));
         if (tileSetMapper.deleteById(tileSet.getId()) != 1

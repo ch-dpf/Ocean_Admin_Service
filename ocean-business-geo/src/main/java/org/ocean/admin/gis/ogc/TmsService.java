@@ -1,7 +1,6 @@
 package org.ocean.admin.gis.ogc;
 
 import org.ocean.admin.gis.service.PublicationRecordService;
-import org.ocean.admin.gis.service.OgcServicePublicationService;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -24,33 +23,27 @@ public class TmsService {
     private static final String BASE_PATH = "/gis/tms/1.0.0";
     private static final String SPEC_SEPARATOR = "@";
 
-    private final PublishedImageryCatalog catalog;
-    private final PublishedVectorCatalog vectorCatalog;
+    private final PublicationCatalog catalog;
     private final VectorTileRenderer vectorTileRenderer;
-    private final OgcServicePublicationService publicationService;
     private final PublicationRecordService recordService;
 
-    public TmsService(PublishedImageryCatalog catalog,
-            PublishedVectorCatalog vectorCatalog,
+    public TmsService(PublicationCatalog catalog,
             VectorTileRenderer vectorTileRenderer,
-            OgcServicePublicationService publicationService,
             PublicationRecordService recordService) {
         this.catalog = catalog;
-        this.vectorCatalog = vectorCatalog;
         this.vectorTileRenderer = vectorTileRenderer;
-        this.publicationService = publicationService;
         this.recordService = recordService;
     }
 
     /** 生成 TileMapService 根文档。 */
     public String tileMapServiceXml() {
         return TmsXmlWriter.tileMapService(baseUrl(),
-                catalog.listPublished(OgcProtocol.TMS), vectorCatalog.listViews());
+                catalog.listRaster(OgcProtocol.TMS), catalog.listVectorViews(OgcProtocol.TMS));
     }
 
     /** 生成单个 TileMap 文档；图层不存在时抛出 404。 */
     public String tileMapXml(String spec) {
-        PublishedVectorCatalog.VectorLayerView vector = vectorView(spec);
+        PublicationLayer.VectorLayerView vector = vectorView(spec);
         if (vector != null) {
             return TmsXmlWriter.tileMap(baseUrl(), vector);
         }
@@ -71,11 +64,11 @@ public class TmsService {
      * @param row    行号，自南向北（TMS 约定）
      */
     public TileResource resolveTile(String spec, String zoom, String column, String row) {
-        PublishedVectorCatalog.VectorLayerView vector = vectorView(spec);
+        PublicationLayer.VectorLayerView vector = vectorView(spec);
         if (vector != null) {
             return vectorTile(vector, zoom, column, row);
         }
-        PublishedImageryCatalog.PublishedLayer layer = requireLayer(spec);
+        PublicationLayer.RasterLayer layer = requireLayer(spec);
         int z = parseInt(zoom, "zoom");
         int x = parseInt(column, "x");
         int y = parseInt(row, "y");
@@ -93,7 +86,7 @@ public class TmsService {
         int storageRow = matrixSet.storageRow(layer.tileProfile(), z, topDownRow);
         String relativePath = z + "/" + x + "/" + storageRow + "." + layer.extension();
         try {
-            Path file = publicationService.resolveTileFile(
+            Path file = catalog.resolveTileFile(
                     layer.serviceCode(), OgcProtocol.TMS, relativePath);
             return new TileResource(file, layer.mediaType(), null);
         } catch (IllegalArgumentException | IllegalStateException ex) {
@@ -103,7 +96,7 @@ public class TmsService {
     }
 
     /** 解析矢量 TileMap 标识；非矢量标识返回 null，由影像目录继续解析。 */
-    private PublishedVectorCatalog.VectorLayerView vectorView(String spec) {
+    private PublicationLayer.VectorLayerView vectorView(String spec) {
         if (spec == null || spec.isBlank()) {
             return null;
         }
@@ -111,7 +104,7 @@ public class TmsService {
         if (parts.length != 4 || !"vector".equalsIgnoreCase(parts[3].trim())) {
             return null;
         }
-        PublishedVectorCatalog.VectorLayerView view = vectorCatalog.findView(
+        PublicationLayer.VectorLayerView view = catalog.findView(
                 parts[0].trim() + "@" + parts[1].trim());
         if (view == null || !view.extension().equalsIgnoreCase(parts[2].trim())) {
             return null;
@@ -120,7 +113,7 @@ public class TmsService {
     }
 
     /** TMS 的 y 自南向北，换成统一的自北向南行号后交给动态渲染器。 */
-    private TileResource vectorTile(PublishedVectorCatalog.VectorLayerView view,
+    private TileResource vectorTile(PublicationLayer.VectorLayerView view,
             String zoom, String column, String row) {
         int z = parseInt(zoom, "zoom");
         int x = parseInt(column, "x");
@@ -147,7 +140,7 @@ public class TmsService {
      *
      * @param spec 形如 {@code 服务编码@矩阵集@格式}
      */
-    private PublishedImageryCatalog.PublishedLayer requireLayer(String spec) {
+    private PublicationLayer.RasterLayer requireLayer(String spec) {
         if (spec == null || spec.isBlank()) {
             throw new TmsException(400, "缺少 TileMap 标识");
         }
@@ -155,7 +148,7 @@ public class TmsService {
         if (parts.length != 3 || parts[0].isBlank() || parts[1].isBlank() || parts[2].isBlank()) {
             throw new TmsException(400, "TileMap 标识应为 服务编码@矩阵集@格式: " + spec);
         }
-        PublishedImageryCatalog.PublishedLayer layer = catalog.load(parts[0].trim(), OgcProtocol.TMS);
+        PublicationLayer.RasterLayer layer = catalog.loadRaster(parts[0].trim(), OgcProtocol.TMS);
         if (layer == null) {
             throw new TmsException(404, "图层不存在或已停用: " + parts[0]);
         }
