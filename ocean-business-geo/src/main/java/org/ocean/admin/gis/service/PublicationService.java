@@ -441,9 +441,12 @@ public class PublicationService {
                     capabilitiesUrls.put("WFS", recordService.buildPublicUrl(
                             "/gis/wfs?SERVICE=WFS&REQUEST=GetCapabilities"));
                 }
-                case XYZ -> tileUrlTemplates.put("XYZ", recordService.buildPublicUrl(
-                        "/gis/publications/" + processingType.name() + "/" + code
-                                + "/{z}/{x}/{y}.png"));
+                case XYZ -> {
+                    String xyz = recordService.buildPublicUrl(
+                            "/gis/publications/" + processingType.name() + "/" + code);
+                    serviceUrls.put("XYZ", xyz);
+                    tileUrlTemplates.put("XYZ", xyz + "/{z}/{x}/{y}.png");
+                }
             }
         }
     }
