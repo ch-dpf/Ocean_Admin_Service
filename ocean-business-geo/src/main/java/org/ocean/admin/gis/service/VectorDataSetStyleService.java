@@ -122,7 +122,6 @@ public class VectorDataSetStyleService {
         return switch (placement) {
             case "AUTO", "UNKNOWN" -> "cn-vector-default";
             case "X_LIGHT" -> "x-institute-light";
-            case "X_DARK" -> "x-institute-dark";
             default -> throw new IllegalArgumentException("不支持的图层业务分类");
         };
     }

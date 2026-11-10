@@ -4,6 +4,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
+import org.ocean.admin.gis.dto.GisDataSetProcessingRequest;
+import org.ocean.admin.gis.service.ProcessingService;
+import org.ocean.admin.gis.vo.GisBatchProcessingTaskVO;
 import org.ocean.admin.kernel.audit.OperationLog;
 import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
@@ -27,6 +31,17 @@ import java.util.List;
 public class DataSetController {
 
     private final DataSetService dataSetService;
+    private final ProcessingService processingService;
+
+    @PostMapping("/{id}/process")
+    @Operation(summary = "按数据集生成静态瓦片",
+            description = "服务端收集整个数据集的输入；影像生成 PNG/JPEG，地形生成 Quantized Mesh，矢量按已保存样式生成 PNG。返回任务及进度引用")
+    @OperationLog(module = "GIS_PROCESSING_TASK", type = OperationType.SUBMIT,
+            description = "提交数据集静态瓦片任务", recordResponse = true)
+    public ResponseResult<GisBatchProcessingTaskVO> processDataSet(@PathVariable Long id,
+            @Valid @RequestBody GisDataSetProcessingRequest request) {
+        return ResponseResult.success("数据集处理任务已提交", processingService.submitDataSet(id, request));
+    }
 
     @GetMapping("/categories")
     @Operation(summary = "获取数据集分类及数量", description = "统计全部未删除数据集，不受名称筛选和分页影响")

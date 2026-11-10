@@ -105,7 +105,7 @@ public class VectorLayerService {
         progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理与入库", 0, progressTotal, ProgressUnit.FEATURE));
         var snapshot = dataSetStyles.require(source.getDataSetId(), false);
         if (!Objects.equals(snapshot.getId(), source.getVectorDatasetStyleId())
-                || source.getVectorPlacement() == null || !Set.of("AUTO", "UNKNOWN", "X_LIGHT", "X_DARK").contains(source.getVectorPlacement())) {
+                || source.getVectorPlacement() == null || !Set.of("AUTO", "UNKNOWN", "X_LIGHT").contains(source.getVectorPlacement())) {
             throw new ImportException("MISSING_VECTOR_IMPORT_CONFIG", "文件未固定样式与归组方式，禁止猜测或重导存量数据");
         }
         var template = dataSetStyles.compile(snapshot);

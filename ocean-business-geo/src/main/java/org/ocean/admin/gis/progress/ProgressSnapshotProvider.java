@@ -64,7 +64,7 @@ public class ProgressSnapshotProvider {
             if (r == null) return null;
             long epoch = Math.max(1, r.getProgressEpoch());
             return snapshot(id, null, "GIS_PROCESSING", r.getProcessingType().name(), r.getTaskName(),
-                    r.getTaskStatus(), r.getCurrentStage(), new ProgressSummary(r.getTotalCount(),
+                    r.getTaskStatus(), r.getTaskStatus().name(), new ProgressSummary(r.getTotalCount(),
                             r.getCompletedCount(), r.getFailedCount(), ProgressUnit.INPUT),
                     List.of(), new Resource("PROCESSING_TASK", r.getId().toString(), "/api/gis/task/" + r.getId()),
                     r.getErrorMessage(), r.getStartTime(), r.getFinishTime(), epoch);

@@ -553,6 +553,10 @@ public class GeoTiffPreprocessor {
 
     private ReferencedEnvelope validSourceBounds(ReferencedEnvelope bounds,
             CoordinateReferenceSystem sourceCrs, CoordinateReferenceSystem targetCrs) {
+        if (CRS.equalsIgnoreMetadata(sourceCrs, WEB_MERCATOR)) {
+            // 投影前先裁掉世界边界外的网格余量，避免经度转换将边缘绕回另一侧。
+            return clampTarget(bounds, ImageryTileOptions.TargetCrs.EPSG_3857);
+        }
         if (!CRS.equalsIgnoreMetadata(sourceCrs, WGS84)
                 || !CRS.equalsIgnoreMetadata(targetCrs, WEB_MERCATOR)) {
             return bounds;
@@ -833,7 +837,8 @@ public class GeoTiffPreprocessor {
 
         private static BufferedImage validRgba(BufferedImage image, BufferedImage mask, Double noData) {
             int width = image.getWidth(), height = image.getHeight();
-            BufferedImage rgba = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
+            // 颜色与重采样生成的 alpha 统一使用字节波段，避免合并时混用整型与字节型数组。
+            BufferedImage rgba = new BufferedImage(width, height, BufferedImage.TYPE_4BYTE_ABGR_PRE);
             var raster = image.getRaster();
             boolean testSamples = noData != null || raster.getDataBuffer().getDataType() == DataBuffer.TYPE_FLOAT
                     || raster.getDataBuffer().getDataType() == DataBuffer.TYPE_DOUBLE;

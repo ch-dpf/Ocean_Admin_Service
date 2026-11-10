@@ -83,6 +83,16 @@ public interface GisFileMetaMapper extends BaseMapper<GisFileMeta> {
 
     List<GisDataSetVO.FileSummary> selectDataSetFileSummaries(@Param("ids") List<Long> ids);
 
+    /** 全量保留待解析及未归组文件，使整体切片可以拒绝不完整输入；重复追溯组不参与。 */
+    @org.apache.ibatis.annotations.Select("""
+            SELECT f.* FROM ocean_gis.gis_file_meta f
+            LEFT JOIN ocean_gis.gis_file_group g ON g.id = f.file_group_id AND g.deleted = 0
+            WHERE f.data_set_id = #{dataSetId} AND f.deleted = 0
+              AND (g.id IS NULL OR (g.assembly_status <> 'DUPLICATE' AND g.duplicate_of_group_id IS NULL))
+            ORDER BY f.id
+            """)
+    List<GisFileMeta> selectDataSetProcessingFiles(@Param("dataSetId") Long dataSetId);
+
     Page<GisFileMetaVO> selectFilePage(Page<GisFileMetaVO> page,
             @Param("q") GisFileQuery query);
 

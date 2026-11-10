@@ -64,8 +64,8 @@ public class GeoTiffTileGenerator {
 
     public GeoTiffTileGenerator(ObjectMapper objectMapper, long maxTileCount) {
         this.objectMapper = objectMapper;
-        if (maxTileCount <= 0) {
-            throw new IllegalArgumentException("影像单任务瓦片上限必须大于0");
+        if (maxTileCount < 0) {
+            throw new IllegalArgumentException("影像单任务瓦片上限不能小于0，0表示不限制");
         }
         this.maxTileCount = maxTileCount;
     }
@@ -78,9 +78,11 @@ public class GeoTiffTileGenerator {
         List<SourceRaster> sources = new ArrayList<>();
         ReferencedEnvelope bounds = new ReferencedEnvelope(coordinateReferenceSystem(options.targetCrs()));
         ReferencedEnvelope geographicBounds = new ReferencedEnvelope(WGS84);
+        Path currentSource = null;
         try {
             for (Path input : inputs) {
                 Path path = input.toAbsolutePath().normalize();
+                currentSource = path;
                 if (!Files.isRegularFile(path) || !Files.isReadable(path)) {
                     throw new IllegalArgumentException("GeoTIFF 不存在或不可读: " + path);
                 }
@@ -115,7 +117,9 @@ public class GeoTiffTileGenerator {
                 }
             }
         } catch (Exception ex) {
-            throw new IllegalArgumentException("无法分析影像集合: " + ex.getMessage(), ex);
+            throw new IllegalArgumentException("无法分析影像集合"
+                    + (currentSource == null ? "" : "（" + currentSource.getFileName() + "）")
+                    + ": " + ex.getMessage(), ex);
         }
         int max = options.maxZoom() == null
                 ? sources.stream().mapToInt(SourceRaster::nativeZoom).max().orElseThrow()
@@ -142,9 +146,10 @@ public class GeoTiffTileGenerator {
                         int previous = masks.getOrDefault(key, 0);
                         if ((previous & bit) == 0) {
                             masks.put(key, previous | bit);
-                            if (++count > maxTileCount) {
+                            count++;
+                            if (maxTileCount > 0 && count > maxTileCount) {
                                 throw new IllegalArgumentException("预计生成瓦片超过单任务上限" + maxTileCount
-                                        + "张；可降低maxZoom或调整GIS_IMAGERY_MAX_TILE_COUNT");
+                                        + "张；可降低maxZoom或调整GIS_IMAGERY_MAX_TILE_COUNT（0表示不限制）");
                             }
                         }
                     }
@@ -181,8 +186,8 @@ public class GeoTiffTileGenerator {
                     if (!Files.isReadable(part.path())) {
                         throw new IllegalStateException("影像分块不可读: " + part.path());
                     }
-                    ReferencedEnvelope bounds = part.bounds().transform(
-                            coordinateReferenceSystem(options.targetCrs()), true);
+                    ReferencedEnvelope bounds = rasters.get(i).singleSource() ? source.bounds()
+                            : part.bounds().transform(coordinateReferenceSystem(options.targetCrs()), true);
                     index.insert(bounds, new IndexedPart(part, source, rasters.get(i).singleSource()));
                 }
             }
@@ -245,11 +250,11 @@ public class GeoTiffTileGenerator {
                 || Math.abs(affine.getShearY()) > 1e-10)) {
             throw new IllegalArgumentException("首期影像切片不支持旋转或错切的 GeoTIFF 仿射变换");
         }
+        double[] resolution = pixelResolution(gridToCrs, gridRange);
         ReferencedEnvelope sourceBounds = normalizeSourceBounds(
                 new ReferencedEnvelope(reader.getOriginalEnvelope())
                         .transform(canonicalSourceCrs, true),
-                canonicalSourceCrs);
-        double[] resolution = pixelResolution(gridToCrs, gridRange);
+                canonicalSourceCrs, resolution[0], resolution[1]);
         return new RasterSource(sourceBounds, gridRange.getSpan(0), gridRange.getSpan(1),
                 resolution[0], resolution[1]);
     }
@@ -586,7 +591,7 @@ public class GeoTiffTileGenerator {
     }
 
     private ReferencedEnvelope normalizeSourceBounds(ReferencedEnvelope bounds,
-            CoordinateReferenceSystem sourceCrs) {
+            CoordinateReferenceSystem sourceCrs, double resolutionX, double resolutionY) {
         if (!Double.isFinite(bounds.getMinX()) || !Double.isFinite(bounds.getMaxX())
                 || !Double.isFinite(bounds.getMinY()) || !Double.isFinite(bounds.getMaxY())
                 || bounds.isEmpty()) {
@@ -597,31 +602,31 @@ public class GeoTiffTileGenerator {
         double maxX = geographic ? 180d : WEB_MERCATOR_LIMIT;
         double minY = geographic ? -90d : -WEB_MERCATOR_LIMIT;
         double maxY = geographic ? 90d : WEB_MERCATOR_LIMIT;
-        double tolerance = geographic ? GEOGRAPHIC_BOUNDARY_TOLERANCE : 1e-3;
-        if (bounds.getMinX() < minX - tolerance || bounds.getMaxX() > maxX + tolerance
-                || bounds.getMinY() < minY - tolerance || bounds.getMaxY() > maxY + tolerance) {
+        if (!Double.isFinite(resolutionX) || !Double.isFinite(resolutionY)
+                || resolutionX <= 0 || resolutionY <= 0) {
+            throw new IllegalArgumentException("GeoTIFF 像元分辨率无效");
+        }
+        // 米制栅格向外对齐到完整像元时，世界边界可落在最外侧像元内部。
+        // 只允许各轴一个源像元的余量；裁剪规划范围，不修改原始像元定位或拉伸影像。
+        double toleranceX = geographic ? GEOGRAPHIC_BOUNDARY_TOLERANCE : Math.max(1e-3, resolutionX);
+        double toleranceY = geographic ? GEOGRAPHIC_BOUNDARY_TOLERANCE : Math.max(1e-3, resolutionY);
+        if (bounds.getMinX() < minX - toleranceX || bounds.getMaxX() > maxX + toleranceX
+                || bounds.getMinY() < minY - toleranceY || bounds.getMaxY() > maxY + toleranceY) {
+            if (!geographic) {
+                throw new IllegalArgumentException("GeoTIFF 范围超出 EPSG:3857 有效切片区域，"
+                        + "且越界超过一个源像元的网格对齐余量；范围: " + bounds);
+            }
             throw new IllegalArgumentException("GeoTIFF 范围超出源坐标系的有效切片区域；"
                     + "当前不支持跨日期变更线或0到360度经度范围");
         }
-        if (!geographic) {
-            return bounds;
+        double clippedMinX = Math.max(bounds.getMinX(), minX);
+        double clippedMaxX = Math.min(bounds.getMaxX(), maxX);
+        double clippedMinY = Math.max(bounds.getMinY(), minY);
+        double clippedMaxY = Math.min(bounds.getMaxY(), maxY);
+        if (clippedMinX >= clippedMaxX || clippedMinY >= clippedMaxY) {
+            throw new IllegalArgumentException("GeoTIFF 范围不在源坐标系有效切片区域内");
         }
-        return new ReferencedEnvelope(
-                snapGeographicBoundary(bounds.getMinX(), minX, maxX),
-                snapGeographicBoundary(bounds.getMaxX(), minX, maxX),
-                snapGeographicBoundary(bounds.getMinY(), minY, maxY),
-                snapGeographicBoundary(bounds.getMaxY(), minY, maxY),
-                sourceCrs);
-    }
-
-    private double snapGeographicBoundary(double value, double minimum, double maximum) {
-        if (value < minimum) {
-            return minimum;
-        }
-        if (value > maximum) {
-            return maximum;
-        }
-        return value;
+        return new ReferencedEnvelope(clippedMinX, clippedMaxX, clippedMinY, clippedMaxY, sourceCrs);
     }
 
     private int clampTile(int value, int dimension) {

@@ -35,7 +35,6 @@ public class GisProcessingTaskSummaryVO {
     @Schema(description = "任务状态：QUEUED、RUNNING、COMPLETED、PARTIAL_FAILED、FAILED")
     private TaskStatus taskStatus;
 
-    private String currentStage;
     private String errorMessage;
 
     @Schema(description = "静态瓦片集归档编号；尚未归档时为空")

@@ -115,7 +115,8 @@ gis:
     imagery-cache-path: ${GIS_IMAGERY_CACHE_PATH:imagery/cache}
     imagery-optimization-enabled: ${GIS_IMAGERY_OPTIMIZATION_ENABLED:true}
     imagery-preprocessing-max-window-pixels: ${GIS_IMAGERY_PREPROCESSING_MAX_WINDOW_PIXELS:16777216}
-    imagery-max-tile-count: ${GIS_IMAGERY_MAX_TILE_COUNT:200000}
+    # 0 表示不限制影像单任务瓦片数量，正数表示指定上限。
+    imagery-max-tile-count: ${GIS_IMAGERY_MAX_TILE_COUNT:0}
     imagery-overview-min-size: ${GIS_IMAGERY_OVERVIEW_MIN_SIZE:512}
     archive-compression-level: ${GIS_ARCHIVE_COMPRESSION_LEVEL:1}
     workspace-max-scan-entries: ${GIS_WORKSPACE_MAX_SCAN_ENTRIES:10000}
@@ -130,7 +131,7 @@ gis:
       default: ${GIS_PROCESSING_WORKSPACE_DEFAULT:gis/workspaces/default}
   publication:
     # 对外返回的服务地址；经反向代理部署时配置为浏览器可访问的域名。
-    public-base-url: ${GIS_PUBLIC_BASE_URL:http://192.168.14.52:8090}
+    public-base-url: ${GIS_PUBLIC_BASE_URL:http://192.168.14.65:8090}
   terrain:
     mago:
       enabled: ${GIS_TERRAIN_MAGO_ENABLED:true}

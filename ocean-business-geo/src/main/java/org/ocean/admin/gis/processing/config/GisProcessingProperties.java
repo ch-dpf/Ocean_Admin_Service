@@ -28,8 +28,13 @@ public class GisProcessingProperties {
     private boolean imageryOptimizationEnabled = true;
     @Positive
     private long imageryPreprocessingMaxWindowPixels = 16_777_216L;
-    @Positive
-    private long imageryMaxTileCount = 200_000L;
+    /** 影像单任务瓦片数量上限，0 表示不限制。 */
+    @Min(0)
+    private long imageryMaxTileCount = 0L;
+    /** 数据集整体提交的逻辑文件组上限，独立于手选文件和上传限制。 */
+    @Min(1)
+    @Max(100000)
+    private int dataSetMaxInputGroups = 10000;
     @Positive
     private int imageryOverviewMinSize = 512;
     // 超出轮廓限额时明确失败，不以矩形或简化几何替代实际覆盖区。

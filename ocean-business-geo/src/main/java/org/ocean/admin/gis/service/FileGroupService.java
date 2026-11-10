@@ -56,6 +56,7 @@ public class FileGroupService {
     private final ObjectMapper json;
     private final TransactionTemplate transactions;
     private final ApplicationEventPublisher events;
+    private final EpsgService epsg;
 
     /** 传输收口后才组装；数据集锁将不同实例的识别和指纹占用串行化。 */
     public List<Long> assembleIngestion(String progressId) {
@@ -666,9 +667,13 @@ public class FileGroupService {
 
     private void validateOptions(GisFileGroupVO.Options options) {
         String crs = options.sourceCrs();
+        if (crs != null) crs = crs.trim();
         if (crs != null && !crs.isBlank() && !crs.matches("(?i)EPSG:[1-9][0-9]*|OGC:CRS84")
                 && !crs.matches("(?is)(GEOGCS|PROJCS|GEOGCRS|PROJCRS|COMPOUNDCRS|BOUNDCRS|VERTCRS)\\s*\\[.*"))
             throw new IllegalArgumentException("源坐标系必须是EPSG编码、OGC:CRS84或明确WKT，禁止文件和URL引用");
+        if (crs != null && crs.matches("(?i)EPSG:[1-9][0-9]*")) {
+            epsg.validateCode(crs);
+        }
         if (options.xField() != null && options.xField().equals(options.yField())) throw new IllegalArgumentException("X、Y字段必须不同");
     }
 
