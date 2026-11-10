@@ -1,1349 +1,13 @@
 {
-  "schemaVersion": 3,
-  "kind": "VECTOR_DATASET_STYLE_TEMPLATE",
-  "templateId": "x-institute-dark",
-  "templateVersion": 2,
+  "schemaVersion": 1,
+  "kind": "VECTOR_STYLE_RULES",
   "name": "x院业务分类－暗色",
-  "description": "依据原始图层和当前亮色与暗色主题样式清单配置业务分类、比例尺与配图。",
-  "provenance": {
-    "excluded": [
-      "china_line_train.shp",
-      "label_sources\\world_poi_ocean.shp",
-      "osm_taiwan\\osm_china_line_metro.shp",
-      "osm_taiwan\\osm_china_line_train.shp"
-    ],
-    "sldDirectory": "configuration/ocean_basemap/styles",
-    "assumptions": {
-      "majorCities": [
-        "深圳",
-        "大连",
-        "青岛",
-        "宁波",
-        "厦门",
-        "苏州",
-        "无锡",
-        "东莞",
-        "佛山",
-        "泉州",
-        "温州",
-        "烟台"
-      ],
-      "largeWaterFilter": "mj >= 500000（源属性单位未提供）",
-      "borderMapping": "dtype 1/2 国界，3/4 省界及特别行政区边界；world ctype=2",
-      "roadInterpolation": "高速范围参数逐级线性递增，中国高等级道路 z8/z11 取相邻端点中值",
-      "font": "Microsoft YaHei UI",
-      "majorCityPointStrokeWidth": 1
-    },
-    "styleChecklist": "04-当前亮色与暗色主题样式清单.md",
-    "scaleConvention": "WEB_MERCATOR_256；整数边界按SLD数值精度归一化，[minZoom,maxZoom)",
-    "sldVerifiedDirectory": "E:/web service/geoserver-3.0.1-bin/configuration/ocean_basemap/styles"
-  },
-  "initialization": {
-    "onDatasetCreate": "COPY_TEMPLATE_TO_DATASET_SNAPSHOT",
-    "createEmptyGroups": true,
-    "referenceMode": "DATASET_LOCAL_BUSINESS_KEYS",
-    "updateExistingDatasetOnTemplateChange": false,
-    "preserveRawProperties": true,
-    "onImportLayerEnabled": "TARGET_GROUP_DEFAULT",
-    "onUnknownLayerEnabled": false,
-    "defaultGroupEnabled": true,
-    "onFirstImport": "SELECT_EXCLUSIVE_DATASET_TEMPLATE"
-  },
-  "geometry": {
-    "categories": {
-      "POINT": [
-        "Point",
-        "MultiPoint"
-      ],
-      "LINE": [
-        "LineString",
-        "MultiLineString"
-      ],
-      "POLYGON": [
-        "Polygon",
-        "MultiPolygon"
-      ]
-    },
-    "geometryCollection": "RECURSIVE_SPLIT",
-    "maxCollectionDepth": 16,
-    "layerPartitionKeys": [
-      "sourceFileId",
-      "groupId",
-      "geometryType"
-    ],
-    "preserveProvenance": [
-      "sourceFileId",
-      "sourceFeatureIndex",
-      "sourceFeatureId",
-      "geometryPath"
-    ],
-    "preserveMultipartGeometry": true,
-    "invalidGeometryPolicy": "REPORT_ERROR_DO_NOT_RENDER"
-  },
   "groups": [
     {
-      "nodeType": "BUSINESS_FOLDER",
-      "parentId": null,
-      "geometryType": null,
-      "assignable": false,
-      "name": "x院业务分类－暗色",
-      "sortOrder": 100,
-      "id": "x-dark"
-    },
-    {
-      "nodeType": "BUSINESS_FOLDER",
-      "parentId": "x-dark",
-      "geometryType": null,
-      "assignable": false,
-      "name": "背景与行政区",
-      "sortOrder": 1,
-      "id": "x-dark-background"
-    },
-    {
-      "nodeType": "BUSINESS_FOLDER",
-      "parentId": "x-dark",
-      "geometryType": null,
-      "assignable": false,
-      "name": "水系与绿地",
-      "sortOrder": 2,
-      "id": "x-dark-water"
-    },
-    {
-      "nodeType": "BUSINESS_FOLDER",
-      "parentId": "x-dark",
-      "geometryType": null,
-      "assignable": false,
-      "name": "建筑",
-      "sortOrder": 3,
-      "id": "x-dark-building"
-    },
-    {
-      "nodeType": "BUSINESS_FOLDER",
-      "parentId": "x-dark",
-      "geometryType": null,
-      "assignable": false,
-      "name": "行政边界",
-      "sortOrder": 4,
-      "id": "x-dark-boundary"
-    },
-    {
-      "nodeType": "BUSINESS_FOLDER",
-      "parentId": "x-dark",
-      "geometryType": null,
-      "assignable": false,
-      "name": "道路",
-      "sortOrder": 5,
-      "id": "x-dark-road"
-    },
-    {
-      "nodeType": "BUSINESS_FOLDER",
-      "parentId": "x-dark",
-      "geometryType": null,
-      "assignable": false,
-      "name": "地名与标注",
-      "sortOrder": 6,
-      "id": "x-dark-label"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 1,
-      "parentId": "x-dark-background",
-      "id": "x-dark-world-aoi-ocean",
-      "defaultLayerEnabled": true,
       "name": "海洋背景面",
-      "defaultStyleId": "style-x-dark-world-aoi-ocean",
-      "assignable": true,
       "geometryType": "POLYGON",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 2,
-      "parentId": "x-dark-background",
-      "id": "x-dark-world-aoi-country",
-      "defaultLayerEnabled": true,
-      "name": "国家面",
-      "defaultStyleId": "style-x-dark-world-aoi-country",
-      "assignable": true,
-      "geometryType": "POLYGON",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 3,
-      "parentId": "x-dark-background",
-      "id": "x-dark-china-aoi-provice",
-      "defaultLayerEnabled": true,
-      "name": "省级行政区面",
-      "defaultStyleId": "style-x-dark-china-aoi-provice",
-      "assignable": true,
-      "geometryType": "POLYGON",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 4,
-      "parentId": "x-dark-water",
-      "id": "x-dark-osm-china-aoi-green",
-      "defaultLayerEnabled": true,
-      "name": "绿地面",
-      "defaultStyleId": "style-x-dark-osm-china-aoi-green",
-      "assignable": true,
-      "geometryType": "POLYGON",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 5,
-      "parentId": "x-dark-water",
-      "id": "x-dark-world-aoi-lake",
-      "defaultLayerEnabled": true,
-      "name": "世界湖泊面",
-      "defaultStyleId": "style-x-dark-world-aoi-lake",
-      "assignable": true,
-      "geometryType": "POLYGON",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 6,
-      "parentId": "x-dark-water",
-      "id": "x-dark-world-aoi-river",
-      "defaultLayerEnabled": true,
-      "name": "世界河流面",
-      "defaultStyleId": "style-x-dark-world-aoi-river",
-      "assignable": true,
-      "geometryType": "POLYGON",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 7,
-      "parentId": "x-dark-water",
-      "id": "x-dark-china-aoi-river",
-      "defaultLayerEnabled": true,
-      "name": "中国河流面",
-      "defaultStyleId": "style-x-dark-china-aoi-river",
-      "assignable": true,
-      "geometryType": "POLYGON",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 8,
-      "parentId": "x-dark-water",
-      "id": "x-dark-osm-china-aoi-river",
-      "defaultLayerEnabled": true,
-      "name": "OSM河流面",
-      "defaultStyleId": "style-x-dark-osm-china-aoi-river",
-      "assignable": true,
-      "geometryType": "POLYGON",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 9,
-      "parentId": "x-dark-building",
-      "id": "x-dark-buildings",
-      "defaultLayerEnabled": true,
-      "name": "建筑面",
-      "defaultStyleId": "style-x-dark-buildings",
-      "assignable": true,
-      "geometryType": "POLYGON",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 16,
-      "parentId": "x-dark-water",
-      "id": "x-dark-world-line-river",
-      "defaultLayerEnabled": true,
-      "name": "世界河流线",
-      "defaultStyleId": "style-x-dark-world-line-river",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 17,
-      "parentId": "x-dark-boundary",
-      "id": "x-dark-world-line-border",
-      "defaultLayerEnabled": true,
-      "name": "世界国界",
-      "defaultStyleId": "style-x-dark-world-line-border",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 18,
-      "parentId": "x-dark-boundary",
-      "id": "x-dark-china-line-border",
-      "defaultLayerEnabled": true,
-      "name": "中国行政边界",
-      "defaultStyleId": "style-x-dark-china-line-border",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 19,
-      "parentId": "x-dark-road",
-      "id": "x-dark-china-line-chigh-ramp",
-      "defaultLayerEnabled": true,
-      "name": "中国次高等级道路匝道",
-      "defaultStyleId": "style-x-dark-china-line-chigh-ramp",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 20,
-      "parentId": "x-dark-road",
-      "id": "x-dark-china-line-chigh",
-      "defaultLayerEnabled": true,
-      "name": "中国次高等级道路",
-      "defaultStyleId": "style-x-dark-china-line-chigh",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 21,
-      "parentId": "x-dark-road",
-      "id": "x-dark-china-line-guide",
-      "defaultLayerEnabled": true,
-      "name": "中国道路引导线",
-      "defaultStyleId": "style-x-dark-china-line-guide",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 22,
-      "parentId": "x-dark-road",
-      "id": "x-dark-osm-china-line-tertiary",
-      "defaultLayerEnabled": true,
-      "name": "OSM三级道路",
-      "defaultStyleId": "style-x-dark-osm-china-line-tertiary",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 23,
-      "parentId": "x-dark-road",
-      "id": "x-dark-osm-china-line-secondary",
-      "defaultLayerEnabled": true,
-      "name": "OSM二级道路",
-      "defaultStyleId": "style-x-dark-osm-china-line-secondary",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 24,
-      "parentId": "x-dark-road",
-      "id": "x-dark-osm-china-line-primary",
-      "defaultLayerEnabled": true,
-      "name": "OSM一级道路",
-      "defaultStyleId": "style-x-dark-osm-china-line-primary",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 25,
-      "parentId": "x-dark-road",
-      "id": "x-dark-osm-china-line-trunk-link",
-      "defaultLayerEnabled": true,
-      "name": "OSM主干路连接线",
-      "defaultStyleId": "style-x-dark-osm-china-line-trunk-link",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 26,
-      "parentId": "x-dark-road",
-      "id": "x-dark-osm-china-line-trunk",
-      "defaultLayerEnabled": true,
-      "name": "OSM主干路",
-      "defaultStyleId": "style-x-dark-osm-china-line-trunk",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 27,
-      "parentId": "x-dark-road",
-      "id": "x-dark-osm-china-line-motorway-link",
-      "defaultLayerEnabled": true,
-      "name": "OSM高速连接线",
-      "defaultStyleId": "style-x-dark-osm-china-line-motorway-link",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 28,
-      "parentId": "x-dark-road",
-      "id": "x-dark-osm-china-line-motorway",
-      "defaultLayerEnabled": true,
-      "name": "OSM高速",
-      "defaultStyleId": "style-x-dark-osm-china-line-motorway",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 29,
-      "parentId": "x-dark-road",
-      "id": "x-dark-china-line-high-ramp",
-      "defaultLayerEnabled": true,
-      "name": "中国高等级道路匝道",
-      "defaultStyleId": "style-x-dark-china-line-high-ramp",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 30,
-      "parentId": "x-dark-road",
-      "id": "x-dark-china-line-high",
-      "defaultLayerEnabled": true,
-      "name": "中国高等级道路",
-      "defaultStyleId": "style-x-dark-china-line-high",
-      "assignable": true,
-      "geometryType": "LINE",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 31,
-      "parentId": "x-dark-label",
-      "id": "x-dark-osm-china-poi-village",
-      "defaultLayerEnabled": true,
-      "name": "OSM村级名称",
-      "defaultStyleId": "style-x-dark-osm-china-poi-village",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 32,
-      "parentId": "x-dark-label",
-      "id": "x-dark-osm-china-poi-town",
-      "defaultLayerEnabled": true,
-      "name": "OSM镇级名称",
-      "defaultStyleId": "style-x-dark-osm-china-poi-town",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 33,
-      "parentId": "x-dark-label",
-      "id": "x-dark-osm-china-poi-county",
-      "defaultLayerEnabled": true,
-      "name": "OSM县级名称",
-      "defaultStyleId": "style-x-dark-osm-china-poi-county",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 34,
-      "parentId": "x-dark-label",
-      "id": "x-dark-china-poi-county",
-      "defaultLayerEnabled": true,
-      "name": "中国县级名称",
-      "defaultStyleId": "style-x-dark-china-poi-county",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 35,
-      "parentId": "x-dark-label",
-      "id": "x-dark-osm-china-poi-city",
-      "defaultLayerEnabled": true,
-      "name": "OSM城市名称",
-      "defaultStyleId": "style-x-dark-osm-china-poi-city",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 36,
-      "parentId": "x-dark-label",
-      "id": "x-dark-world-poi-ocean",
-      "defaultLayerEnabled": true,
-      "name": "大洋与近海名称",
-      "defaultStyleId": "style-x-dark-world-poi-ocean",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 37,
-      "parentId": "x-dark-label",
-      "id": "x-dark-world-poi-country",
-      "defaultLayerEnabled": true,
-      "name": "外国国家名称",
-      "defaultStyleId": "style-x-dark-world-poi-country",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 38,
-      "parentId": "x-dark-label",
-      "id": "x-dark-china-poi-country",
-      "defaultLayerEnabled": true,
-      "name": "中国国家名称",
-      "defaultStyleId": "style-x-dark-china-poi-country",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 39,
-      "parentId": "x-dark-label",
-      "id": "x-dark-china-poi-provice",
-      "defaultLayerEnabled": true,
-      "name": "省级名称",
-      "defaultStyleId": "style-x-dark-china-poi-provice",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 40,
-      "parentId": "x-dark-label",
-      "id": "x-dark-world-poi-captital",
-      "defaultLayerEnabled": true,
-      "name": "外国首都名称",
-      "defaultStyleId": "style-x-dark-world-poi-captital",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "placement": "X_DARK",
-      "sortOrder": 41,
-      "parentId": "x-dark-label",
-      "id": "x-dark-china-poi-city",
-      "defaultLayerEnabled": true,
-      "name": "中国城市名称",
-      "defaultStyleId": "style-x-dark-china-poi-city",
-      "assignable": true,
-      "geometryType": "POINT",
-      "nodeType": "CLASSIFICATION"
-    },
-    {
-      "id": "unknown",
-      "parentId": "x-dark",
-      "name": "未匹配图层",
-      "nodeType": "UNKNOWN_FOLDER",
-      "geometryType": null,
-      "assignable": false,
-      "sortOrder": 99
-    },
-    {
-      "id": "unknown-point",
-      "parentId": "unknown",
-      "name": "未知点图层",
-      "nodeType": "UNKNOWN_CLASSIFICATION",
-      "geometryType": "POINT",
-      "assignable": true,
-      "defaultStyleId": "style-unknown-point",
-      "defaultLayerEnabled": false,
-      "sortOrder": 10
-    },
-    {
-      "id": "unknown-line",
-      "parentId": "unknown",
-      "name": "未知线图层",
-      "nodeType": "UNKNOWN_CLASSIFICATION",
-      "geometryType": "LINE",
-      "assignable": true,
-      "defaultStyleId": "style-unknown-line",
-      "defaultLayerEnabled": false,
-      "sortOrder": 20
-    },
-    {
-      "id": "unknown-polygon",
-      "parentId": "unknown",
-      "name": "未知面图层",
-      "nodeType": "UNKNOWN_CLASSIFICATION",
-      "geometryType": "POLYGON",
-      "assignable": true,
-      "defaultStyleId": "style-unknown-polygon",
-      "defaultLayerEnabled": false,
-      "sortOrder": 30
-    }
-  ],
-  "classification": {
-    "rules": [
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POLYGON",
-        "sourceLayers": [
-          "world_aoi_ocean"
-        ],
-        "groupId": "x-dark-world-aoi-ocean",
-        "id": "classify-x-dark-world-aoi-ocean"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POLYGON",
-        "sourceLayers": [
-          "world_aoi_country"
-        ],
-        "groupId": "x-dark-world-aoi-country",
-        "id": "classify-x-dark-world-aoi-country"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POLYGON",
-        "sourceLayers": [
-          "china_aoi_provice"
-        ],
-        "groupId": "x-dark-china-aoi-provice",
-        "id": "classify-x-dark-china-aoi-provice"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POLYGON",
-        "sourceLayers": [
-          "osm_china_aoi_green"
-        ],
-        "groupId": "x-dark-osm-china-aoi-green",
-        "id": "classify-x-dark-osm-china-aoi-green"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POLYGON",
-        "sourceLayers": [
-          "world_aoi_lake"
-        ],
-        "groupId": "x-dark-world-aoi-lake",
-        "id": "classify-x-dark-world-aoi-lake"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POLYGON",
-        "sourceLayers": [
-          "world_aoi_river"
-        ],
-        "groupId": "x-dark-world-aoi-river",
-        "id": "classify-x-dark-world-aoi-river"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POLYGON",
-        "sourceLayers": [
-          "china_aoi_river"
-        ],
-        "groupId": "x-dark-china-aoi-river",
-        "id": "classify-x-dark-china-aoi-river"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POLYGON",
-        "sourceLayers": [
-          "osm_china_aoi_river"
-        ],
-        "groupId": "x-dark-osm-china-aoi-river",
-        "id": "classify-x-dark-osm-china-aoi-river"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POLYGON",
-        "sourceLayers": [
-          "building_alxa_152900",
-          "building_guangde_341882",
-          "building_guiyang",
-          "building_haixi_632800",
-          "building_jiuquan_620900",
-          "building_shanghai",
-          "building_zunyi_520300"
-        ],
-        "groupId": "x-dark-buildings",
-        "id": "classify-x-dark-buildings"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "world_line_river"
-        ],
-        "groupId": "x-dark-world-line-river",
-        "id": "classify-x-dark-world-line-river"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "world_line_border"
-        ],
-        "groupId": "x-dark-world-line-border",
-        "id": "classify-x-dark-world-line-border"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "china_line_border"
-        ],
-        "groupId": "x-dark-china-line-border",
-        "id": "classify-x-dark-china-line-border"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "china_line_chigh_ramp"
-        ],
-        "groupId": "x-dark-china-line-chigh-ramp",
-        "id": "classify-x-dark-china-line-chigh-ramp"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "china_line_chigh"
-        ],
-        "groupId": "x-dark-china-line-chigh",
-        "id": "classify-x-dark-china-line-chigh"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "china_line_guide"
-        ],
-        "groupId": "x-dark-china-line-guide",
-        "id": "classify-x-dark-china-line-guide"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "osm_china_line_tertiary"
-        ],
-        "groupId": "x-dark-osm-china-line-tertiary",
-        "id": "classify-x-dark-osm-china-line-tertiary"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "osm_china_line_secondary"
-        ],
-        "groupId": "x-dark-osm-china-line-secondary",
-        "id": "classify-x-dark-osm-china-line-secondary"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "osm_china_line_primary"
-        ],
-        "groupId": "x-dark-osm-china-line-primary",
-        "id": "classify-x-dark-osm-china-line-primary"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "osm_china_line_trunk_link"
-        ],
-        "groupId": "x-dark-osm-china-line-trunk-link",
-        "id": "classify-x-dark-osm-china-line-trunk-link"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "osm_china_line_trunk"
-        ],
-        "groupId": "x-dark-osm-china-line-trunk",
-        "id": "classify-x-dark-osm-china-line-trunk"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "osm_china_line_motorway_link"
-        ],
-        "groupId": "x-dark-osm-china-line-motorway-link",
-        "id": "classify-x-dark-osm-china-line-motorway-link"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "osm_china_line_motorway"
-        ],
-        "groupId": "x-dark-osm-china-line-motorway",
-        "id": "classify-x-dark-osm-china-line-motorway"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "china_line_high_ramp"
-        ],
-        "groupId": "x-dark-china-line-high-ramp",
-        "id": "classify-x-dark-china-line-high-ramp"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "LINE",
-        "sourceLayers": [
-          "china_line_high"
-        ],
-        "groupId": "x-dark-china-line-high",
-        "id": "classify-x-dark-china-line-high"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "osm_china_poi_village"
-        ],
-        "groupId": "x-dark-osm-china-poi-village",
-        "id": "classify-x-dark-osm-china-poi-village"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "osm_china_poi_town"
-        ],
-        "groupId": "x-dark-osm-china-poi-town",
-        "id": "classify-x-dark-osm-china-poi-town"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "osm_china_poi_county"
-        ],
-        "groupId": "x-dark-osm-china-poi-county",
-        "id": "classify-x-dark-osm-china-poi-county"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "china_poi_county"
-        ],
-        "groupId": "x-dark-china-poi-county",
-        "id": "classify-x-dark-china-poi-county"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "osm_china_poi_city"
-        ],
-        "groupId": "x-dark-osm-china-poi-city",
-        "id": "classify-x-dark-osm-china-poi-city"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "world_poi_ocean"
-        ],
-        "groupId": "x-dark-world-poi-ocean",
-        "id": "classify-x-dark-world-poi-ocean"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "world_poi_country"
-        ],
-        "groupId": "x-dark-world-poi-country",
-        "id": "classify-x-dark-world-poi-country"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "china_poi_country"
-        ],
-        "groupId": "x-dark-china-poi-country",
-        "id": "classify-x-dark-china-poi-country"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "china_poi_provice"
-        ],
-        "groupId": "x-dark-china-poi-provice",
-        "id": "classify-x-dark-china-poi-provice"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "world_poi_captital"
-        ],
-        "groupId": "x-dark-world-poi-captital",
-        "id": "classify-x-dark-world-poi-captital"
-      },
-      {
-        "placement": "X_DARK",
-        "sourceClasses": [],
-        "geometryType": "POINT",
-        "sourceLayers": [
-          "china_poi_city"
-        ],
-        "groupId": "x-dark-china-poi-city",
-        "id": "classify-x-dark-china-poi-city"
-      }
-    ],
-    "strategy": "FIRST_MATCH",
-    "fallbackGroupByGeometry": {
-      "POLYGON": "unknown-polygon",
-      "LINE": "unknown-line",
-      "POINT": "unknown-point"
-    }
-  },
-  "styleResolution": {
-    "precedence": [
-      "FEATURE_OVERRIDE",
-      "LAYER_CUSTOM_STYLE",
-      "GROUP_OVERRIDE",
-      "PROPERTY_RULE",
-      "GROUP_DEFAULT_STYLE"
-    ],
-    "groupOverride": {
-      "evaluation": "FIRST_MATCH",
-      "patchMode": "MERGE_WITH_BASE_SYMBOL",
-      "scope": "AUTOMATIC_GROUP_ASSIGNMENTS_ONLY"
-    },
-    "manualGroupAssignment": "INHERIT_TARGET_BASE_STYLE_OR_KEEP_EXPLICIT_CUSTOM_STYLE",
-    "layerCustomStyleReplacesGroupZoomBounds": true,
-    "zoomInterval": "MIN_INCLUSIVE_MAX_EXCLUSIVE",
-    "ancestorsMustBeEnabled": true,
-    "noMatchingVisibleStyle": "CLIENT_HIDE",
-    "unknownWithoutExplicitConfiguration": "CLIENT_HIDE",
-    "groupVisibilityIncludesLeaf": true,
-    "renderRules": {
-      "evaluation": "ALL_MATCH",
-      "scaleInterval": "MIN_INCLUSIVE_MAX_EXCLUSIVE",
-      "symbolizers": "ORDERED"
-    }
-  },
-  "unknownPolicy": {
-    "groupId": "unknown",
-    "defaultLayerEnabled": false,
-    "requireExplicitStyleConfigurationBeforeDisplay": true,
-    "automaticReclassification": false,
-    "allowImportDirectlyToUnknown": true,
-    "forceUnknownBypassesClassification": true,
-    "unknownPointIsNotRecognizedPoi": true,
-    "inheritUnknownDefaultStyle": false
-  },
-  "manualLayerPolicy": {
-    "allowMoveWithinDataset": true,
-    "targetNodes": "ASSIGNABLE_CLASSIFICATION_ONLY",
-    "requireSameDataset": true,
-    "requireSameGeometryType": true,
-    "mixedGeometryMustBePartitionedBeforeMove": true,
-    "styleModes": [
-      "INHERIT_TARGET_GROUP",
-      "CUSTOM"
-    ],
-    "allowCustomStyleWhileRemainingUnknown": true,
-    "configurableFields": [
-      "enabled",
-      "minZoom",
-      "maxZoom",
-      "symbol"
-    ],
-    "customStyleBounds": {
-      "minZoom": 0,
-      "maxStartZoom": 18,
-      "maxZoom": 25,
-      "minLessThanMax": true
-    },
-    "preserveOriginalProperties": true,
-    "preserveSourceReferences": true,
-    "modifyOriginalFiles": false,
-    "reparseSourceOnMove": false,
-    "rerunClassificationOnMove": false,
-    "affectOtherLayers": false,
-    "globalRenderPolicyOverridable": false,
-    "applyGroupAndStyleUpdateAtomically": true,
-    "onCancel": "DISCARD_DRAFT",
-    "mergeLayersOnMove": false,
-    "symbolFieldsByGeometry": {
-      "POINT": [
-        "color",
-        "radius",
-        "opacity",
-        "strokeColor",
-        "strokeWidth"
-      ],
-      "LINE": [
-        "color",
-        "width",
-        "opacity",
-        "dashArray"
-      ],
-      "POLYGON": [
-        "fillColor",
-        "fillOpacity",
-        "strokeColor",
-        "strokeWidth",
-        "strokeOpacity",
-        "dashArray"
-      ]
-    },
-    "symbolConstraints": {
-      "colorPattern": "^#[0-9a-fA-F]{6}$",
-      "opacity": {
-        "min": 0,
-        "max": 1
-      },
-      "sizePixels": {
-        "min": 0.5,
-        "max": 12
-      },
-      "strokeWidthPixels": {
-        "min": 0,
-        "max": 12
-      }
-    }
-  },
-  "derivations": [],
-  "tilePolicy": {
-    "minZoom": 0,
-    "nativeMaxZoom": 18,
-    "displayMaxZoom": 24,
-    "tileSize": 512,
-    "extent": 8192,
-    "buffer": 256,
-    "simplifyPixels": 0.25,
-    "polygonMinAreaPixels": 1,
-    "lineMinLengthPixels": 1,
-    "encodingVersion": 2,
-    "groups": [
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 0,
-        "groupKey": "x-dark-world-aoi-ocean"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 0,
-        "groupKey": "x-dark-world-aoi-country"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 4,
-        "groupKey": "x-dark-china-aoi-provice"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 10,
-        "groupKey": "x-dark-osm-china-aoi-green"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 1,
-        "groupKey": "x-dark-world-aoi-lake"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 5,
-        "groupKey": "x-dark-world-aoi-river"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 5,
-        "groupKey": "x-dark-china-aoi-river"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 9,
-        "groupKey": "x-dark-osm-china-aoi-river"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 13,
-        "groupKey": "x-dark-buildings"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 5,
-        "groupKey": "x-dark-world-line-river"
-      },
-      {
-        "preserveBoundary": true,
-        "overrides": [],
-        "minZoom": 3,
-        "groupKey": "x-dark-world-line-border"
-      },
-      {
-        "preserveBoundary": true,
-        "overrides": [],
-        "minZoom": 3,
-        "groupKey": "x-dark-china-line-border"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 11,
-        "groupKey": "x-dark-china-line-chigh-ramp"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 10,
-        "groupKey": "x-dark-china-line-chigh"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 12,
-        "groupKey": "x-dark-china-line-guide"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 11,
-        "groupKey": "x-dark-osm-china-line-tertiary"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 10,
-        "groupKey": "x-dark-osm-china-line-secondary"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 9,
-        "groupKey": "x-dark-osm-china-line-primary"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 10,
-        "groupKey": "x-dark-osm-china-line-trunk-link"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 8,
-        "groupKey": "x-dark-osm-china-line-trunk"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 10,
-        "groupKey": "x-dark-osm-china-line-motorway-link"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 7,
-        "groupKey": "x-dark-osm-china-line-motorway"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 10,
-        "groupKey": "x-dark-china-line-high-ramp"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 7,
-        "groupKey": "x-dark-china-line-high"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 13,
-        "groupKey": "x-dark-osm-china-poi-village"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 11,
-        "groupKey": "x-dark-osm-china-poi-town"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 10,
-        "groupKey": "x-dark-osm-china-poi-county"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 9,
-        "groupKey": "x-dark-china-poi-county"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 8,
-        "groupKey": "x-dark-osm-china-poi-city"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 1,
-        "groupKey": "x-dark-world-poi-ocean"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 3,
-        "groupKey": "x-dark-world-poi-country"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 3,
-        "groupKey": "x-dark-china-poi-country"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 5,
-        "groupKey": "x-dark-china-poi-provice"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 4,
-        "groupKey": "x-dark-world-poi-captital"
-      },
-      {
-        "preserveBoundary": false,
-        "overrides": [],
-        "minZoom": 4,
-        "groupKey": "x-dark-china-poi-city"
-      },
-      {
-        "groupKey": "unknown-point",
-        "minZoom": 13,
-        "preserveBoundary": false,
-        "overrides": []
-      },
-      {
-        "groupKey": "unknown-line",
-        "minZoom": 15,
-        "preserveBoundary": false,
-        "overrides": []
-      },
-      {
-        "groupKey": "unknown-polygon",
-        "minZoom": 15,
-        "preserveBoundary": false,
-        "overrides": []
-      }
-    ],
-    "propertyFields": [
-      "fclass",
-      "code",
-      "id",
-      "name",
-      "ref",
-      "bridge",
-      "tunnel",
-      "ctype",
-      "dtype",
-      "dislevel",
-      "kind",
-      "mj",
-      "roadname",
-      "roadcode"
-    ],
-    "zoomReferenceSize": 256
-  },
-  "cartography": {
-    "styles": [
-      {
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -1365,7 +29,6 @@
         "minZoom": 0,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-world-aoi-ocean",
         "labels": {
           "enabled": false,
           "minZoom": 0,
@@ -1381,8 +44,13 @@
         },
         "geometryType": "POLYGON",
         "renderOrder": 10
-      },
-      {
+      }
+    },
+    {
+      "name": "国家面",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -1404,7 +72,6 @@
         "minZoom": 0,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-world-aoi-country",
         "labels": {
           "enabled": false,
           "minZoom": 0,
@@ -1420,8 +87,13 @@
         },
         "geometryType": "POLYGON",
         "renderOrder": 20
-      },
-      {
+      }
+    },
+    {
+      "name": "省级行政区面",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -1444,7 +116,6 @@
         "minZoom": 4,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-china-aoi-provice",
         "labels": {
           "enabled": false,
           "minZoom": 0,
@@ -1460,8 +131,13 @@
         },
         "geometryType": "POLYGON",
         "renderOrder": 30
-      },
-      {
+      }
+    },
+    {
+      "name": "绿地面",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -1538,7 +214,6 @@
         "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-aoi-green",
         "labels": {
           "enabled": true,
           "minZoom": 15,
@@ -1560,8 +235,13 @@
         },
         "geometryType": "POLYGON",
         "renderOrder": 40
-      },
-      {
+      }
+    },
+    {
+      "name": "世界湖泊面",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -1676,7 +356,6 @@
         "minZoom": 1,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-world-aoi-lake",
         "labels": {
           "enabled": true,
           "minZoom": 15,
@@ -1698,8 +377,13 @@
         },
         "geometryType": "POLYGON",
         "renderOrder": 50
-      },
-      {
+      }
+    },
+    {
+      "name": "世界河流面",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -1784,7 +468,6 @@
         "minZoom": 5,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-world-aoi-river",
         "labels": {
           "enabled": true,
           "minZoom": 15,
@@ -1806,8 +489,13 @@
         },
         "geometryType": "POLYGON",
         "renderOrder": 60
-      },
-      {
+      }
+    },
+    {
+      "name": "中国河流面",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -1922,7 +610,6 @@
         "minZoom": 5,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-china-aoi-river",
         "labels": {
           "enabled": true,
           "minZoom": 15,
@@ -1944,8 +631,13 @@
         },
         "geometryType": "POLYGON",
         "renderOrder": 70
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM河流面",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -2030,7 +722,6 @@
         "minZoom": 9,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-aoi-river",
         "labels": {
           "enabled": true,
           "minZoom": 15,
@@ -2052,8 +743,13 @@
         },
         "geometryType": "POLYGON",
         "renderOrder": 80
-      },
-      {
+      }
+    },
+    {
+      "name": "建筑面",
+      "geometryType": "POLYGON",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -2093,7 +789,6 @@
         "minZoom": 13,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-buildings",
         "labels": {
           "enabled": false,
           "minZoom": 0,
@@ -2109,8 +804,13 @@
         },
         "geometryType": "POLYGON",
         "renderOrder": 90
-      },
-      {
+      }
+    },
+    {
+      "name": "世界河流线",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -2185,7 +885,6 @@
         "minZoom": 5,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-world-line-river",
         "labels": {
           "enabled": true,
           "minZoom": 15,
@@ -2205,8 +904,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 160
-      },
-      {
+      }
+    },
+    {
+      "name": "世界国界",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -2232,7 +936,6 @@
         "minZoom": 3,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-world-line-border",
         "labels": {
           "enabled": false,
           "minZoom": 0,
@@ -2246,8 +949,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 170
-      },
-      {
+      }
+    },
+    {
+      "name": "中国行政边界",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -2313,7 +1021,6 @@
         "minZoom": 3,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-china-line-border",
         "labels": {
           "enabled": false,
           "minZoom": 0,
@@ -2327,8 +1034,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 180
-      },
-      {
+      }
+    },
+    {
+      "name": "中国次高等级道路匝道",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -2507,7 +1219,6 @@
         "minZoom": 11,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-china-line-chigh-ramp",
         "labels": {
           "enabled": true,
           "minZoom": 11,
@@ -2527,8 +1238,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 190
-      },
-      {
+      }
+    },
+    {
+      "name": "中国次高等级道路",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -2722,7 +1438,6 @@
         "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-china-line-chigh",
         "labels": {
           "enabled": true,
           "minZoom": 11,
@@ -2742,8 +1457,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 200
-      },
-      {
+      }
+    },
+    {
+      "name": "中国道路引导线",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -2764,7 +1484,6 @@
         "minZoom": 12,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-china-line-guide",
         "labels": {
           "enabled": false,
           "minZoom": 0,
@@ -2778,8 +1497,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 210
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM三级道路",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -3037,7 +1761,6 @@
         "minZoom": 11,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-line-tertiary",
         "labels": {
           "enabled": true,
           "minZoom": 14,
@@ -3057,8 +1780,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 220
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM二级道路",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -3316,7 +2044,6 @@
         "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-line-secondary",
         "labels": {
           "enabled": true,
           "minZoom": 13,
@@ -3336,8 +2063,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 230
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM一级道路",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -3595,7 +2327,6 @@
         "minZoom": 9,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-line-primary",
         "labels": {
           "enabled": true,
           "minZoom": 13,
@@ -3615,8 +2346,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 240
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM主干路连接线",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -3874,7 +2610,6 @@
         "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-line-trunk-link",
         "labels": {
           "enabled": true,
           "minZoom": 11,
@@ -3894,8 +2629,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 250
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM主干路",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -4153,7 +2893,6 @@
         "minZoom": 8,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-line-trunk",
         "labels": {
           "enabled": true,
           "minZoom": 11,
@@ -4173,8 +2912,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 260
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM高速连接线",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -4650,7 +3394,6 @@
         "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-line-motorway-link",
         "labels": {
           "enabled": true,
           "minZoom": 11,
@@ -4670,8 +3413,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 270
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM高速",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -5444,7 +4192,6 @@
         "minZoom": 7,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-line-motorway",
         "labels": {
           "enabled": true,
           "minZoom": 11,
@@ -5464,8 +4211,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 280
-      },
-      {
+      }
+    },
+    {
+      "name": "中国高等级道路匝道",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -5695,7 +4447,6 @@
         "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-china-line-high-ramp",
         "labels": {
           "enabled": true,
           "minZoom": 11,
@@ -5715,8 +4466,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 290
-      },
-      {
+      }
+    },
+    {
+      "name": "中国高等级道路",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -5991,7 +4747,6 @@
         "minZoom": 7,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-china-line-high",
         "labels": {
           "enabled": true,
           "minZoom": 11,
@@ -6011,8 +4766,13 @@
         },
         "geometryType": "LINE",
         "renderOrder": 300
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM村级名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6072,7 +4832,6 @@
         "minZoom": 13,
         "maxZoom": 21,
         "overrides": [],
-        "id": "style-x-dark-osm-china-poi-village",
         "labels": {
           "enabled": true,
           "minZoom": 13,
@@ -6094,8 +4853,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 310
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM镇级名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6155,7 +4919,6 @@
         "minZoom": 11,
         "maxZoom": 21,
         "overrides": [],
-        "id": "style-x-dark-osm-china-poi-town",
         "labels": {
           "enabled": true,
           "minZoom": 11,
@@ -6177,8 +4940,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 320
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM县级名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6238,7 +5006,6 @@
         "minZoom": 10,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-osm-china-poi-county",
         "labels": {
           "enabled": true,
           "minZoom": 10,
@@ -6260,8 +5027,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 330
-      },
-      {
+      }
+    },
+    {
+      "name": "中国县级名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6321,7 +5093,6 @@
         "minZoom": 9,
         "maxZoom": 21,
         "overrides": [],
-        "id": "style-x-dark-china-poi-county",
         "labels": {
           "enabled": true,
           "minZoom": 9,
@@ -6343,8 +5114,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 340
-      },
-      {
+      }
+    },
+    {
+      "name": "OSM城市名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6414,7 +5190,6 @@
         "minZoom": 8,
         "maxZoom": 21,
         "overrides": [],
-        "id": "style-x-dark-osm-china-poi-city",
         "labels": {
           "enabled": true,
           "minZoom": 8,
@@ -6436,8 +5211,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 350
-      },
-      {
+      }
+    },
+    {
+      "name": "大洋与近海名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6507,7 +5287,6 @@
         "minZoom": 1,
         "maxZoom": 10,
         "overrides": [],
-        "id": "style-x-dark-world-poi-ocean",
         "labels": {
           "enabled": true,
           "minZoom": 1,
@@ -6529,8 +5308,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 360
-      },
-      {
+      }
+    },
+    {
+      "name": "外国国家名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6600,7 +5384,6 @@
         "minZoom": 3,
         "maxZoom": 5,
         "overrides": [],
-        "id": "style-x-dark-world-poi-country",
         "labels": {
           "enabled": true,
           "minZoom": 3,
@@ -6622,8 +5405,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 370
-      },
-      {
+      }
+    },
+    {
+      "name": "中国国家名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6683,7 +5471,6 @@
         "minZoom": 3,
         "maxZoom": 5,
         "overrides": [],
-        "id": "style-x-dark-china-poi-country",
         "labels": {
           "enabled": true,
           "minZoom": 3,
@@ -6705,8 +5492,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 380
-      },
-      {
+      }
+    },
+    {
+      "name": "省级名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6766,7 +5558,6 @@
         "minZoom": 5,
         "maxZoom": 5.956991606583276,
         "overrides": [],
-        "id": "style-x-dark-china-poi-provice",
         "labels": {
           "enabled": true,
           "minZoom": 5,
@@ -6788,8 +5579,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 390
-      },
-      {
+      }
+    },
+    {
+      "name": "外国首都名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -6859,7 +5655,6 @@
         "minZoom": 4,
         "maxZoom": 11,
         "overrides": [],
-        "id": "style-x-dark-world-poi-captital",
         "labels": {
           "enabled": true,
           "minZoom": 4,
@@ -6881,8 +5676,13 @@
         },
         "geometryType": "POINT",
         "renderOrder": 400
-      },
-      {
+      }
+    },
+    {
+      "name": "中国城市名称",
+      "geometryType": "POINT",
+      "enabled": true,
+      "style": {
         "renderRules": [
           {
             "symbolizers": [
@@ -7302,7 +6102,6 @@
         "minZoom": 4,
         "maxZoom": 25,
         "overrides": [],
-        "id": "style-x-dark-china-poi-city",
         "labels": {
           "enabled": true,
           "minZoom": 4,
@@ -7324,40 +6123,162 @@
         },
         "geometryType": "POINT",
         "renderOrder": 410
-      },
-      {
-        "id": "style-unknown-point",
-        "geometryType": "POINT",
-        "enabled": false,
-        "minZoom": 13,
+      }
+    },
+    {
+      "name": "中国铁路",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 9,
         "maxZoom": 25,
-        "renderOrder": 90,
+        "renderOrder": 450,
         "symbol": {
-          "color": "#b2927c",
-          "radius": 6,
+          "color": "#B8A5E0",
+          "width": 1.2,
           "opacity": 1,
-          "strokeColor": "#b2927c",
-          "strokeWidth": 0
+          "dashArray": [
+            4,
+            3
+          ]
         },
         "labels": {
-          "enabled": false,
+          "enabled": true,
           "field": "name",
           "fallbackField": null,
           "minZoom": 14,
-          "collisionAvoidance": true
+          "collisionAvoidance": true,
+          "color": "#DCEBFF",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "strokeColor": "#050D1A",
+          "strokeWidth": 3
         },
-        "overrides": []
-      },
-      {
-        "id": "style-unknown-line",
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              6,
+              1.2
+            ],
+            [
+              16,
+              2.2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "OSM铁路与轨道",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
         "geometryType": "LINE",
-        "enabled": false,
+        "enabled": true,
+        "minZoom": 9,
+        "maxZoom": 25,
+        "renderOrder": 450,
+        "symbol": {
+          "color": "#B8A5E0",
+          "width": 1.2,
+          "opacity": 1,
+          "dashArray": [
+            4,
+            3
+          ]
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 14,
+          "collisionAvoidance": true,
+          "color": "#DCEBFF",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "strokeColor": "#050D1A",
+          "strokeWidth": 3
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              6,
+              1.2
+            ],
+            [
+              16,
+              2.2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "OSM地铁",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
+        "geometryType": "LINE",
+        "enabled": true,
+        "minZoom": 11,
+        "maxZoom": 25,
+        "renderOrder": 450,
+        "symbol": {
+          "color": "#E4A4CE",
+          "width": 1.3,
+          "opacity": 1,
+          "dashArray": [
+            4,
+            3
+          ]
+        },
+        "labels": {
+          "enabled": true,
+          "field": "name",
+          "fallbackField": null,
+          "minZoom": 14,
+          "collisionAvoidance": true,
+          "color": "#DCEBFF",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "strokeColor": "#050D1A",
+          "strokeWidth": 3
+        },
+        "overrides": [],
+        "zoomStops": {
+          "width": [
+            [
+              6,
+              1.3
+            ],
+            [
+              16,
+              2.4
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "OSM河流面附属线",
+      "geometryType": "LINE",
+      "enabled": true,
+      "style": {
+        "geometryType": "LINE",
+        "enabled": true,
         "minZoom": 15,
         "maxZoom": 25,
-        "renderOrder": 90,
+        "renderOrder": 450,
         "symbol": {
-          "color": "#b2927c",
-          "width": 1.5,
+          "color": "#4F8DDD",
+          "width": 1.4,
           "opacity": 1
         },
         "labels": {
@@ -7365,33 +6286,16 @@
           "field": "name",
           "fallbackField": null,
           "minZoom": 14,
-          "collisionAvoidance": true
-        },
-        "overrides": []
-      },
-      {
-        "id": "style-unknown-polygon",
-        "geometryType": "POLYGON",
-        "enabled": false,
-        "minZoom": 15,
-        "maxZoom": 25,
-        "renderOrder": 90,
-        "symbol": {
-          "fillColor": "#b2927c",
-          "fillOpacity": 0.58,
-          "strokeColor": "#b2927c",
-          "strokeWidth": 1,
-          "strokeOpacity": 1
-        },
-        "labels": {
-          "enabled": false,
-          "field": "name",
-          "fallbackField": null,
-          "minZoom": 14,
-          "collisionAvoidance": true
+          "collisionAvoidance": true,
+          "color": "#DCEBFF",
+          "fontSize": 11,
+          "fontFamily": "Microsoft YaHei UI",
+          "fontWeight": "normal",
+          "strokeColor": "#050D1A",
+          "strokeWidth": 3
         },
         "overrides": []
       }
-    ]
-  }
+    }
+  ]
 }

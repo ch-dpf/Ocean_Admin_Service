@@ -117,6 +117,11 @@ public class GdalDatasetReader {
             } else {
                 Path staged = context.directory().resolve("source");
                 Files.createDirectory(staged);
+                long totalBytes = context.snapshots.stream().mapToLong(SourceSnapshot::size).reduce(0L, Math::addExact);
+                long preparedBytes = 0;
+                Consumer<ProgressStage> preparationProgress = ProgressStage.throttled(progress);
+                preparationProgress.accept(totalBytes == 0 ? ProgressStage.indeterminate("SOURCE_PREPARING", "准备源文件")
+                        : ProgressStage.determinate("SOURCE_PREPARING", "准备源文件", 0, totalBytes, ProgressUnit.BYTE));
                 for (SourceSnapshot snapshot : context.snapshots) {
                     Path target = staged.resolve(memberPath(snapshot.member().getMemberPath())).normalize();
                     if (!target.startsWith(staged)) throw failure("INVALID_MEMBER_PATH", "文件组路径越界");
@@ -129,6 +134,7 @@ public class GdalDatasetReader {
                             Files.deleteIfExists(target);
                             throw failure("SOURCE_CHANGED", "源文件已变为链接或特殊文件");
                         }
+                        preparedBytes += snapshot.size();
                         continue;
                     } catch (IOException | UnsupportedOperationException | SecurityException linkFailure) {
                         // 不同文件系统或不允许硬链接时，按原有受控流式复制准备副本。
@@ -139,9 +145,17 @@ public class GdalDatasetReader {
                         while ((count = input.read(buffer)) != -1) {
                             heartbeat.run();
                             output.write(buffer, 0, count);
+                            preparedBytes += count;
+                            if (preparedBytes > totalBytes) throw failure("SOURCE_CHANGED", "准备期间源文件大小发生变化");
+                            if (preparedBytes < totalBytes)
+                                preparationProgress.accept(ProgressStage.determinate("SOURCE_PREPARING",
+                                        "准备源文件: " + snapshot.member().getMemberPath(), preparedBytes, totalBytes, ProgressUnit.BYTE));
                         }
                     }
                 }
+                if (totalBytes > 0)
+                    preparationProgress.accept(ProgressStage.determinate("SOURCE_PREPARING", "源文件准备完成",
+                            preparedBytes, totalBytes, ProgressUnit.BYTE));
                 entryPath = staged.resolve(memberPath(entry.getMemberPath()));
                 for (GisFileMeta member : members) {
                     if (GisFileFormat.extension(member.getMemberPath()).equals("tab")) {

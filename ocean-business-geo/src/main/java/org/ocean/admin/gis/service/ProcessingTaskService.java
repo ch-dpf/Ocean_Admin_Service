@@ -32,6 +32,7 @@ import java.util.Objects;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** 在单一事务中创建任务、处理作业、输入快照和唯一瓦片集。 */
@@ -97,6 +98,7 @@ public class ProcessingTaskService {
         if (command.sourceType() != GisInputSourceType.MANAGED_FILE) {
             return;
         }
+        if (inputs.isEmpty()) throw new IllegalArgumentException("处理输入不能为空");
         Map<Long, GroupSnapshot> snapshots = new LinkedHashMap<>();
         for (GisProcessingInput input : inputs) {
             if (input.getSourceGroupSnapshot() == null || input.getSourceFileGroupId() == null || input.getSourceGroupRevision() == null)
@@ -106,6 +108,7 @@ public class ProcessingTaskService {
             if (!input.getSourceFileGroupId().equals(group.getId()) || !input.getSourceGroupRevision().equals(group.getInputRevision())
                     || !Objects.equals(input.getSourceFileMetaId(), group.getEntryFileId())
                     || !Objects.equals(input.getSourceDataSetId(), group.getDataSetId())
+                    || (command.dataSetId() != null && !command.dataSetId().equals(group.getDataSetId()))
                     || snapshots.putIfAbsent(group.getId(), snapshot) != null)
                 throw new IllegalArgumentException("处理输入文件组身份不一致或重复");
         }
@@ -114,8 +117,33 @@ public class ProcessingTaskService {
             if (dataSet == null || !command.processingType().categoryId().equals(dataSet.getCategoryId()))
                 throw new IllegalStateException("处理输入所属数据集已删除或分类已变化: " + id);
         }
+        Map<Long, GisFileMeta> members = snapshots.values().stream().flatMap(snapshot -> snapshot.members().stream())
+                .collect(Collectors.toMap(GisFileMeta::getId, member -> member));
+        Map<Long, GisFileGroup> lockedGroups = new LinkedHashMap<>();
+        Map<Long, GisFileMeta> lockedMembers = new LinkedHashMap<>();
+        if (command.dataSetId() != null) {
+            // 数据集锁阻止接入和删除改动集合；批量锁组与成员，避免大数据集逐条往返查询。
+            List<GisFileGroup> allGroups = fileGroupMapper.lockByDataSet(command.dataSetId());
+            Set<Long> duplicateGroups = allGroups.stream()
+                    .filter(group -> "DUPLICATE".equals(group.getAssemblyStatus()) || group.getDuplicateOfGroupId() != null)
+                    .map(GisFileGroup::getId).collect(Collectors.toSet());
+            for (GisFileGroup group : allGroups) {
+                if (!duplicateGroups.contains(group.getId())) lockedGroups.put(group.getId(), group);
+            }
+            if (!lockedGroups.keySet().equals(snapshots.keySet())) {
+                throw new IllegalStateException("数据集文件组在任务提交期间发生变化，请重新提交");
+            }
+            for (GisFileMeta member : fileMetaMapper.selectAllByDataSetIdForUpdate(command.dataSetId())) {
+                if (Integer.valueOf(0).equals(member.getDeleted()) && !duplicateGroups.contains(member.getFileGroupId())) {
+                    lockedMembers.put(member.getId(), member);
+                }
+            }
+            if (!lockedMembers.keySet().equals(members.keySet())) {
+                throw new IllegalStateException("数据集文件在任务提交期间发生变化，请重新提交");
+            }
+        }
         for (Long id : snapshots.keySet().stream().sorted().toList()) {
-            GisFileGroup current = fileGroupMapper.lock(id);
+            GisFileGroup current = command.dataSetId() == null ? fileGroupMapper.lock(id) : lockedGroups.get(id);
             GisFileGroup snapshot = snapshots.get(id).group();
             if (current == null || !"COMPLETE".equals(current.getAssemblyStatus()) || !"COMPLETED".equals(current.getParseStatus())
                     || !Objects.equals(current.getDataSetId(), snapshot.getDataSetId())
@@ -124,16 +152,17 @@ public class ProcessingTaskService {
                     || !Objects.equals(current.getFormat(), snapshot.getFormat())
                     || !Objects.equals(current.getReadOptionsJson(), snapshot.getReadOptionsJson()))
                 throw new IllegalStateException("文件组在任务提交期间发生变化，请重新提交: " + id);
-            var expectedIds = snapshots.get(id).members().stream().map(GisFileMeta::getId).collect(Collectors.toSet());
-            var currentIds = fileGroupMapper.members(id).stream().map(GisFileMeta::getId).collect(Collectors.toSet());
-            if (!expectedIds.equals(currentIds)) throw new IllegalStateException("文件组成员已变化，请重新提交: " + id);
+            if (command.dataSetId() == null) {
+                var expectedIds = snapshots.get(id).members().stream().map(GisFileMeta::getId).collect(Collectors.toSet());
+                var currentIds = fileGroupMapper.members(id).stream().map(GisFileMeta::getId).collect(Collectors.toSet());
+                if (!expectedIds.equals(currentIds)) throw new IllegalStateException("文件组成员已变化，请重新提交: " + id);
+            }
         }
-        Map<Long, GisFileMeta> members = snapshots.values().stream().flatMap(snapshot -> snapshot.members().stream())
-                .collect(Collectors.toMap(GisFileMeta::getId, member -> member));
         for (Long id : members.keySet().stream().sorted().toList()) {
-            GisFileMeta current = fileMetaMapper.selectActiveByIdForUpdate(id);
+            GisFileMeta current = command.dataSetId() == null ? fileMetaMapper.selectActiveByIdForUpdate(id) : lockedMembers.get(id);
             GisFileMeta snapshot = members.get(id);
             if (current == null || !"READY".equals(current.getFileStatus())
+                    || !"RETAINED".equals(current.getRawRetention())
                     || !Objects.equals(current.getDataSetId(), snapshot.getDataSetId())
                     || !Objects.equals(current.getFileGroupId(), snapshot.getFileGroupId())
                     || !Objects.equals(current.getMemberPath(), snapshot.getMemberPath())
@@ -164,7 +193,6 @@ public class ProcessingTaskService {
         task.setCompletedCount(0L);
         task.setFailedCount(0L);
         task.setTaskStatus(TaskStatus.QUEUED);
-        task.setCurrentStage(TaskStatus.QUEUED.name());
         task.setCreateTime(now);
         task.setUpdateTime(now);
         task.setDeleted(0);

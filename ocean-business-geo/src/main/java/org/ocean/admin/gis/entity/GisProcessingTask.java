@@ -38,7 +38,6 @@ public class GisProcessingTask {
     private Long completedCount;
     private Long failedCount;
     private TaskStatus taskStatus;
-    private String currentStage;
     private String errorMessage;
     private LocalDateTime startTime;
     private LocalDateTime finishTime;
