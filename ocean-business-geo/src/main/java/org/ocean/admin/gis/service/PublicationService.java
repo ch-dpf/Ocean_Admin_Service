@@ -88,6 +88,9 @@ public class PublicationService {
         GisTileSet tileSet = tileSetMapper.selectByTaskId(task.getId());
         boolean dynamicVector = processingType == GisProcessingType.VECTOR
                 && (tileSet == null || !"PNG".equalsIgnoreCase(tileSet.getOutputFormat()));
+        if (!dynamicVector && protocols.contains(OgcProtocol.WFS)) {
+            throw new IllegalArgumentException("静态瓦片产物不支持 WFS；请取消 WFS 或发布动态矢量服务");
+        }
         GisVectorResource resource = null;
         String vectorDefinition = null;
         JsonNode descriptor = null;
