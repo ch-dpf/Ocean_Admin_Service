@@ -22,10 +22,10 @@ public final class TmsXmlWriter {
     }
 
     /**
-     * 生成 TileMapService 根文档，列出全部已发布图层。
+     * 生成单个服务的 TileMapService 根文档，只列出该服务的一个 TileMap。
      *
-     * @param baseUrl 服务根地址，如 {@code http://host:8090/gis/tms/1.0.0}
-     * @param layers  已发布图层
+     * @param baseUrl 单服务根地址，如 {@code http://host:8090/gis/tms/1.0.0/IMG_xxx}
+     * @param layers  该服务的已发布图层
      */
     public static String tileMapService(String baseUrl,
             List<PublicationLayer.RasterLayer> layers,
@@ -78,27 +78,25 @@ public final class TmsXmlWriter {
      * <p>{@code Origin} 取矩阵集左下角而非图层范围，{@code BoundingBox} 取图层实际范围，
      * 与 GeoWebCache 的输出一致——客户端据此把瓦片行列号对齐到全局矩阵。</p>
      *
-     * @param baseUrl 服务根地址，如 {@code http://host:8090/gis/tms/1.0.0}
+     * @param baseUrl 单服务根地址，如 {@code http://host:8090/gis/tms/1.0.0/IMG_xxx}
      * @param layer   已发布图层
      */
     public static String tileMap(String baseUrl, PublicationLayer.RasterLayer layer) {
-        return tileMap(baseUrl, layer.serviceCode(), displayTitle(layer.title(), layer.layerName(), layer.serviceCode()),
-                layer.abstractText(), layer.keywords(), layer.matrixSet(),
-                layer.wgs84Bounds(), layer.mediaType(), layer.extension(),
+        return tileMap(baseUrl, layer.serviceCode(), layer.serviceName(),
+                layer.matrixSet(), layer.wgs84Bounds(), layer.mediaType(), layer.extension(),
                 layer.minZoom(), layer.maxZoom(), spec(layer));
     }
 
     /** 矢量 TileMap 文档；参数与影像一致，取图地址由动态渲染器消费。 */
     public static String tileMap(String baseUrl,
             PublicationLayer.VectorLayerView layer) {
-        return tileMap(baseUrl, vectorSpec(layer), displayTitle(layer.title(), layer.layerName(), layer.serviceCode()),
-                layer.abstractText(), layer.keywords(), layer.matrixSet(),
-                layer.wgs84Bounds(), layer.mediaType(), layer.extension(),
+        return tileMap(baseUrl, vectorSpec(layer), layer.serviceName(),
+                layer.matrixSet(), layer.wgs84Bounds(), layer.mediaType(), layer.extension(),
                 layer.minZoom(), layer.maxZoom(), vectorSpec(layer));
     }
 
     private static String tileMap(String baseUrl, String identifier, String title,
-            String abstractText, String keywords, TileMatrixSetDefinition matrixSet,
+            TileMatrixSetDefinition matrixSet,
             double[] wgs84Bounds, String mediaType, String extension,
             int minZoom, int maxZoom, String hrefSuffix) {
         String root = stripTrailingSlash(baseUrl);
@@ -113,7 +111,7 @@ public final class TmsXmlWriter {
             writer.writeAttribute("tilemapservice", root);
 
             writeText(writer, "Title", title);
-            writeText(writer, "Abstract", displayAbstract(abstractText, keywords, identifier));
+            writeText(writer, "Abstract", "已发布 OGC 服务: " + identifier);
             writeText(writer, "SRS", matrixSet.tmsSrs());
 
             writer.writeStartElement("BoundingBox");
@@ -190,26 +188,6 @@ public final class TmsXmlWriter {
         writer.writeStartElement(localName);
         writer.writeCharacters(value == null ? "" : value);
         writer.writeEndElement();
-    }
-
-    /** 能力文档标题优先使用 Title，其次 LayerName，最后回退服务编码。 */
-    private static String displayTitle(String title, String layerName, String serviceCode) {
-        if (title != null && !title.isBlank()) return title;
-        if (layerName != null && !layerName.isBlank()) return layerName;
-        return serviceCode;
-    }
-
-    /** 能力文档摘要优先使用 Abstract；缺失时用关键字或服务编码兜底。 */
-    private static String displayAbstract(String abstractText, String keywords, String serviceCode) {
-        if (abstractText != null && !abstractText.isBlank()) return abstractText;
-        if (keywords != null && !keywords.isBlank()) return "关键字: " + keywords;
-        return "已发布 OGC 服务: " + serviceCode;
-    }
-
-    /** 能力文档展示名优先使用发布时填写的图层名称，缺失时回退服务编码。 */
-    private static String catalogTitle(PublicationLayer.RasterLayer layer) {
-        String title = layer.layerName();
-        return title == null || title.isBlank() ? layer.serviceCode() : title;
     }
 
     private static XMLStreamWriter newWriter(StringWriter buffer) throws XMLStreamException {

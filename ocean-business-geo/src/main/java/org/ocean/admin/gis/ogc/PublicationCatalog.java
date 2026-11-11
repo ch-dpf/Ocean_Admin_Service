@@ -10,6 +10,7 @@ import org.ocean.admin.gis.entity.GisVectorResource;
 import org.ocean.admin.gis.mapper.GisPublicationMapper;
 import org.ocean.admin.gis.mapper.GisTileSetMapper;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
+import org.ocean.admin.gis.processing.GisProcessingType;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -52,13 +53,10 @@ public class PublicationCatalog {
         this.objectMapper = objectMapper;
     }
 
-    /** 列出指定协议的全部静态瓦片图层。 */
+    /** 列出指定协议的全部静态瓦片图层；WMS 运行时另有矢量图层来源。 */
     public List<PublicationLayer.RasterLayer> listRaster(OgcProtocol protocol) {
         List<PublicationLayer.RasterLayer> layers = new ArrayList<>();
         for (GisPublication publication : listPublished(protocol)) {
-            if (publication.getTileSetId() == null) {
-                continue;
-            }
             // 矢量静态 PNG 任务的 WMS 读取任务 GPKG，不读已切好的 PNG 瓦片。
             if (protocol == OgcProtocol.WMS
                     && "VECTOR".equalsIgnoreCase(publication.getProcessingType())) {
@@ -97,9 +95,9 @@ public class PublicationCatalog {
         return layers;
     }
 
-    /** 按服务编码加载矢量图层；静态 PNG 任务在 WMS 下读取任务 GPKG。 */
+    /** 按服务编码加载矢量图层，供独立的数据集 WMS 服务读取。 */
     public PublicationLayer.VectorLayer loadVector(String serviceCode, String styleId) {
-        GisPublication publication = selectPublished(serviceCode, null);
+        GisPublication publication = selectPublished(serviceCode, OgcProtocol.WMS);
         if (publication == null) {
             return null;
         }
@@ -115,9 +113,6 @@ public class PublicationCatalog {
 
     /** 动态矢量服务在两种受支持矩阵集下各生成一个瓦片视图。 */
     public List<PublicationLayer.VectorLayerView> listVectorViews(OgcProtocol protocol) {
-        if (protocol == OgcProtocol.WMTS || protocol == OgcProtocol.TMS) {
-            return List.of();
-        }
         List<PublicationLayer.VectorLayerView> views = new ArrayList<>();
         for (PublicationLayer.VectorLayer layer : listVector(protocol)) {
             int minZoom = layer.contract().path("map").path("minZoom").asInt(0);
@@ -127,8 +122,7 @@ public class PublicationCatalog {
             }
             for (TileMatrixSetDefinition matrixSet : TileMatrixSetDefinition.values()) {
                 views.add(new PublicationLayer.VectorLayerView(layer.serviceCode(),
-                        layer.serviceName(), layer.layerName(), layer.title(),
-                        layer.abstractText(), layer.keywords(), layer.wgs84Bounds(),
+                        layer.serviceName(), layer.wgs84Bounds(),
                         minZoom, maxZoom, "png", "image/png", matrixSet,
                         layer.styles(), layer.styleId(), layer.releaseVersion()));
             }
@@ -152,7 +146,7 @@ public class PublicationCatalog {
             return null;
         }
         String serviceCode = parts[0].trim();
-        for (PublicationLayer.VectorLayerView view : listVectorViews(OgcProtocol.WMTS)) {
+        for (PublicationLayer.VectorLayerView view : listVectorViews(OgcProtocol.WMS)) {
             if (serviceCode.equals(view.serviceCode()) && matrixSet == view.matrixSet()) {
                 return view;
             }
@@ -167,6 +161,75 @@ public class PublicationCatalog {
             return null;
         }
         return findView(serviceCode + "@" + matrixSet.id());
+    }
+
+    /** 读取切片产物描述文件，推导目标坐标系、矩阵集、格式和层级范围。 */
+    public PublicationLayer.TileArtifact readTileArtifact(GisTileSet tileSet) {
+        if (tileSet == null) {
+            throw new IllegalArgumentException("任务没有对应类型的瓦片集");
+        }
+        Path descriptorPath = chooseDescriptor(tileSet);
+        if (descriptorPath == null || !Files.isRegularFile(descriptorPath)) {
+            throw new IllegalStateException("切片产物描述文件缺失");
+        }
+        try {
+            JsonNode descriptor = objectMapper.readTree(descriptorPath.toFile());
+            String crs = descriptor.path("crs").asText(
+                    descriptor.path("targetCrs").asText(
+                            descriptor.path("projection").asText(tileSet.getTargetCrs())));
+            String declaredMatrixSet = descriptor.path("tileMatrixSet").asText(
+                    descriptor.path("matrixSet").asText(""));
+            TileMatrixSetDefinition matrixSet = TileMatrixSetDefinition.resolve(declaredMatrixSet);
+            if (matrixSet == null) {
+                matrixSet = TileMatrixSetDefinition.resolveByCrs(crs);
+            }
+            if (matrixSet == null) {
+                throw new IllegalStateException("切片产物坐标系没有对应的瓦片矩阵集: " + crs);
+            }
+            String format = descriptor.path("format").asText(tileSet.getOutputFormat())
+                    .toLowerCase(Locale.ROOT);
+            String extension;
+            String mediaType;
+            if (format.contains("quantized-mesh") || format.contains("terrain")) {
+                extension = "terrain";
+                mediaType = "application/vnd.quantized-mesh";
+            } else if (format.startsWith("jpeg") || format.startsWith("jpg")) {
+                extension = "jpg";
+                mediaType = "image/jpeg";
+            } else {
+                extension = "png";
+                mediaType = "image/png";
+            }
+            int minZoom = descriptor.path("minZoom").asInt(descriptor.path("minzoom")
+                    .asInt(tileSet.getMinZoom() == null ? 0 : tileSet.getMinZoom()));
+            int maxZoom = descriptor.path("maxZoom").asInt(descriptor.path("maxzoom")
+                    .asInt(tileSet.getMaxZoom() == null ? 0 : tileSet.getMaxZoom()));
+            // 地形 layer.json 不写层级字段，由 available 的非空层级推导。
+            if (descriptor.path("available").isArray()) {
+                int first = -1;
+                int last = -1;
+                for (int zoom = 0; zoom < descriptor.path("available").size(); zoom++) {
+                    JsonNode ranges = descriptor.path("available").get(zoom);
+                    if (!ranges.isArray() || ranges.isEmpty()) {
+                        continue;
+                    }
+                    if (first < 0) {
+                        first = zoom;
+                    }
+                    last = zoom;
+                }
+                if (first >= 0) {
+                    minZoom = first;
+                    maxZoom = last;
+                }
+            }
+            return new PublicationLayer.TileArtifact(matrixSet, crs, extension, mediaType,
+                    minZoom, maxZoom, boundsOf(descriptor));
+        } catch (IllegalStateException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new IllegalStateException("切片产物描述文件无法解析", ex);
+        }
     }
 
     /** 按服务编码和协议定位静态瓦片文件。 */
@@ -193,10 +256,13 @@ public class PublicationCatalog {
     }
 
     private List<GisPublication> listPublished(OgcProtocol protocol) {
-        return publicationMapper.selectList(new LambdaQueryWrapper<GisPublication>()
+        LambdaQueryWrapper<GisPublication> query = new LambdaQueryWrapper<GisPublication>()
                 .eq(GisPublication::getStatus, PUBLISHED)
-                .orderByDesc(GisPublication::getPublishTime))
-                .stream().filter(publication -> hasProtocol(publication, protocol)).toList();
+                .orderByDesc(GisPublication::getPublishTime);
+        if (protocol != null) {
+            query.eq(GisPublication::getServiceProtocol, protocol.name());
+        }
+        return publicationMapper.selectList(query);
     }
 
     private GisPublication selectPublished(String serviceCode, OgcProtocol protocol) {
@@ -207,24 +273,14 @@ public class PublicationCatalog {
                 new LambdaQueryWrapper<GisPublication>()
                         .eq(GisPublication::getServiceCode, serviceCode.trim())
                         .eq(GisPublication::getStatus, PUBLISHED));
-        return publication != null && (protocol == null || hasProtocol(publication, protocol))
-                ? publication : null;
+        if (publication == null) {
+            return null;
+        }
+        return protocol == null || hasProtocol(publication, protocol) ? publication : null;
     }
 
     private boolean hasProtocol(GisPublication publication, OgcProtocol protocol) {
-        if (publication.getProtocolsJson() == null || publication.getProtocolsJson().isBlank()) {
-            return false;
-        }
-        try {
-            for (JsonNode value : objectMapper.readTree(publication.getProtocolsJson())) {
-                if (protocol.name().equalsIgnoreCase(value.asText())) {
-                    return true;
-                }
-            }
-        } catch (RuntimeException ex) {
-            log.debug("[OGC] 发布记录 {} 协议集合无法解析", publication.getServiceCode(), ex);
-        }
-        return false;
+        return OgcProtocol.fromStored(publication.getServiceProtocol()) == protocol;
     }
 
     private PublicationLayer.RasterLayer loadRaster(GisPublication publication) {
@@ -233,31 +289,9 @@ public class PublicationCatalog {
             return null;
         }
         try {
-            Path descriptorPath = chooseDescriptor(tileSet);
-            if (descriptorPath == null || !Files.isRegularFile(descriptorPath)) {
-                return null;
-            }
-            JsonNode descriptor = objectMapper.readTree(descriptorPath.toFile());
-            String crs = descriptor.path("crs").asText(
-                    descriptor.path("targetCrs").asText(tileSet.getTargetCrs()));
-            String declaredMatrixSet = descriptor.path("tileMatrixSet").asText(
-                    descriptor.path("matrixSet").asText(""));
-            TileMatrixSetDefinition matrixSet = TileMatrixSetDefinition.resolve(declaredMatrixSet);
-            if (matrixSet == null) {
-                matrixSet = TileMatrixSetDefinition.resolveByCrs(crs);
-            }
-            if (matrixSet == null) {
-                return null;
-            }
-            String format = descriptor.path("format").asText(tileSet.getOutputFormat())
-                    .toLowerCase(Locale.ROOT);
-            String extension = format.startsWith("jpeg") || format.startsWith("jpg") ? "jpg" : "png";
-            String mediaType = "jpg".equals(extension) ? "image/jpeg" : "image/png";
-            int minZoom = descriptor.path("minZoom").asInt(descriptor.path("minzoom")
-                    .asInt(tileSet.getMinZoom() == null ? 0 : tileSet.getMinZoom()));
-            int maxZoom = descriptor.path("maxZoom").asInt(descriptor.path("maxzoom")
-                    .asInt(tileSet.getMaxZoom() == null ? 0 : tileSet.getMaxZoom()));
-            double[] bounds = boundsOf(descriptor, publication);
+            PublicationLayer.TileArtifact artifact = readTileArtifact(tileSet);
+            double[] bounds = parseBounds(publication.getBoundsWgs84Json(),
+                    artifact.wgs84Bounds());
             String gpkg = null;
             JsonNode taskDefinition = null;
             JsonNode taskScheme = null;
@@ -269,6 +303,8 @@ public class PublicationCatalog {
                 if (Files.isRegularFile(sourceGpkg) && Files.isRegularFile(sourceJson)) {
                     gpkg = sourceGpkg.toString();
                     taskDefinition = objectMapper.readTree(sourceJson.toFile());
+                    Path descriptorPath = chooseDescriptor(tileSet);
+                    JsonNode descriptor = objectMapper.readTree(descriptorPath.toFile());
                     JsonNode scheme = descriptor.path("scheme");
                     if (scheme.isObject()) {
                         taskScheme = scheme;
@@ -282,12 +318,10 @@ public class PublicationCatalog {
                 }
             }
             return new PublicationLayer.RasterLayer(publication.getServiceCode(),
-                    publication.getServiceName(), publication.getLayerName(),
-                    publication.getTitle(), publication.getAbstractText(),
-                    publication.getKeywords(), matrixSet, tileSet.getTileProfile(),
-                    extension, mediaType,
-                    publication.getMinZoom() == null ? minZoom : publication.getMinZoom(),
-                    publication.getMaxZoom() == null ? maxZoom : publication.getMaxZoom(),
+                    publication.getServiceName(), artifact.matrixSet(), tileSet.getTileProfile(),
+                    artifact.extension(), artifact.mediaType(),
+                    publication.getMinZoom() == null ? artifact.minZoom() : publication.getMinZoom(),
+                    publication.getMaxZoom() == null ? artifact.maxZoom() : publication.getMaxZoom(),
                     bounds, tileSet, gpkg, taskDefinition, taskScheme);
         } catch (RuntimeException ex) {
             log.debug("[OGC] 跳过不可用静态图层 {}: {}", publication.getServiceCode(), ex.getMessage());
@@ -297,16 +331,24 @@ public class PublicationCatalog {
 
     private Path chooseDescriptor(GisTileSet tileSet) {
         Path root = storageService.resolveTiles(tileSet.getOutputKey());
-        if (tileSet.getTileType() == org.ocean.admin.gis.processing.GisProcessingType.VECTOR) {
+        if (tileSet.getTileType() == GisProcessingType.VECTOR) {
             return root.resolve("manifest.json");
         }
-        return root.resolve("tilejson.json");
+        Path tileJson = root.resolve("tilejson.json");
+        if (Files.isRegularFile(tileJson)) {
+            return tileJson;
+        }
+        Path manifest = root.resolve("manifest.json");
+        if (Files.isRegularFile(manifest)) {
+            return manifest;
+        }
+        return root.resolve("layer.json");
     }
 
-    private double[] boundsOf(JsonNode descriptor, GisPublication publication) {
+    private double[] boundsOf(JsonNode descriptor) {
         JsonNode boundsNode = descriptor.path("bounds");
         if (!boundsNode.isArray() || boundsNode.size() != 4) {
-            return parseBounds(publication.getBoundsWgs84Json(), WORLD_BOUNDS.clone());
+            return WORLD_BOUNDS.clone();
         }
         return new double[]{boundsNode.get(0).asDouble(), boundsNode.get(1).asDouble(),
                 boundsNode.get(2).asDouble(), boundsNode.get(3).asDouble()};
@@ -368,9 +410,7 @@ public class PublicationCatalog {
                         candidate.path("id").asText(), candidate.path("name").asText("")));
             }
             return new PublicationLayer.VectorLayer(publication.getServiceCode(),
-                    publication.getServiceName(), publication.getLayerName(),
-                    publication.getTitle(), publication.getAbstractText(),
-                    publication.getKeywords(), binding.path("releaseVersion").asText(), resource,
+                    publication.getServiceName(), binding.path("releaseVersion").asText(), resource,
                     parseBounds(publication.getBoundsWgs84Json(), vectorBounds(publication.getDataSetId())),
                     binding, contract, scheme, cartography, List.copyOf(styles), chosenId);
         } catch (RuntimeException ex) {
@@ -423,9 +463,7 @@ public class PublicationCatalog {
                     .put("defaultStyleId", option.id())
                     .put("releaseVersion", "task-" + publication.getSourceTaskId());
             return new PublicationLayer.VectorLayer(publication.getServiceCode(),
-                    publication.getServiceName(), publication.getLayerName(),
-                    publication.getTitle(), publication.getAbstractText(),
-                    publication.getKeywords(), binding.path("releaseVersion").asText(),
+                    publication.getServiceName(), binding.path("releaseVersion").asText(),
                     resource, parseBounds(publication.getBoundsWgs84Json(), WORLD_BOUNDS.clone()),
                     binding, contract, scheme, cartography, styles, option.id());
         } catch (RuntimeException ex) {

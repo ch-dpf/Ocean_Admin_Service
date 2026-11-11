@@ -48,17 +48,10 @@ public class VectorDatasetPublicationService {
         record.setServiceCode(code);
         record.setServiceName(request.serviceName().strip());
         record.setServiceProtocol("WMS");
-        record.setProtocolsJson(json.writeValueAsString(List.of("WMS")));
         record.setProcessingType("VECTOR");
-        record.setLayerName(code);
-        record.setTitle(record.getServiceName());
-        record.setDefaultCrs("EPSG:3857");
-        record.setSupportedCrsJson(json.writeValueAsString(List.of("EPSG:3857", "EPSG:4326", "CRS:84")));
-        record.setTileMatrixSetsJson("[]");
         record.setMinZoom(0);
         record.setMaxZoom(Math.min(22, json.readTree(resource.getDefinitionJson()).path("map").path("nativeMaxZoom").asInt(18)));
         record.setTargetCrs("EPSG:3857");
-        record.setOutputFormat("PNG");
         record.setBoundsWgs84Json(json.writeValueAsString(List.of(-180d, -85.05112877980659d, 180d, 85.05112877980659d)));
         record.setStyleId(binding.path("defaultStyleId").asText());
         record.setStyleName(defaultStyleName(binding));

@@ -20,11 +20,11 @@ import java.time.Duration;
 /**
  * TMS 1.0.0 公开服务入口（OSGeo Tile Map Service Specification）。
  *
- * <p>地址结构与 GeoServer 内置 TMS 服务一致：</p>
+ * <p>每个服务编码独占一套文档与瓦片地址：</p>
  * <pre>
- * /gis/tms/1.0.0                                                       TileMapService
- * /gis/tms/1.0.0/{服务编码}@{矩阵集}@{格式}                              TileMap
- * /gis/tms/1.0.0/{服务编码}@{矩阵集}@{格式}/{z}/{x}/{y}.{格式}           瓦片
+ * /gis/tms/1.0.0/{服务编码}                                             单服务 TileMapService
+ * /gis/tms/1.0.0/{服务编码}/{服务编码}@{矩阵集}@{格式}                   单图层 TileMap
+ * /gis/tms/1.0.0/{服务编码}/{服务编码}@{矩阵集}@{格式}/{z}/{x}/{y}.{格式} 瓦片
  * </pre>
  *
  * <p>与其它 OGC 入口一致，不经过 {@code /api} 鉴权拦截。TMS 1.0.0 未定义异常报文，
@@ -46,21 +46,22 @@ public class TmsController {
         this.tmsService = tmsService;
     }
 
-    /** 服务根文档：列出全部已发布图层。 */
-    @GetMapping(VERSION_PATH)
-    public ResponseEntity<?> tileMapService() {
+    /** 单服务根文档：只列出该发布记录的一个 TileMap。 */
+    @GetMapping(VERSION_PATH + "/{serviceCode}")
+    public ResponseEntity<?> tileMapService(@PathVariable String serviceCode) {
         try {
-            return document(tmsService.tileMapServiceXml());
+            return document(tmsService.tileMapServiceXml(serviceCode));
         } catch (RuntimeException ex) {
             return failure(ex);
         }
     }
 
     /** 单个图层的 TileMap 文档。 */
-    @GetMapping(VERSION_PATH + "/{spec}")
-    public ResponseEntity<?> tileMap(@PathVariable String spec) {
+    @GetMapping(VERSION_PATH + "/{serviceCode}/{spec}")
+    public ResponseEntity<?> tileMap(@PathVariable String serviceCode,
+            @PathVariable String spec) {
         try {
-            return document(tmsService.tileMapXml(spec));
+            return document(tmsService.tileMapXml(serviceCode, spec));
         } catch (RuntimeException ex) {
             return failure(ex);
         }
@@ -71,14 +72,15 @@ public class TmsController {
      *
      * @param yWithExtension 形如 {@code 6789.png} 的行号与格式扩展名
      */
-    @GetMapping(VERSION_PATH + "/{spec}/{zoom}/{column}/{yWithExtension}")
-    public ResponseEntity<?> tile(@PathVariable String spec,
+    @GetMapping(VERSION_PATH + "/{serviceCode}/{spec}/{zoom}/{column}/{yWithExtension}")
+    public ResponseEntity<?> tile(@PathVariable String serviceCode,
+            @PathVariable String spec,
             @PathVariable String zoom,
             @PathVariable String column,
             @PathVariable String yWithExtension) {
         try {
             return tileReply(tmsService.resolveTile(
-                    spec, zoom, column, stripExtension(yWithExtension)));
+                    serviceCode, spec, zoom, column, stripExtension(yWithExtension)));
         } catch (RuntimeException ex) {
             return failure(ex);
         }
@@ -99,13 +101,6 @@ public class TmsController {
     }
 
     private ResponseEntity<?> tileReply(TmsService.TileResource tile) {
-        if (tile.body() != null) {
-            return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType(tile.mediaType()))
-                    .contentLength(tile.body().length)
-                    .cacheControl(CacheControl.maxAge(Duration.ofMinutes(10)).cachePublic())
-                    .body(tile.body());
-        }
         Path file = tile.file();
         try {
             long size = Files.size(file);

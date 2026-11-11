@@ -26,14 +26,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 
 /** GIS 统一多协议发布管理入口。 */
 @RestController
 @RequestMapping("/api/gis/publications")
-@Tag(name = "GIS服务发布", description = "按已完成任务发布影像、地形和矢量多协议服务")
+@Tag(name = "GIS服务发布", description = "按已完成任务发布影像、地形和矢量单协议服务")
 @RequiredArgsConstructor
 public class PublicationController {
 
@@ -84,14 +83,14 @@ public class PublicationController {
     }
 
     @PostMapping("/{processingType}/{sourceTaskId}/publish")
-    @Operation(summary = "按所选协议集合发布已完成的任务产物")
+    @Operation(summary = "按所选单个协议发布已完成的任务产物")
     @OperationLog(module = "GIS_PUBLICATION", type = OperationType.SUBMIT,
-            description = "发布统一多协议 GIS 服务", recordResponse = true)
+            description = "发布单协议 GIS 服务", recordResponse = true)
     public ResponseResult<GisPublicationVO> publish(
             @Parameter(description = "发布类型：TERRAIN、IMAGERY 或 VECTOR")
             @PathVariable GisProcessingType processingType,
             @PathVariable Long sourceTaskId,
-            @Valid @RequestBody UnifiedPublicationRequest request) throws IOException {
+            @Valid @RequestBody UnifiedPublicationRequest request) {
         return ResponseResult.success("GIS服务发布成功",
                 publicationService.publish(processingType, sourceTaskId, request));
     }
