@@ -91,7 +91,8 @@ public final class VectorRasterStyleBuilder {
         List<Draw> draws = new ArrayList<>();
         JsonNode labels = segmented ? groupOverride.path("labels") : json.missingNode();
         double order = base.path("renderOrder").asDouble();
-        if (base.has("renderRules") && custom.isMissingNode()) {
+        // 与工作区一致：手动归类继承基础样式，不依赖自动分类的属性筛选。
+        if (layer.path("automatic").asBoolean() && base.has("renderRules") && custom.isMissingNode()) {
             ObjectNode patch = merge(groupOverride.path("symbol"), previewSymbol, feature.path("symbol"));
             for (JsonNode rule : base.path("renderRules")) {
                 if (!inZoom(rule, zoom, 0, 24) || !templates.matches(rule.path("filter"), properties)) continue;

@@ -77,6 +77,17 @@ public interface GisVectorMapper {
         """)
     int replaceDataSetRules(GisVectorDataSetStyle snapshot);
 
+    /** 只启用从未人工配置的未分类图层，不覆盖已有样式和主动隐藏的图层。 */
+    @Update("""
+        UPDATE ocean_gis.gis_vector_layer l SET enabled=true,style_mode='INHERIT_TARGET_GROUP',
+            presentation_version=presentation_version+1,update_time=CURRENT_TIMESTAMP
+        FROM ocean_gis.gis_vector_group g
+        WHERE l.data_set_id=#{dataSetId} AND g.data_set_id=l.data_set_id AND g.id=l.group_id
+          AND g.node_type='UNKNOWN_CLASSIFICATION' AND l.deleted=0 AND l.layer_status='READY'
+          AND l.style_mode='UNCONFIGURED' AND l.assignment_mode='AUTO' AND l.presentation_version=1
+        """)
+    int enableUnconfiguredLayers(Long dataSetId);
+
     @Select("""
         SELECT EXISTS(SELECT 1 FROM ocean_gis.gis_file_meta WHERE data_set_id=#{dataSetId} AND vector_dataset_style_id IS NOT NULL)
             OR EXISTS(SELECT 1 FROM ocean_gis.gis_vector_layer WHERE data_set_id=#{dataSetId})
@@ -213,6 +224,7 @@ public interface GisVectorMapper {
     int refreshLayer(@Param("id") Long id);
     int deleteLayer(@Param("id") Long id);
     GisVectorVO.GeometryError firstGeometryError(@Param("items") List<GisVectorFeature> items);
+    List<GisVectorVO.GeometryIssue> geometryIssues(@Param("items") List<GisVectorFeature> items);
     int insertFeatures(@Param("items") List<GisVectorFeature> items);
     List<GisVectorFeature> features(@Param("layerId") Long layerId, @Param("afterId") long afterId,
             @Param("limit") int limit, @Param("west") Double west, @Param("south") Double south,

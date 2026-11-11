@@ -50,9 +50,11 @@ GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验
 
 文件登记时固定 `vector_placement`（AUTO 或 UNKNOWN）和 `vector_dataset_style_id`，通过复合外键限制快照属于同一数据集。逐要素匹配分类；GeometryCollection 按递归分量拆分，MultiPoint、MultiLineString、MultiPolygon 保持整体。一个文件组按来源图层、初始分类业务键与几何类别生成多个业务图层，`(source_file_id,layer_key)` 唯一。`source_feature_index`、`source_geometry_path`、`source_feature_id`、`classification_rule_key` 保存来源引用；原始 properties 不被归一化结果覆盖。分批写入的数据仅在文件组整体提取完成、所有图层切为 READY 后可查询和编辑；失败时清理未完成图层及其要素。成功图层不重复导入。
 
+拓扑质量检查保存于 `gis_file_spatial_metadata.extra_metadata.vectorImport.geometryQuality`：`invalidGeometries` 统计无效几何分量，`issues` 最多保留20条来源集合、零起始要素下标、几何路径、原因及WGS84问题位置。GeometryCollection 的多个问题分量分别计数。文件组列表与详情从当前已完成解析元数据读取该摘要，不增加数据表或修复数据文件。拓扑问题不会阻止文件导入，原始快照及工作要素不自动修复；仅现有显示缓存和渲染过程整理几何。结构损坏、无效坐标和在线编辑的几何有效性校验仍会阻止相关操作。
+
 要素更新通过 version 校验，服务层在图层行锁内执行修改，同事务重算数量、范围和几何类型并递增 data_version。最后一个要素删除后范围为空。图层逻辑删除后所有要素退出查询并解除来源文件引用；未删除图层会阻止来源文件删除或变更。
 
-`gis_vector_layer.group_id` 和 `original_group_id` 通过复合外键关联同一数据集内的分类；手动移组只改变前者，保持 layer_key、来源引用和要素属性不变，不合并图层或重读文件。assignment_mode 为 AUTO/MANUAL，style_mode 为 UNCONFIGURED/INHERIT_TARGET_GROUP/CUSTOM。未知层默认 enabled=false 且 UNCONFIGURED，显式配置后方可显示；数据库禁止启用未配置图层。手动移组、配色、级别和开关由 presentation 接口原子保存，递增 presentation_version 和数据集 display_revision。
+`gis_vector_layer.group_id` 和 `original_group_id` 通过复合外键关联同一数据集内的分类；手动移组只改变前者，保持 layer_key、来源引用和要素属性不变，不合并图层或重读文件。assignment_mode 为 AUTO/MANUAL，style_mode 为 UNCONFIGURED/INHERIT_TARGET_GROUP/CUSTOM。新模板中的未分类图层默认启用并继承点、线、面基础样式；已有 UNCONFIGURED 图层通过显式批量操作配置。数据库仍禁止启用未配置图层。批量基础预览更新数据集快照和瓦片版本，GPKG 显示索引通过持久变更记录重建，保留原始要素与发布快照。手动移组、配色、级别和开关由 presentation 接口原子保存，递增 presentation_version 和数据集 display_revision。
 
 `gis_vector_style.layer_id` 外键关联矢量图层，物理删除图层时级联删除方案，(layer_id,name) 唯一。is_default 的部分唯一索引保证每层至多一个选中方案，禁止直接删除选中方案。新导入的已识别图层直接继承分类样式，不再生成通用蓝色默认方案。自定义图层方案的 definition 仍为 schemaVersion=1 和 rules 数组，由 `VectorStyleRules` 校验；这是独立的图层样式领域，不是对 schemaVersion=2 数据集快照的兼容转换。非选中方案修改不影响显示；CUSTOM 模式下选中方案修改或切换，会更新图层 presentation_version 和数据集 display_revision，不修改原始要素或 layer.data_version。
 

@@ -46,6 +46,9 @@ public class VectorTileEncoder {
             }
         }
         Geometry shape = geometry(json.readTree(feature.getGeometryJson()));
+        // 只整理可重建的显示几何；工作要素与原始快照仍保留导入坐标，不生成修复数据文件。
+        // 在投影、锚点和各级显示缓存之前统一处理，避免填充与轮廓使用不同的面结构。
+        if (shape.getDimension() == 2 && !shape.isValid()) shape = GeometryFixer.fix(shape);
         Envelope world = new Envelope(-180, 180, -85.0511287798066, 85.0511287798066);
         if (!world.contains(shape.getEnvelopeInternal())) shape = shape.intersection(FACTORY.toGeometry(world));
         shape.apply((CoordinateFilter) c -> {
