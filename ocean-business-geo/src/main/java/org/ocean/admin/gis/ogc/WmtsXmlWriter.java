@@ -27,10 +27,10 @@ public final class WmtsXmlWriter {
     }
 
     /**
-     * 生成 GetCapabilities 响应。
+     * 生成单个服务的 GetCapabilities 响应。
      *
-     * @param serviceUrl 服务根地址，用于 OnlineResource 与资源模板
-     * @param layers     已启用图层
+     * @param serviceUrl 单服务根地址，用于 OnlineResource 与资源模板
+     * @param layers     该服务的已启用图层
      */
     public static String capabilities(String serviceUrl,
             List<PublicationLayer.RasterLayer> layers,
@@ -190,9 +190,9 @@ public final class WmtsXmlWriter {
     private static void writeLayer(XMLStreamWriter writer, String baseUrl,
             PublicationLayer.RasterLayer layer) throws XMLStreamException {
         writer.writeStartElement("", "Layer", NAMESPACE);
-        writeOwsText(writer, "Title", displayTitle(layer.title(), layer.layerName(), layer.serviceCode()));
+        writeOwsText(writer, "Title", layer.serviceName());
         writeOwsText(writer, "Identifier", layer.serviceCode());
-        writeOwsText(writer, "Abstract", displayAbstract(layer.abstractText(), layer.keywords(), layer.serviceCode()));
+        writeOwsText(writer, "Abstract", "已发布 OGC 服务: " + layer.serviceCode());
         writeBoundingBox(writer, layer);
 
         writer.writeStartElement("", "Style", NAMESPACE);
@@ -236,9 +236,9 @@ public final class WmtsXmlWriter {
             throws XMLStreamException {
         PublicationLayer.VectorLayerView first = views.getFirst();
         writer.writeStartElement("", "Layer", NAMESPACE);
-        writeOwsText(writer, "Title", displayTitle(first.title(), first.layerName(), first.serviceCode()));
+        writeOwsText(writer, "Title", first.serviceName());
         writeOwsText(writer, "Identifier", identifier);
-        writeOwsText(writer, "Abstract", displayAbstract(first.abstractText(), first.keywords(), identifier));
+        writeOwsText(writer, "Abstract", "已发布 OGC 服务: " + identifier);
         writer.writeStartElement("ows", "WGS84BoundingBox", OWS_NAMESPACE);
         writeOwsText(writer, "LowerCorner",
                 first.wgs84Bounds()[0] + " " + first.wgs84Bounds()[1]);
@@ -378,26 +378,6 @@ public final class WmtsXmlWriter {
         writer.writeStartElement(prefix, localName, namespace);
         writer.writeCharacters(value == null ? "" : value);
         writer.writeEndElement();
-    }
-
-    /** 能力文档标题优先使用 Title，其次 LayerName，最后回退服务编码。 */
-    private static String displayTitle(String title, String layerName, String serviceCode) {
-        if (title != null && !title.isBlank()) return title;
-        if (layerName != null && !layerName.isBlank()) return layerName;
-        return serviceCode;
-    }
-
-    /** 能力文档摘要优先使用 Abstract；缺失时用关键字或服务编码兜底。 */
-    private static String displayAbstract(String abstractText, String keywords, String serviceCode) {
-        if (abstractText != null && !abstractText.isBlank()) return abstractText;
-        if (keywords != null && !keywords.isBlank()) return "关键字: " + keywords;
-        return "已发布 OGC 服务: " + serviceCode;
-    }
-
-    /** 能力文档展示名优先使用发布时填写的图层名称，缺失时回退服务编码。 */
-    private static String catalogTitle(PublicationLayer.RasterLayer layer) {
-        String title = layer.layerName();
-        return title == null || title.isBlank() ? layer.serviceCode() : title;
     }
 
     private static XMLStreamWriter newWriter(StringWriter buffer) throws XMLStreamException {

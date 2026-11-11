@@ -9,7 +9,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** 地形、影像和矢量服务共用的发布记录。 */
+/** 地形、影像和矢量服务共用的单协议发布记录。 */
 @Data
 @TableName(value = "gis_publication", schema = "ocean_gis")
 public class GisPublication {
@@ -19,26 +19,12 @@ public class GisPublication {
     private String serviceCode;
     private String serviceName;
     private String serviceProtocol;
-    @TableField("protocols")
-    private String protocolsJson;
     private Long sourceTaskId;
     private String processingType;
-    private String layerName;
-    private String title;
-    @TableField("abstract")
-    private String abstractText;
-    private String keywords;
-    private String defaultCrs;
-    @TableField("supported_crs")
-    private String supportedCrsJson;
-    @TableField("tile_matrix_sets")
-    private String tileMatrixSetsJson;
     private Integer minZoom;
     private Integer maxZoom;
     private String targetCrs;
     private String tileMatrixSet;
-    private String outputFormat;
-    private String tileProfile;
     @TableField("bounds_wgs84")
     private String boundsWgs84Json;
     private String styleId;

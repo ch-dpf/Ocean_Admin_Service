@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** WMTS 1.0.0 协议语义：请求解析、参数校验、矩阵集一致性判断与瓦片文件定位。 */
+/** WMTS 1.0.0 协议语义：单服务请求解析、参数校验与瓦片文件定位。 */
 @Service
 public class WmtsService {
 
@@ -18,114 +18,49 @@ public class WmtsService {
     private static final String VERSION = "1.0.0";
 
     private final PublicationCatalog catalog;
-    private final VectorTileRenderer vectorTileRenderer;
     private final PublicationRecordService recordService;
 
     public WmtsService(PublicationCatalog catalog,
-            VectorTileRenderer vectorTileRenderer,
             PublicationRecordService recordService) {
         this.catalog = catalog;
-        this.vectorTileRenderer = vectorTileRenderer;
         this.recordService = recordService;
     }
 
-    /** 处理 KVP 请求：GetCapabilities 或 GetTile。 */
-    public WmtsReply handleKvp(Map<String, String> requestParameters) {
+    /** 处理单服务 KVP 请求：GetCapabilities 或 GetTile。 */
+    public WmtsReply handleKvp(String serviceCode, Map<String, String> requestParameters) {
         Map<String, String> parameters = lowerCaseKeys(requestParameters);
         requireService(parameters);
         String operation = required(parameters.get("request"), "REQUEST");
         return switch (operation.toUpperCase(Locale.ROOT)) {
-            case "GETCAPABILITIES" -> document(capabilitiesXml());
-            case "GETTILE" -> getTile(parameters);
+            case "GETCAPABILITIES" -> document(capabilitiesXml(serviceCode));
+            case "GETTILE" -> getTile(serviceCode, parameters);
             default -> throw new OgcException("OperationNotSupported", "REQUEST",
                     "不支持的操作: " + operation);
         };
     }
 
-    /** GetTile 先按矢量图层标识解析，未命中再走已生成影像瓦片文件。 */
-    private WmtsReply getTile(Map<String, String> parameters) {
-        String layer = required(parameters.get("layer"), "LAYER");
-        PublicationLayer.VectorLayerView view = vectorView(layer,
-                parameters.get("tilematrixset"));
-        if (view == null) {
-            return tileReply(resolveTile(
-                    requireLayer(layer), parameters.get("style"),
-                    parameters.get("tilematrixset"), parameters.get("tilematrix"),
-                    parameters.get("tilerow"), parameters.get("tilecol"),
-                    parameters.get("format")));
+    /** GetTile 只读取路径编码对应的已发布静态瓦片图层。 */
+    private WmtsReply getTile(String serviceCode, Map<String, String> parameters) {
+        String layer = parameters.get("layer");
+        if (layer != null && !layer.isBlank() && !serviceCode.equalsIgnoreCase(layer.trim())) {
+            throw new OgcException("InvalidParameterValue", "LAYER",
+                    "LAYER 必须等于服务编码 " + serviceCode);
         }
-        return vectorTile(view, parameters.get("style"),
+        return tileReply(resolveTile(
+                requireLayer(serviceCode), parameters.get("style"),
                 parameters.get("tilematrixset"), parameters.get("tilematrix"),
                 parameters.get("tilerow"), parameters.get("tilecol"),
-                parameters.get("format"), "WMTS");
-    }
-
-    /** KVP 的 LAYER 可用服务编码简写，具体矩阵集由 TILEMATRIXSET 决定；REST 可带 @矩阵集 后缀。 */
-    private PublicationLayer.VectorLayerView vectorView(String layer,
-            String matrixSetId) {
-        if (matrixSetId != null && !matrixSetId.isBlank()) {
-            String[] parts = layer.split("@", -1);
-            if (parts.length == 2 && parts[1].equalsIgnoreCase(matrixSetId.trim())) {
-                layer = parts[0];
-            }
-            return catalog.findView(layer, matrixSetId);
-        }
-        return catalog.findView(layer);
-    }
-
-    /** 校验矢量瓦片参数并交给动态光栅渲染器。 */
-    private WmtsReply vectorTile(PublicationLayer.VectorLayerView view,
-            String style, String tileMatrixSet, String tileMatrix,
-            String tileRow, String tileCol, String format, String protocol) {
-        String chosenStyle = style == null || style.isBlank()
-                ? view.defaultStyleId() : style.trim();
-        if (view.styles().stream().noneMatch(item -> item.id().equals(chosenStyle))) {
-            throw new OgcException("InvalidParameterValue", "STYLE",
-                    "图层 " + view.serviceCode() + " 不支持样式: " + chosenStyle);
-        }
-        if (tileMatrixSet == null || tileMatrixSet.isBlank()) {
-            throw new OgcException("MissingParameterValue", "TILEMATRIXSET",
-                    "缺少 TILEMATRIXSET 参数");
-        }
-        if (!view.matrixSet().id().equalsIgnoreCase(tileMatrixSet.trim())) {
-            throw new OgcException("InvalidParameterValue", "TILEMATRIXSET",
-                    "图层 " + view.serviceCode() + " 使用矩阵集 " + view.matrixSet().id());
-        }
-        if (format != null && !format.isBlank()
-                && !view.mediaType().equalsIgnoreCase(format.trim())
-                && !view.extension().equalsIgnoreCase(format.trim())) {
-            throw new OgcException("InvalidParameterValue", "FORMAT",
-                    "矢量瓦片仅支持 " + view.mediaType());
-        }
-        int zoom = parseInt(tileMatrix, "TILEMATRIX");
-        int row = parseInt(tileRow, "TILEROW");
-        int col = parseInt(tileCol, "TILECOL");
-        if (zoom < view.minZoom() || zoom > view.maxZoom()) {
-            throw new OgcException("TileOutOfRange", "TILEMATRIX",
-                    "TILEMATRIX 超出图层层级范围 " + view.minZoom() + "-"
-                            + view.maxZoom() + ": " + zoom);
-        }
-        if (row < 0 || row >= view.matrixSet().matrixHeight(zoom)
-                || col < 0 || col >= view.matrixSet().matrixWidth(zoom)) {
-            throw new OgcException("TileOutOfRange", "TILEROW/TILECOL",
-                    "瓦片行列号超出矩阵范围: " + row + "/" + col);
-        }
-        try {
-            return new WmtsReply(null, null, view.mediaType(), vectorTileRenderer.render(
-                    view, chosenStyle, protocol, zoom, row, col));
-        } catch (RuntimeException ex) {
-            throw new OgcException("NoApplicableCode", null,
-                    "矢量瓦片渲染失败: " + ex.getMessage());
-        }
+                parameters.get("format")));
     }
 
     /**
-     * 处理 RESTful 取图请求。
+     * 处理单服务 RESTful 取图请求。
      *
      * @param tileColWithExtension 形如 {@code 200.png} 的列号与格式扩展名
      */
-    public WmtsReply handleRestTile(String layer, String style, String tileMatrixSet,
-            String tileMatrix, String tileRow, String tileColWithExtension) {
+    public WmtsReply handleRestTile(String serviceCode, String layer, String style,
+            String tileMatrixSet, String tileMatrix, String tileRow,
+            String tileColWithExtension) {
         int separator = tileColWithExtension == null ? -1 : tileColWithExtension.lastIndexOf('.');
         if (separator <= 0 || separator == tileColWithExtension.length() - 1) {
             throw new OgcException("InvalidParameterValue", "TILECOL",
@@ -133,25 +68,26 @@ public class WmtsService {
         }
         String tileCol = tileColWithExtension.substring(0, separator);
         String extension = tileColWithExtension.substring(separator + 1).toLowerCase(Locale.ROOT);
-        String format = "jpg".equals(extension) || "jpeg".equals(extension)
-                ? "image/jpeg" : "image/" + extension;
-        String layerId = layer.contains("@") ? layer : layer + "@" + tileMatrixSet;
-        PublicationLayer.VectorLayerView view = catalog.findView(layerId);
-        if (view != null) {
-            return vectorTile(view, style, tileMatrixSet, tileMatrix, tileRow, tileCol,
-                    format, "WMTS");
+        String format = switch (extension) {
+            case "jpg", "jpeg" -> "image/jpeg";
+            case "png" -> "image/png";
+            default -> extension;
+        };
+        if (!serviceCode.equalsIgnoreCase(layer)) {
+            throw new OgcException("InvalidParameterValue", "LAYER",
+                    "RESTful 图层必须等于服务编码 " + serviceCode);
         }
         return tileReply(resolveTile(
-                requireLayer(layer.contains("@") ? layer.substring(0, layer.indexOf('@')) : layer),
-                style, tileMatrixSet,
+                requireLayer(serviceCode), style, tileMatrixSet,
                 tileMatrix, tileRow, tileCol, format));
     }
 
-    /** 生成 GetCapabilities 文档；服务地址与既有发布接口同源。 */
-    public String capabilitiesXml() {
+    /** 生成单个服务的能力文档；只包含一个图层，层级范围来自该发布记录。 */
+    public String capabilitiesXml(String serviceCode) {
+        PublicationLayer.RasterLayer layer = requireLayer(serviceCode);
         return WmtsXmlWriter.capabilities(
-                recordService.buildPublicUrl("/gis/wmts"),
-                catalog.listRaster(OgcProtocol.WMTS), catalog.listVectorViews(OgcProtocol.WMTS));
+                recordService.buildPublicUrl("/gis/wmts/" + serviceCode),
+                List.of(layer), List.of());
     }
 
     /** 生成 OGC ExceptionReport 文档。 */
@@ -161,13 +97,15 @@ public class WmtsService {
     }
 
     /** 解析图层；服务不存在、已停用或元数据非法时抛出 OGC 参数异常。 */
-    public PublicationLayer.RasterLayer requireLayer(String layer) {
-        if (layer == null || layer.isBlank()) {
-            throw new OgcException("MissingParameterValue", "LAYER", "缺少 LAYER 参数");
+    public PublicationLayer.RasterLayer requireLayer(String serviceCode) {
+        if (serviceCode == null || serviceCode.isBlank()) {
+            throw new OgcException("MissingParameterValue", "LAYER", "缺少服务编码");
         }
-        PublicationLayer.RasterLayer published = catalog.loadRaster(layer.trim(), OgcProtocol.WMTS);
+        PublicationLayer.RasterLayer published = catalog.loadRaster(serviceCode.trim(),
+                OgcProtocol.WMTS);
         if (published == null) {
-            throw new OgcException("InvalidParameterValue", "LAYER", "图层不存在或已停用: " + layer);
+            throw new OgcException("InvalidParameterValue", "LAYER",
+                    "图层不存在或已停用: " + serviceCode);
         }
         return published;
     }
@@ -260,7 +198,8 @@ public class WmtsService {
         if (format == null || format.isBlank()) {
             throw new OgcException("MissingParameterValue", "FORMAT", "缺少 FORMAT 参数");
         }
-        if (!layer.mediaType().equalsIgnoreCase(format.trim())) {
+        if (!layer.mediaType().equalsIgnoreCase(format.trim())
+                && !layer.extension().equalsIgnoreCase(format.trim())) {
             throw new OgcException("InvalidParameterValue", "FORMAT",
                     "图层 " + layer.serviceCode() + " 仅支持格式 " + layer.mediaType());
         }
@@ -293,18 +232,17 @@ public class WmtsService {
     }
 
     private WmtsReply tileReply(TileResource tile) {
-        return new WmtsReply(null, tile.file(), tile.mediaType(), null);
+        return new WmtsReply(null, tile.file(), tile.mediaType());
     }
 
     private WmtsReply document(String xml) {
-        return new WmtsReply(xml, null, null, null);
+        return new WmtsReply(xml, null, null);
     }
 
     /**
-     * WMTS 响应内容：能力文档或异常报告返回 {@code xml}，影像取图返回瓦片文件，
-     * 矢量取图返回内存字节。
+     * WMTS 响应内容：能力文档或异常报告返回 {@code xml}，取图返回瓦片文件。
      */
-    public record WmtsReply(String xml, Path file, String mediaType, byte[] body) {
+    public record WmtsReply(String xml, Path file, String mediaType) {
     }
 
     /** 已定位的瓦片文件及其响应媒体类型。 */

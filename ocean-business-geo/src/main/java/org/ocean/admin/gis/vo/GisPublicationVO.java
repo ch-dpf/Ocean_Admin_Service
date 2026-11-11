@@ -7,29 +7,22 @@ import org.ocean.admin.gis.processing.GisProcessingType;
 
 import java.time.LocalDateTime;
 
-/** 地形、影像和矢量瓦片服务共用的发布记录视图。 */
+/** 地形、影像和矢量瓦片服务共用的单协议发布记录视图。 */
 @Data
 @Builder
 public class GisPublicationVO {
     private Long id;
     private String serviceCode;
     private String serviceName;
-    @Schema(description = "明确发布协议：WMS、MVT、TMS_WMTS、XYZ、TMS、TERRAIN")
+    @Schema(description = "本记录唯一服务协议：WMTS 或 TMS")
     private String serviceProtocol;
 
-    @Schema(description = "本次发布支持的协议集合：WMS、WMTS、TMS、WFS、XYZ")
+    @Schema(description = "本记录唯一服务协议：WMTS 或 TMS")
     private java.util.List<String> protocols;
 
     @Schema(description = "发布类型：TERRAIN、IMAGERY、VECTOR")
     private GisProcessingType processingType;
 
-    private String layerName;
-    private String title;
-    private String abstractText;
-    private String keywords;
-    private String defaultCrs;
-    private java.util.List<String> supportedCrs;
-    private java.util.List<String> tileMatrixSets;
     private java.util.List<Double> boundsWgs84;
     private String styleId;
     private String styleName;
@@ -53,30 +46,22 @@ public class GisPublicationVO {
 
     private String outputKey;
     private String targetCrs;
-    private String tileProfile;
-    private String outputFormat;
+    private String tileMatrixSet;
     private Integer minZoom;
     private Integer maxZoom;
 
-    @Schema(description = "服务访问地址：地形根地址、影像瓦片模板、动态矢量根地址或静态配图 WMTS 端点")
-    private String serviceUrl;
-
-    @Schema(description = "服务描述地址：影像 TileJSON、地形 layer.json、矢量 manifest 或静态配图 WMTS 能力文档")
+    @Schema(description = "本服务的单图层能力文档地址")
     private String descriptorUrl;
 
-    @Schema(description = "瓦片访问模板；不适用的发布类型为空")
+    @Schema(description = "本服务的协议根地址")
+    private String serviceUrl;
+
+    @Schema(description = "本服务的瓦片访问模板")
     private String tileUrlTemplate;
 
-    @Schema(description = "静态配图 TMS 图层描述地址；同一发布记录同时提供 WMTS")
+    @Schema(description = "TMS 单服务根文档地址；非 TMS 发布为空")
     private String tmsUrl;
     private String tmsTileUrlTemplate;
-
-    @Schema(description = "动态矢量发布的固定数据资源ID")
-    private String vectorResourceId;
-    private String vectorDefinition;
-    private String releaseVersion;
-    private String defaultStyleId;
-    private tools.jackson.databind.JsonNode styles;
 
     private LocalDateTime publishTime;
     private LocalDateTime updateTime;

@@ -6,20 +6,16 @@ import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 
-/** 统一发布目录向四个 OGC 运行时提供的图层契约。 */
+/** 统一发布目录向各 OGC 运行时提供的图层契约。 */
 public final class PublicationLayer {
 
     private PublicationLayer() {
     }
 
-    /** 静态影像、地形或矢量配图瓦片图层。 */
+    /** 静态影像或矢量配图瓦片图层。 */
     public record RasterLayer(
             String serviceCode,
             String serviceName,
-            String layerName,
-            String title,
-            String abstractText,
-            String keywords,
             TileMatrixSetDefinition matrixSet,
             String tileProfile,
             String extension,
@@ -37,10 +33,6 @@ public final class PublicationLayer {
     public record VectorLayer(
             String serviceCode,
             String serviceName,
-            String layerName,
-            String title,
-            String abstractText,
-            String keywords,
             String releaseVersion,
             GisVectorResource resource,
             double[] wgs84Bounds,
@@ -87,10 +79,6 @@ public final class PublicationLayer {
     public record VectorLayerView(
             String serviceCode,
             String serviceName,
-            String layerName,
-            String title,
-            String abstractText,
-            String keywords,
             double[] wgs84Bounds,
             int minZoom,
             int maxZoom,
@@ -104,5 +92,16 @@ public final class PublicationLayer {
 
     /** 能力文档列出的一套可切换样式。 */
     public record StyleOption(String id, String name) {
+    }
+
+    /** 切片产物描述文件推导出的服务元数据；发布记录与单服务能力文档共用。 */
+    public record TileArtifact(
+            TileMatrixSetDefinition matrixSet,
+            String targetCrs,
+            String extension,
+            String mediaType,
+            int minZoom,
+            int maxZoom,
+            double[] wgs84Bounds) {
     }
 }

@@ -82,22 +82,13 @@ public class PublicationRecordService {
         return publication;
     }
 
-    public GisPublication findBySourceTaskId(
-            GisProcessingType processingType, Long sourceTaskId) {
-        GisTileSet tileSet = tileSetMapper.selectByTaskId(sourceTaskId);
-        if (tileSet == null || processingType != tileSet.getTileType()) {
-            return null;
-        }
-        return publicationMapper.selectOne(new LambdaQueryWrapper<GisPublication>()
-                .eq(GisPublication::getTileSetId, tileSet.getId()));
-    }
-
-    /** 统一发布记录的保存入口；同一任务只保留一条有效记录。 */
+    /** 统一发布记录的保存入口；同一任务的同一协议只保留一条有效记录，不同协议各自独立成记录。 */
     @Transactional(rollbackFor = Exception.class)
     public GisPublication saveUnified(GisPublication publication) {
         GisPublication existing = publicationMapper.selectOne(
                 new LambdaQueryWrapper<GisPublication>()
-                        .eq(GisPublication::getSourceTaskId, publication.getSourceTaskId()));
+                        .eq(GisPublication::getSourceTaskId, publication.getSourceTaskId())
+                        .eq(GisPublication::getServiceProtocol, publication.getServiceProtocol()));
         if (existing == null) {
             if (publicationMapper.insert(publication) != 1) {
                 throw new IllegalStateException("统一发布记录保存失败");

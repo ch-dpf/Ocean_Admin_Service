@@ -21,7 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * WMTS 1.0.0 公开服务入口，同时支持 KVP 与 RESTful 两种取图方式。
+ * WMTS 1.0.0 公开服务入口，每个服务编码独占一套 KVP 与 RESTful 地址。
  *
  * <p>与既有的 {@code /gis/publications/**} 一致，不经过 {@code /api} 鉴权拦截。</p>
  */
@@ -39,10 +39,10 @@ public class WmtsController {
         this.wmtsService = wmtsService;
     }
 
-    @GetMapping
-    public ResponseEntity<?> kvp(HttpServletRequest request) {
+    @GetMapping("/{serviceCode}")
+    public ResponseEntity<?> kvp(@PathVariable String serviceCode, HttpServletRequest request) {
         try {
-            return respond(wmtsService.handleKvp(parameters(request)));
+            return respond(wmtsService.handleKvp(serviceCode, parameters(request)));
         } catch (WmtsService.OgcException ex) {
             return exception(ex);
         } catch (RuntimeException ex) {
@@ -52,8 +52,9 @@ public class WmtsController {
         }
     }
 
-    @GetMapping("/rest/{layer}/{style}/{tileMatrixSet}/{tileMatrix}/{tileRow}/{tileColWithExtension}")
+    @GetMapping("/{serviceCode}/rest/{layer}/{style}/{tileMatrixSet}/{tileMatrix}/{tileRow}/{tileColWithExtension}")
     public ResponseEntity<?> rest(
+            @PathVariable String serviceCode,
             @PathVariable String layer,
             @PathVariable String style,
             @PathVariable String tileMatrixSet,
@@ -62,7 +63,8 @@ public class WmtsController {
             @PathVariable String tileColWithExtension) {
         try {
             return respond(wmtsService.handleRestTile(
-                    layer, style, tileMatrixSet, tileMatrix, tileRow, tileColWithExtension));
+                    serviceCode, layer, style, tileMatrixSet, tileMatrix, tileRow,
+                    tileColWithExtension));
         } catch (WmtsService.OgcException ex) {
             return exception(ex);
         } catch (RuntimeException ex) {
@@ -76,13 +78,6 @@ public class WmtsController {
         if (reply.xml() != null) {
             return ResponseEntity.ok().contentType(XML)
                     .header("Cache-Control", "no-store").body(reply.xml());
-        }
-        if (reply.body() != null) {
-            return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType(reply.mediaType()))
-                    .contentLength(reply.body().length)
-                    .cacheControl(CacheControl.maxAge(Duration.ofMinutes(10)).cachePublic())
-                    .body(reply.body());
         }
         Path file = reply.file();
         try {

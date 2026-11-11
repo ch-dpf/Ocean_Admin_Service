@@ -896,22 +896,12 @@ CREATE TABLE ocean_gis.gis_publication (
     service_code        VARCHAR(64)  NOT NULL,
     service_name        VARCHAR(200) NOT NULL,
     service_protocol    VARCHAR(20) NOT NULL,
-    protocols           TEXT         NOT NULL DEFAULT '[]',
     source_task_id      BIGINT       REFERENCES ocean_gis.gis_processing_task(id) ON DELETE CASCADE,
     processing_type     VARCHAR(20)  NOT NULL,
-    layer_name          VARCHAR(200),
-    title               VARCHAR(200),
-    abstract            VARCHAR(1000),
-    keywords            VARCHAR(500),
-    default_crs         VARCHAR(32),
-    supported_crs       TEXT,
-    tile_matrix_sets    TEXT,
     min_zoom            INTEGER,
     max_zoom            INTEGER,
     target_crs          VARCHAR(32),
     tile_matrix_set     VARCHAR(64),
-    output_format       VARCHAR(32),
-    tile_profile        VARCHAR(32),
     bounds_wgs84        TEXT,
     style_id            VARCHAR(64),
     style_name          VARCHAR(200),
@@ -928,7 +918,6 @@ CREATE TABLE ocean_gis.gis_publication (
     update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted             INTEGER      NOT NULL DEFAULT 0,
     CONSTRAINT uk_gis_publication_code UNIQUE (service_code),
-    CONSTRAINT uk_gis_publication_tile_set UNIQUE (tile_set_id),
     CONSTRAINT fk_gis_publication_tile_set
         FOREIGN KEY (tile_set_id) REFERENCES ocean_gis.gis_tile_set (id),
     CONSTRAINT fk_gis_publication_data_set
@@ -936,29 +925,28 @@ CREATE TABLE ocean_gis.gis_publication (
     CONSTRAINT ck_gis_publication_status
         CHECK (status IN ('PUBLISHED', 'DISABLED')),
     CONSTRAINT ck_gis_publication_source CHECK ((tile_set_id IS NOT NULL) <> (vector_resource_id IS NOT NULL)),
-    CONSTRAINT ck_gis_publication_protocol CHECK (
-        (vector_resource_id IS NOT NULL AND service_protocol IN ('MVT', 'WMS')) OR
-        (tile_set_id IS NOT NULL AND service_protocol IN ('TMS_WMTS', 'XYZ', 'TMS', 'TERRAIN'))),
+    CONSTRAINT ck_gis_publication_protocol CHECK (service_protocol IN ('WMTS', 'TMS')),
     CONSTRAINT ck_gis_publication_deleted
         CHECK (deleted IN (0, 1))
 );
 
-COMMENT ON TABLE ocean_gis.gis_publication IS '静态瓦片集或固定矢量资源与样式组合的公开发布记录';
+COMMENT ON TABLE ocean_gis.gis_publication IS '静态瓦片集的单协议公开发布记录；同一任务每个协议各一条记录';
 COMMENT ON COLUMN ocean_gis.gis_publication.service_name IS '可重命名的服务名称';
-COMMENT ON COLUMN ocean_gis.gis_publication.service_protocol IS '发布协议；独立于成果格式和物理瓦片编号方案';
-COMMENT ON COLUMN ocean_gis.gis_publication.service_code IS '公开服务 URL 中使用的稳定编码';
+COMMENT ON COLUMN ocean_gis.gis_publication.service_protocol IS '本记录唯一对外协议：WMTS 或 TMS';
+COMMENT ON COLUMN ocean_gis.gis_publication.service_code IS '公开服务 URL 中区分图层的稳定编码';
 COMMENT ON COLUMN ocean_gis.gis_publication.tile_set_id IS '被发布的静态瓦片集 ID';
+COMMENT ON COLUMN ocean_gis.gis_publication.target_crs IS '切片产物实际使用的目标坐标系';
+COMMENT ON COLUMN ocean_gis.gis_publication.tile_matrix_set IS '切片产物实际使用的瓦片矩阵集';
 
 CREATE INDEX idx_gis_publication_status
     ON ocean_gis.gis_publication (status, publish_time DESC)
     WHERE deleted = 0;
-CREATE UNIQUE INDEX uk_gis_publication_task
-    ON ocean_gis.gis_publication (source_task_id)
+CREATE UNIQUE INDEX uk_gis_publication_task_protocol
+    ON ocean_gis.gis_publication (source_task_id, service_protocol)
     WHERE deleted = 0 AND source_task_id IS NOT NULL;
 CREATE INDEX idx_gis_publication_processing_status
     ON ocean_gis.gis_publication (processing_type, status, publish_time DESC)
     WHERE deleted = 0;
-COMMENT ON COLUMN ocean_gis.gis_publication.protocols IS '本次发布支持的协议集合：WMS、WMTS、TMS、WFS、XYZ';
 COMMENT ON COLUMN ocean_gis.gis_publication.source_task_id IS '发起发布的数据处理任务 ID';
 COMMENT ON COLUMN ocean_gis.gis_publication.processing_type IS '原始数据类别；决定记录进入影像、地形或矢量服务列表';
 
