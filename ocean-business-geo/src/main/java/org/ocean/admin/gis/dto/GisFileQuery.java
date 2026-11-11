@@ -51,12 +51,6 @@ public class GisFileQuery {
         if (!Set.of("INTERSECTS", "COVERED_BY").contains(spatialRelation)) {
             throw new IllegalArgumentException("空间关系只能为 INTERSECTS 或 COVERED_BY");
         }
-        if (fileStatus != null && !Set.of("PENDING", "READY", "FAILED").contains(fileStatus)) {
-            throw new IllegalArgumentException("文件状态只能为 PENDING、READY 或 FAILED");
-        }
-        if (metadataStatus != null && !Set.of("WAITING", "PARKED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "NOT_APPLICABLE").contains(metadataStatus)) {
-            throw new IllegalArgumentException("元数据状态无效");
-        }
         boolean any = west != null || south != null || east != null || north != null;
         if (any && !hasBounds()) throw new IllegalArgumentException("框选四个坐标必须同时提供");
         if (hasBounds() && (!Double.isFinite(west) || !Double.isFinite(east)

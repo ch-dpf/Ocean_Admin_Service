@@ -41,6 +41,7 @@ import org.springframework.context.ApplicationEventPublisher;
 @RequiredArgsConstructor
 public class FileMetaService {
 
+    private final GisDictionaryService dictionaries;
     private final GisFileMetaMapper gisFileMetaMapper;
     private final GisFileGroupMapper fileGroupMapper;
     private final FileGroupService fileGroups;
@@ -57,6 +58,8 @@ public class FileMetaService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResult<List<GisFileMetaVO>> getFileMetaPage(GisFileQuery query) {
         query.validate();
+        dictionaries.validateOptional("metadataStatus", query.getMetadataStatus());
+        dictionaries.validateOptional("fileStatus", query.getFileStatus());
         Page<GisFileMetaVO> page = gisFileMetaMapper.selectFilePage(
                 new Page<>(query.getCurrent(), query.getSize()), query);
         spatialMetadataService.populate(page.getRecords(), query.isIncludeGeometry());

@@ -27,7 +27,7 @@ public class GisFileProcessingEngineRegistry {
     public GisFileProcessingEngine require(GisProcessingType type) {
         GisFileProcessingEngine engine = engines.get(type);
         if (engine == null) {
-            throw new IllegalStateException(type.displayName() + "引擎尚未接入或未启用");
+            throw new IllegalStateException(type.name() + "引擎尚未接入或未启用");
         }
         return engine;
     }

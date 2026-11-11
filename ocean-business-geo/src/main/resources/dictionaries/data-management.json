@@ -1,0 +1,541 @@
+{
+  "datasetCategory": [
+    {
+      "code": "0",
+      "label": "影像数据",
+      "sort": 10
+    },
+    {
+      "code": "1",
+      "label": "地形数据",
+      "sort": 20
+    },
+    {
+      "code": "2",
+      "label": "矢量数据",
+      "sort": 30
+    }
+  ],
+  "metadataStatus": [
+    {
+      "code": "WAITING",
+      "label": "等待接收结束",
+      "sort": 10
+    },
+    {
+      "code": "PARKED",
+      "label": "已接收未解析",
+      "sort": 20
+    },
+    {
+      "code": "QUEUED",
+      "label": "待解析",
+      "sort": 30
+    },
+    {
+      "code": "RUNNING",
+      "label": "解析中",
+      "sort": 40
+    },
+    {
+      "code": "COMPLETED",
+      "label": "解析完成",
+      "sort": 50
+    },
+    {
+      "code": "FAILED",
+      "label": "解析失败",
+      "sort": 60
+    },
+    {
+      "code": "NOT_APPLICABLE",
+      "label": "配套文件",
+      "sort": 70
+    }
+  ],
+  "groupAssemblyStatus": [
+    {
+      "code": "COMPLETE",
+      "label": "完整",
+      "sort": 10
+    },
+    {
+      "code": "INCOMPLETE",
+      "label": "缺件",
+      "sort": 20
+    },
+    {
+      "code": "UNKNOWN",
+      "label": "待识别",
+      "sort": 30
+    },
+    {
+      "code": "BLOCKED",
+      "label": "能力阻塞",
+      "sort": 40
+    },
+    {
+      "code": "DUPLICATE",
+      "label": "重复输入",
+      "sort": 50
+    }
+  ],
+  "groupParseStatus": [
+    {
+      "code": "PARKED",
+      "label": "已接收，暂未解析",
+      "sort": 10
+    },
+    {
+      "code": "QUEUED",
+      "label": "排队中",
+      "sort": 20
+    },
+    {
+      "code": "RUNNING",
+      "label": "解析中",
+      "sort": 30
+    },
+    {
+      "code": "COMPLETED",
+      "label": "解析完成",
+      "sort": 40
+    },
+    {
+      "code": "FAILED",
+      "label": "解析失败",
+      "sort": 50
+    },
+    {
+      "code": "NOT_APPLICABLE",
+      "label": "不适用",
+      "sort": 60
+    },
+    {
+      "code": "REIMPORT_REQUIRED",
+      "label": "需显式重导",
+      "sort": 70
+    }
+  ],
+  "taskStatus": [
+    {
+      "code": "QUEUED",
+      "label": "排队中",
+      "sort": 10
+    },
+    {
+      "code": "RUNNING",
+      "label": "处理中",
+      "sort": 20
+    },
+    {
+      "code": "COMPLETED",
+      "label": "已完成",
+      "sort": 30
+    },
+    {
+      "code": "PARTIAL_FAILED",
+      "label": "部分失败",
+      "sort": 40
+    },
+    {
+      "code": "FAILED",
+      "label": "失败",
+      "sort": 70
+    }
+  ],
+  "processingInputKind": [
+    {
+      "code": "FILE",
+      "label": "文件",
+      "sort": 10
+    },
+    {
+      "code": "DIRECTORY",
+      "label": "目录",
+      "sort": 20
+    }
+  ],
+  "processingInputStatus": [
+    {
+      "code": "READY",
+      "label": "待处理",
+      "sort": 10
+    },
+    {
+      "code": "RUNNING",
+      "label": "处理中",
+      "sort": 20
+    },
+    {
+      "code": "CONSUMED",
+      "label": "已处理",
+      "sort": 30
+    },
+    {
+      "code": "FAILED",
+      "label": "处理失败",
+      "sort": 40
+    }
+  ],
+  "tileSetStatus": [
+    {
+      "code": "BUILDING",
+      "label": "生成中",
+      "sort": 10
+    },
+    {
+      "code": "READY",
+      "label": "就绪",
+      "sort": 20
+    },
+    {
+      "code": "FAILED",
+      "label": "失败",
+      "sort": 30
+    }
+  ],
+  "inputSourceType": [
+    {
+      "code": "UPLOAD",
+      "label": "文件上传",
+      "sort": 10,
+      "attributes": {
+        "tabKey": "local"
+      }
+    },
+    {
+      "code": "WORKSPACE",
+      "label": "工作空间",
+      "sort": 20,
+      "attributes": {
+        "tabKey": "server"
+      }
+    },
+    {
+      "code": "MANAGED_FILE",
+      "label": "已管理文件",
+      "sort": 30,
+      "attributes": {
+        "tabKey": "managed"
+      }
+    },
+    {
+      "code": "VECTOR_RESOURCE",
+      "label": "矢量工作数据",
+      "sort": 40
+    }
+  ],
+  "processingType": [
+    {
+      "code": "TERRAIN",
+      "label": "地形处理",
+      "sort": 10,
+      "attributes": {
+        "categoryId": "1",
+        "formLabel": "地形切片",
+        "dataLabel": "文件上传"
+      }
+    },
+    {
+      "code": "IMAGERY",
+      "label": "影像处理",
+      "sort": 20,
+      "attributes": {
+        "categoryId": "0",
+        "formLabel": "影像切片",
+        "dataLabel": "文件上传"
+      }
+    },
+    {
+      "code": "VECTOR",
+      "label": "矢量处理",
+      "sort": 30,
+      "attributes": {
+        "categoryId": "2",
+        "formLabel": "矢量切片",
+        "dataLabel": "矢量"
+      }
+    }
+  ],
+  "terrainTargetCrs": [
+    {
+      "code": "EPSG:4326",
+      "label": "EPSG:4326",
+      "sort": 10,
+      "attributes": {
+        "default": "true"
+      }
+    }
+  ],
+  "terrainTileProfile": [
+    {
+      "code": "TMS",
+      "label": "TMS",
+      "sort": 10,
+      "attributes": {
+        "default": "true"
+      }
+    }
+  ],
+  "terrainOutputFormat": [
+    {
+      "code": "QUANTIZED_MESH",
+      "label": ".terrain",
+      "sort": 10,
+      "attributes": {
+        "default": "true"
+      }
+    }
+  ],
+  "imageryTargetCrs": [
+    {
+      "code": "EPSG:3857",
+      "label": "EPSG:3857",
+      "sort": 10,
+      "attributes": {
+        "default": "true"
+      }
+    },
+    {
+      "code": "EPSG:4326",
+      "label": "EPSG:4326",
+      "sort": 20
+    }
+  ],
+  "imageryTileProfile": [
+    {
+      "code": "XYZ",
+      "label": "XYZ",
+      "sort": 10,
+      "attributes": {
+        "default": "true"
+      }
+    },
+    {
+      "code": "TMS",
+      "label": "TMS",
+      "sort": 20
+    }
+  ],
+  "imageryOutputFormat": [
+    {
+      "code": "PNG",
+      "label": "PNG",
+      "sort": 10,
+      "attributes": {
+        "default": "true"
+      }
+    },
+    {
+      "code": "JPEG",
+      "label": "JPEG",
+      "sort": 20
+    },
+    {
+      "code": "JPG",
+      "label": "JPG",
+      "sort": 30
+    }
+  ],
+  "processingStage": [
+    {
+      "code": "queued",
+      "label": "排队中",
+      "sort": 10
+    },
+    {
+      "code": "preparing",
+      "label": "准备中",
+      "sort": 20,
+      "attributes": {
+        "imageryOrder": "1"
+      }
+    },
+    {
+      "code": "analyzing",
+      "label": "分析中",
+      "sort": 30,
+      "attributes": {
+        "imageryOrder": "2",
+        "terrainOrder": "1"
+      }
+    },
+    {
+      "code": "preprocessing",
+      "label": "预处理中",
+      "sort": 40,
+      "attributes": {
+        "terrainOrder": "2"
+      }
+    },
+    {
+      "code": "processing",
+      "label": "处理中",
+      "sort": 50
+    },
+    {
+      "code": "running",
+      "label": "处理中",
+      "sort": 60
+    },
+    {
+      "code": "completed",
+      "label": "已完成",
+      "sort": 70
+    },
+    {
+      "code": "failed",
+      "label": "失败",
+      "sort": 80
+    },
+    {
+      "code": "partial_failed",
+      "label": "部分失败",
+      "sort": 90
+    },
+    {
+      "code": "source_verifying",
+      "label": "源文件校验",
+      "sort": 100
+    },
+    {
+      "code": "source_reverifying",
+      "label": "源文件复核",
+      "sort": 110
+    },
+    {
+      "code": "source_preparing",
+      "label": "准备源文件",
+      "sort": 120
+    },
+    {
+      "code": "native_inspection",
+      "label": "检查数据结构",
+      "sort": 130
+    },
+    {
+      "code": "native_raster_conversion",
+      "label": "栅格格式转换",
+      "sort": 140
+    },
+    {
+      "code": "generating",
+      "label": "生成中",
+      "sort": 150,
+      "attributes": {
+        "imageryOrder": "3",
+        "terrainOrder": "3"
+      }
+    },
+    {
+      "code": "finalizing",
+      "label": "收尾中",
+      "sort": 160,
+      "attributes": {
+        "imageryOrder": "4",
+        "terrainOrder": "4"
+      }
+    },
+    {
+      "code": "storing",
+      "label": "存储中",
+      "sort": 170
+    },
+    {
+      "code": "vector_snapshot",
+      "label": "固定数据快照",
+      "sort": 180
+    },
+    {
+      "code": "vector_raster_tiles",
+      "label": "生成静态栅格瓦片",
+      "sort": 190
+    },
+    {
+      "code": "vector_tiles",
+      "label": "生成静态矢量瓦片",
+      "sort": 200
+    }
+  ],
+  "importStage": [
+    {
+      "code": "UPLOADING",
+      "label": "文件传输中",
+      "sort": 10
+    },
+    {
+      "code": "SCANNING",
+      "label": "扫描服务器文件中",
+      "sort": 20
+    },
+    {
+      "code": "EXTRACTING_METADATA",
+      "label": "空间信息提取中",
+      "sort": 30
+    }
+  ],
+  "vectorPlacement": [
+    {
+      "code": "AUTO",
+      "label": "自动识别业务分类",
+      "sort": 10
+    },
+    {
+      "code": "UNKNOWN",
+      "label": "归入未知业务分类",
+      "sort": 20
+    },
+    {
+      "code": "X_LIGHT",
+      "label": "x院业务分类－亮色",
+      "sort": 30
+    }
+  ],
+  "datasetPublicationStatus": [
+    {
+      "code": "published",
+      "label": "已发布",
+      "sort": 10
+    },
+    {
+      "code": "unpublished",
+      "label": "未发布",
+      "sort": 20
+    }
+  ],
+  "fileStatus": [
+    {
+      "code": "PENDING",
+      "label": "接收中",
+      "sort": 10
+    },
+    {
+      "code": "READY",
+      "label": "已接收",
+      "sort": 20
+    },
+    {
+      "code": "FAILED",
+      "label": "接收失败",
+      "sort": 30
+    }
+  ],
+  "rawRetention": [
+    {
+      "code": "RETAINED",
+      "label": "已保留",
+      "sort": 10
+    },
+    {
+      "code": "RELEASE_PENDING",
+      "label": "释放中",
+      "sort": 20
+    },
+    {
+      "code": "RELEASED",
+      "label": "已释放",
+      "sort": 30
+    }
+  ]
+}

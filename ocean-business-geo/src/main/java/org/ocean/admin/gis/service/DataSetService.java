@@ -7,7 +7,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisDataSet;
-import org.ocean.admin.gis.entity.GisDataSetCategory;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
@@ -47,6 +46,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DataSetService {
 
+    private final GisDictionaryService dictionaries;
     private final VectorDataSetStyleService vectorDataSetStyles;
     private final GisVectorResourceMapper gisVectorResourceMapper;
     private final GisDataSetMapper gisDataSetMapper;
@@ -66,10 +66,11 @@ public class DataSetService {
                         GisDataSetMapper.CategoryCount::dataSetCount));
         List<GisDataSetVO.CategoryStatistics> categories = new ArrayList<>();
         long totalCount = 0;
-        for (GisDataSetCategory category : GisDataSetCategory.values()) {
-            long dataSetCount = counts.getOrDefault(category.categoryId(), 0L);
+        for (var category : dictionaries.items("datasetCategory")) {
+            Long categoryId = Long.valueOf(category.code());
+            long dataSetCount = counts.getOrDefault(categoryId, 0L);
             categories.add(new GisDataSetVO.CategoryStatistics(
-                    category.categoryId(), category.categoryName(), dataSetCount));
+                    categoryId, category.label(), dataSetCount));
             totalCount += dataSetCount;
         }
         return new GisDataSetVO.CategorySummary(totalCount, categories);
@@ -351,9 +352,7 @@ public class DataSetService {
         if (reqVO.getCategoryId() == null) {
             throw new IllegalArgumentException("数据类别不能为空");
         }
-        if (!GisDataSetCategory.isValid(reqVO.getCategoryId())) {
-            throw new IllegalArgumentException("数据类别只能为0-影像数据、1-地形数据、2-矢量数据");
-        }
+        dictionaries.requireItem("datasetCategory", String.valueOf(reqVO.getCategoryId()));
     }
 
     /**

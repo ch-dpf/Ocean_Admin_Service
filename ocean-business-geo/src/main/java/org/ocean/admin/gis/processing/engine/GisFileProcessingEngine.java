@@ -24,6 +24,6 @@ public interface GisFileProcessingEngine {
     default void processFolder(Path inputFolder, GisProcessingWorkspace workspace,
             GisProcessingParameters parameters,
             Consumer<ProgressStage> progressListener) {
-        throw new UnsupportedOperationException(type().displayName() + "引擎不支持目录输入");
+        throw new UnsupportedOperationException(type().name() + "引擎不支持目录输入");
     }
 }

@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ProcessingTaskRecordService {
 
+    private final GisDictionaryService dictionaries;
     private final GisProcessingTaskMapper taskMapper;
     private final GisProcessingInputMapper inputMapper;
     private final GisTileSetMapper tileSetMapper;
@@ -306,7 +307,7 @@ public class ProcessingTaskRecordService {
         result.setProcessingType(task.getProcessingType());
         result.setOutputFormat(outputFormat);
         result.setSourceType(task.getSourceType());
-        result.setSourceTypeName(task.getSourceType().displayName());
+        result.setSourceTypeName(dictionaries.label("inputSourceType", task.getSourceType().name()));
         result.setPriority(task.getPriority());
         result.setTotalCount(task.getTotalCount());
         result.setCompletedCount(task.getCompletedCount());
@@ -501,6 +502,7 @@ public class ProcessingTaskRecordService {
             return null;
         }
         try {
+            dictionaries.requireItem("processingType", normalized);
             return GisProcessingType.valueOf(normalized);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException(
@@ -514,6 +516,7 @@ public class ProcessingTaskRecordService {
             return null;
         }
         try {
+            dictionaries.requireItem("inputSourceType", normalized);
             return GisInputSourceType.valueOf(normalized);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException(
@@ -527,6 +530,7 @@ public class ProcessingTaskRecordService {
             return null;
         }
         try {
+            dictionaries.requireItem("taskStatus", normalized);
             return TaskStatus.valueOf(normalized);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException(

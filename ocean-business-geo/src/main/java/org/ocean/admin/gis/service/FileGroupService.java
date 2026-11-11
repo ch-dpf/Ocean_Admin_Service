@@ -33,6 +33,7 @@ import java.util.TreeMap;
 @Service
 @RequiredArgsConstructor
 public class FileGroupService {
+    private final GisDictionaryService dictionaries;
     private final GisFileGroupMapper groups;
     private final GisFileMetaMapper files;
     private final GisDataSetMapper dataSets;
@@ -102,6 +103,8 @@ public class FileGroupService {
 
     @Transactional(readOnly = true)
     public PageResult<List<GisFileGroupVO.Group>> page(GisFileGroupVO.Query query) {
+        dictionaries.validateOptional("groupAssemblyStatus", query.assemblyStatus());
+        dictionaries.validateOptional("groupParseStatus", query.parseStatus());
         long current = query.current() == null ? 1 : query.current();
         long size = query.size() == null ? 20 : query.size();
         if (current < 1 || size < 1 || size > 200) throw new IllegalArgumentException("分页范围无效");

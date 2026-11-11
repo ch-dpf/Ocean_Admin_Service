@@ -2,7 +2,6 @@ package org.ocean.admin.gis.vo;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -113,7 +112,7 @@ public class GisFileMetaVO {
             @NotBlank @Size(max = 64) String workspaceCode,
             @NotBlank @Size(max = 1000) String relativePath,
             @Schema(description = "目录接入是否包含所有层级子目录，默认false", defaultValue = "false") Boolean includeSubdirectories,
-            @Pattern(regexp = "AUTO|UNKNOWN|X_LIGHT") String vectorPlacement) { }
+            String vectorPlacement) { }
 
     public record WorkspaceItem(Long fileMetaId, String relativePath, String status, String errorMessage) { }
 
