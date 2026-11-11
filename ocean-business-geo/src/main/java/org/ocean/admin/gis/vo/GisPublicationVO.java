@@ -14,10 +14,10 @@ public class GisPublicationVO {
     private Long id;
     private String serviceCode;
     private String serviceName;
-    @Schema(description = "本记录唯一服务协议：WMTS 或 TMS")
+    @Schema(description = "本记录唯一服务协议：WMTS、TMS 或 TERRAIN")
     private String serviceProtocol;
 
-    @Schema(description = "本记录唯一服务协议：WMTS 或 TMS")
+    @Schema(description = "本记录唯一服务协议：WMTS、TMS 或 TERRAIN")
     private java.util.List<String> protocols;
 
     @Schema(description = "发布类型：TERRAIN、IMAGERY、VECTOR")

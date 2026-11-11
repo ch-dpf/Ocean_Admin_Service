@@ -87,7 +87,15 @@ public class PublicationService {
             throw new IllegalStateException("只有 COMPLETED 状态的任务可以发布");
         }
         OgcProtocol protocol = OgcProtocol.parsePublishable(request.protocol());
-        // 仅匹配同任务同协议的记录，保证 WMTS 与 TMS 各自独立成条互不覆盖。
+        // 协议与任务类型必须配对：量化地形只有专用 TERRAIN 协议，
+        // 影像与矢量瓦片走 OGC 协议，不允许互串。
+        if (protocol == OgcProtocol.TERRAIN && processingType != GisProcessingType.TERRAIN) {
+            throw new IllegalArgumentException("TERRAIN 协议仅用于地形任务发布");
+        }
+        if (protocol != OgcProtocol.TERRAIN && processingType == GisProcessingType.TERRAIN) {
+            throw new IllegalArgumentException("地形任务仅支持 TERRAIN 协议发布");
+        }
+        // 仅匹配同任务同协议的记录，保证各协议独立成条互不覆盖。
         GisPublication existing = publicationMapper.selectOne(
                 new LambdaQueryWrapper<GisPublication>()
                         .eq(GisPublication::getSourceTaskId, task.getId())
@@ -105,13 +113,25 @@ public class PublicationService {
         if (minZoom < 0 || maxZoom < minZoom || maxZoom > TileMatrixSetDefinition.MAX_ZOOM) {
             throw new IllegalArgumentException("服务层级范围不合法");
         }
+        // 地形服务的层级必须与切片产物 layer.json 的 available 完全一致，
+        // 否则客户端按元数据请求不到瓦片，因此不接受自定义覆盖。
+        if (protocol == OgcProtocol.TERRAIN) {
+            minZoom = artifact.minZoom();
+            maxZoom = artifact.maxZoom();
+        }
         String spec = serviceCode(tileSet, existing);
         String matrixSetId = artifact.matrixSet().id();
         String extension = artifact.extension();
         String tileMapSpec = spec + "@" + matrixSetId + "@" + extension;
-        String serviceRoot = protocol == OgcProtocol.WMTS
-                ? recordService.buildPublicUrl("/gis/wmts/" + spec)
-                : recordService.buildPublicUrl("/gis/tms/1.0.0/" + spec);
+        String serviceRoot;
+        if (protocol == OgcProtocol.WMTS) {
+            serviceRoot = recordService.buildPublicUrl("/gis/wmts/" + spec);
+        } else if (protocol == OgcProtocol.TMS) {
+            serviceRoot = recordService.buildPublicUrl("/gis/tms/1.0.0/" + spec);
+        } else {
+            // TERRAIN 为量化地形专用入口，CesiumTerrainProvider 以该根地址初始化。
+            serviceRoot = recordService.buildPublicUrl("/gis/terrain/" + spec);
+        }
 
         Map<String, String> serviceUrls = new LinkedHashMap<>();
         Map<String, String> capabilitiesUrls = new LinkedHashMap<>();
@@ -123,9 +143,14 @@ public class PublicationService {
             tileUrlTemplates.put(protocol.name(), serviceRoot + "/rest/" + spec
                     + "/default/" + matrixSetId
                     + "/{TileMatrix}/{TileRow}/{TileCol}." + extension);
-        } else {
+        } else if (protocol == OgcProtocol.TMS) {
             capabilitiesUrls.put(protocol.name(), serviceRoot);
             tileUrlTemplates.put(protocol.name(), serviceRoot + "/" + tileMapSpec
+                    + "/{z}/{x}/{y}." + extension);
+        } else {
+            // TERRAIN 的能力地址即量化地形元数据 layer.json，客户端直接以此为入口。
+            capabilitiesUrls.put(protocol.name(), serviceRoot + "/layer.json");
+            tileUrlTemplates.put(protocol.name(), serviceRoot
                     + "/{z}/{x}/{y}." + extension);
         }
 

@@ -924,14 +924,14 @@ CREATE TABLE ocean_gis.gis_publication (
     CONSTRAINT ck_gis_publication_status
         CHECK (status IN ('PUBLISHED', 'DISABLED')),
     CONSTRAINT ck_gis_publication_source CHECK ((tile_set_id IS NOT NULL) <> (vector_resource_id IS NOT NULL)),
-    CONSTRAINT ck_gis_publication_protocol CHECK (service_protocol IN ('WMTS', 'TMS')),
+    CONSTRAINT ck_gis_publication_protocol CHECK (service_protocol IN ('WMTS', 'TMS', 'TERRAIN')),
     CONSTRAINT ck_gis_publication_deleted
         CHECK (deleted IN (0, 1))
 );
 
 COMMENT ON TABLE ocean_gis.gis_publication IS '静态瓦片集的单协议公开发布记录；同一任务每个协议各一条记录';
 COMMENT ON COLUMN ocean_gis.gis_publication.service_name IS '可重命名的服务名称';
-COMMENT ON COLUMN ocean_gis.gis_publication.service_protocol IS '本记录唯一对外协议：WMTS 或 TMS';
+COMMENT ON COLUMN ocean_gis.gis_publication.service_protocol IS '本记录唯一对外协议：WMTS、TMS 或 TERRAIN';
 COMMENT ON COLUMN ocean_gis.gis_publication.service_code IS '公开服务 URL 中区分图层的稳定编码';
 COMMENT ON COLUMN ocean_gis.gis_publication.tile_set_id IS '被发布的静态瓦片集 ID';
 COMMENT ON COLUMN ocean_gis.gis_publication.target_crs IS '切片产物实际使用的目标坐标系';

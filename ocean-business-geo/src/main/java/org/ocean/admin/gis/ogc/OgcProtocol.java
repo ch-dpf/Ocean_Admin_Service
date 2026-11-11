@@ -7,11 +7,13 @@ public enum OgcProtocol {
 
     WMS,
     WMTS,
-    TMS;
+    TMS,
+    /** Cesium 量化地形专用协议；量化网格没有对应的 OGC 瓦片标准，不属于 OGC 协议。 */
+    TERRAIN;
 
     /** 发布向导可选择的协议；WMS 不在其中。 */
     public static boolean isPublishable(OgcProtocol protocol) {
-        return protocol == WMTS || protocol == TMS;
+        return protocol == WMTS || protocol == TMS || protocol == TERRAIN;
     }
 
     /** 解析请求中的协议名称；仅接受本版可发布的协议。 */
