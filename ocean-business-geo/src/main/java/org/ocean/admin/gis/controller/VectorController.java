@@ -133,6 +133,14 @@ public class VectorController {
         return ResponseEntity.ok().header("Cache-Control","private, no-cache").eTag(tree.etag()).body(ResponseResult.success(tree.groups()));
     }
 
+    @PostMapping("/datasets/{dataSetId}/basic-styles")
+    @Operation(summary = "为未配置的未分类图层批量应用基础样式", description = "If-Match来自分类树；保留人工配置与已保存方案")
+    @OperationLog(module = "GIS_VECTOR", type = OperationType.UPDATE, description = "批量应用矢量基础样式")
+    public ResponseResult<Integer> applyBasicStyles(@PathVariable Long dataSetId,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch) {
+        return ResponseResult.success(styles.applyBasicStyles(dataSetId, ifMatch));
+    }
+
     @PatchMapping("/datasets/{dataSetId}/groups/{groupId}/visibility")
     @Operation(summary = "更新分类默认显隐", description = "If-Match来自分类树响应；父分类关闭后所有后代均隐藏")
     @OperationLog(module = "GIS_VECTOR_STYLE", type = OperationType.UPDATE, description = "更新矢量分类显隐")

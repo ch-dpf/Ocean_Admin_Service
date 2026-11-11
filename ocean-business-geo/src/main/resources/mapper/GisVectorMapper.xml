@@ -83,6 +83,21 @@
         ) v(feature_index, geom)
         WHERE NOT ST_IsValid(v.geom) LIMIT 1
     </select>
+    <select id="geometryIssues" resultType="org.ocean.admin.gis.vo.GisVectorVO$GeometryIssue">
+        WITH checked AS MATERIALIZED (
+            SELECT v.*, ST_IsValidDetail(ST_GeomFromGeoJSON(v.geometry_json), 0) AS validity
+            FROM (VALUES
+                <foreach collection="items" item="f" separator=",">
+                    (#{f.sourceLayerId,jdbcType=BIGINT}, #{f.sourceFeatureIndex,jdbcType=BIGINT},
+                     #{f.sourceGeometryPath}, #{f.geometryJson})
+                </foreach>
+            ) v(source_layer_id, feature_index, geometry_path, geometry_json)
+        )
+        SELECT source_layer_id, feature_index, geometry_path,
+            (validity).reason AS reason, ST_AsText((validity).location) AS location
+        FROM checked WHERE NOT (validity).valid
+        ORDER BY source_layer_id, feature_index, geometry_path
+    </select>
     <insert id="insertFeatures">
         INSERT INTO ocean_gis.gis_vector_feature
             (id, layer_id, source_layer_id, geom, properties, source_feature_id, source_feature_index, source_geometry_path, classification_rule_key, version, create_time, update_time)

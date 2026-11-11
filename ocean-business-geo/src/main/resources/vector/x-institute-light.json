@@ -631,34 +631,34 @@
     {
       "id": "unknown-point",
       "parentId": "unknown",
-      "name": "未知点图层",
+      "name": "未分类点图层",
       "nodeType": "UNKNOWN_CLASSIFICATION",
       "geometryType": "POINT",
       "assignable": true,
       "defaultStyleId": "style-unknown-point",
-      "defaultLayerEnabled": false,
+      "defaultLayerEnabled": true,
       "sortOrder": 10
     },
     {
       "id": "unknown-line",
       "parentId": "unknown",
-      "name": "未知线图层",
+      "name": "未分类线图层",
       "nodeType": "UNKNOWN_CLASSIFICATION",
       "geometryType": "LINE",
       "assignable": true,
       "defaultStyleId": "style-unknown-line",
-      "defaultLayerEnabled": false,
+      "defaultLayerEnabled": true,
       "sortOrder": 20
     },
     {
       "id": "unknown-polygon",
       "parentId": "unknown",
-      "name": "未知面图层",
+      "name": "未分类面图层",
       "nodeType": "UNKNOWN_CLASSIFICATION",
       "geometryType": "POLYGON",
       "assignable": true,
       "defaultStyleId": "style-unknown-polygon",
-      "defaultLayerEnabled": false,
+      "defaultLayerEnabled": true,
       "sortOrder": 30
     }
   ],
@@ -1401,19 +1401,19 @@
       },
       {
         "groupKey": "unknown-point",
-        "minZoom": 13,
+        "minZoom": 0,
         "preserveBoundary": false,
         "overrides": []
       },
       {
         "groupKey": "unknown-line",
-        "minZoom": 15,
+        "minZoom": 0,
         "preserveBoundary": false,
         "overrides": []
       },
       {
         "groupKey": "unknown-polygon",
-        "minZoom": 15,
+        "minZoom": 0,
         "preserveBoundary": false,
         "overrides": []
       },
@@ -7399,8 +7399,8 @@
       {
         "id": "style-unknown-point",
         "geometryType": "POINT",
-        "enabled": false,
-        "minZoom": 13,
+        "enabled": true,
+        "minZoom": 0,
         "maxZoom": 25,
         "renderOrder": 90,
         "symbol": {
@@ -7422,8 +7422,8 @@
       {
         "id": "style-unknown-line",
         "geometryType": "LINE",
-        "enabled": false,
-        "minZoom": 15,
+        "enabled": true,
+        "minZoom": 0,
         "maxZoom": 25,
         "renderOrder": 90,
         "symbol": {
@@ -7443,8 +7443,8 @@
       {
         "id": "style-unknown-polygon",
         "geometryType": "POLYGON",
-        "enabled": false,
-        "minZoom": 15,
+        "enabled": true,
+        "minZoom": 0,
         "maxZoom": 25,
         "renderOrder": 90,
         "symbol": {

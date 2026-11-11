@@ -8,6 +8,8 @@ import java.util.List;
 
 /** 组详情携带物理成员，解析配置仅作用于该逻辑数据源。 */
 public record GisFileGroupVO(GisFileGroup group, Long effectiveGroupId, List<GisFileMeta> members) {
+    /** 文件组列表批量读取已有空间元数据中的质量摘要。 */
+    public record GeometryQualityResult(Long fileMetaId, String qualityJson) { }
     public record Query(Long dataSetId, String name, String format, String assemblyStatus,
                         String parseStatus, Boolean includeDuplicates, Long current, Long size) { }
     public record Options(@Size(max = 10000) String sourceCrs,

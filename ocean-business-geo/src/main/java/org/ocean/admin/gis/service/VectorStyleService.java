@@ -36,6 +36,25 @@ public class VectorStyleService {
     private final VectorTemplateRules templateRules;
     private final VectorResourceService resources;
 
+    /** 基础预览同时修订工作包显示索引；沿用持久变更记录保证失败后可继续完成。 */
+    @Transactional(rollbackFor = Exception.class)
+    public int applyBasicStyles(Long dataSetId, String ifMatch) {
+        resources.finishPending(dataSetId);
+        var beforePolicy = json.readTree(dataSetStyles.require(dataSetId, true).getDefinitionJson()).path("tilePolicy");
+        int updated = dataSetStyles.applyBasicStyles(dataSetId, ifMatch);
+        var after = dataSetStyles.require(dataSetId, false);
+        if (!beforePolicy.equals(json.readTree(after.getDefinitionJson()).path("tilePolicy"))) {
+            var unknownGroups = new HashSet<Long>();
+            for (var group : mapper.groups(dataSetId)) {
+                if ("UNKNOWN_CLASSIFICATION".equals(group.getNodeType())) unknownGroups.add(group.getId());
+            }
+            for (var layer : mapper.dataSetLayers(dataSetId)) {
+                if (unknownGroups.contains(layer.getGroupId())) resources.rebuildLayer(layer);
+            }
+        }
+        return updated;
+    }
+
     public List<GisVectorVO.Scheme> schemes(Long dataSetId) {
         dataSetStyles.require(dataSetId,false);
         return mapper.schemes(dataSetId).stream().map(this::schemeVO).toList();
@@ -612,7 +631,6 @@ public class VectorStyleService {
             validateKind(layer, custom);
             result.set("rules", definition.path("rules").deepCopy());
         } else {
-            if ("UNKNOWN_CLASSIFICATION".equals(group.getNodeType())) throw error(HttpStatus.CONFLICT, "未知组不能继承默认业务样式");
             result.set("rules", templateRules.displayRules(base, "AUTO".equals(layer.getAssignmentMode())));
         }
         return result;
@@ -627,7 +645,6 @@ public class VectorStyleService {
             throw error(HttpStatus.BAD_REQUEST, "目标须为同一数据集内几何类别一致的可挂载分类");
         boolean custom = "CUSTOM".equals(request.styleMode());
         if (!custom && !"INHERIT_TARGET_GROUP".equals(request.styleMode())) throw error(HttpStatus.BAD_REQUEST, "样式模式无效");
-        if (!custom && "UNKNOWN_CLASSIFICATION".equals(target.getNodeType())) throw error(HttpStatus.BAD_REQUEST, "未知组必须显式配置样式");
         if (custom) savePresentationStyle(layer, target, request.customStyle());
         else if (request.customStyle() != null) throw error(HttpStatus.BAD_REQUEST, "继承分组时不能同时提交自定义样式");
         boolean regrouped = !target.getId().equals(layer.getGroupId()) || !"MANUAL".equals(layer.getAssignmentMode());

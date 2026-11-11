@@ -65,7 +65,7 @@ public class VectorLayerService {
 
     /** 提取结果由文件元数据生命周期统一提交，导入服务不提前将图层标记为 READY。 */
     public record VectorExtraction(List<Long> layerIds, long sourceFeatures, long parts, long unknownParts,
-            long warnings, long emptyGeometryFeatures, Map<String, Long> groupCounts) {
+            long warnings, long emptyGeometryFeatures, Map<String, Long> groupCounts, GisVectorVO.GeometryQuality geometryQuality) {
         public VectorExtraction {
             layerIds = List.copyOf(layerIds);
             groupCounts = Map.copyOf(groupCounts);
@@ -126,6 +126,8 @@ public class VectorLayerService {
         long[] committedParts = {0};
         long[] processedFeatures = {0};
         long[] emptyGeometryFeatures = {0};
+        long[] invalidGeometries = {0};
+        List<GisVectorVO.GeometryIssue> geometryIssues = new ArrayList<>();
         long sourceFeatures = 0;
         long resourceId = IdWorker.getId();
         Path inputPath = resources.workingInput(resourceId);
@@ -154,9 +156,8 @@ public class VectorLayerService {
                             layer.setSourceLayerId(sourceLayerId);
                             layer.setGroupId(group.getId()); layer.setOriginalGroupId(group.getId()); layer.setGeometryType(part.kind());
                             layer.setAssignmentMode("AUTO");
-                            boolean unknown = "UNKNOWN_CLASSIFICATION".equals(group.getNodeType());
-                            layer.setEnabled(!unknown && template.groups().get(match.groupKey()).path("defaultLayerEnabled").asBoolean());
-                            layer.setStyleMode(unknown ? "UNCONFIGURED" : "INHERIT_TARGET_GROUP");
+                            layer.setEnabled(template.groups().get(match.groupKey()).path("defaultLayerEnabled").asBoolean());
+                            layer.setStyleMode("INHERIT_TARGET_GROUP");
                             layer.setLayerKey(layerKey); layer.setLayerName(layerName);
                             GisVectorLayer created = layer;
                             transactions.executeWithoutResult(status -> {
@@ -180,7 +181,7 @@ public class VectorLayerService {
                         if (match.warning()) statistics[3]++;
                         counts.merge(match.groupKey(), 1L, Long::sum);
                         if (batch.size() >= 100 || statistics[0] >= 2 * 1024 * 1024) {
-                            committedParts[0] += flushImportBatch(batch, claimGuard, output);
+                            committedParts[0] += flushImportBatch(batch, claimGuard, output, invalidGeometries, geometryIssues);
                             statistics[0] = 0;
                         }
                     }
@@ -189,7 +190,7 @@ public class VectorLayerService {
                             Math.min(processedFeatures[0], progressTotal), progressTotal, ProgressUnit.FEATURE));
                 }, heartbeat);
             }
-            committedParts[0] += flushImportBatch(batch, claimGuard, output);
+            committedParts[0] += flushImportBatch(batch, claimGuard, output, invalidGeometries, geometryIssues);
         } catch (IOException | RuntimeException ex) {
             java.nio.file.Files.deleteIfExists(inputPath);
             throw ex;
@@ -200,18 +201,25 @@ public class VectorLayerService {
             if (sourceFeatures == 0 || layers.isEmpty()) throw new ImportException("EMPTY_GEOMETRY", "来源不包含可制图要素");
             resources.importWorking(resourceId, source, List.copyOf(layers.values()), claimGuard, heartbeat);
             return new VectorExtraction(layers.values().stream().map(GisVectorLayer::getId).toList(),
-                    sourceFeatures, statistics[1], statistics[2], statistics[3], emptyGeometryFeatures[0], counts);
+                    sourceFeatures, statistics[1], statistics[2], statistics[3] + invalidGeometries[0], emptyGeometryFeatures[0], counts,
+                    new GisVectorVO.GeometryQuality(invalidGeometries[0], geometryIssues));
         } finally { java.nio.file.Files.deleteIfExists(inputPath); }
     }
 
-    private int flushImportBatch(List<GisVectorFeature> batch, Runnable claimGuard, java.io.BufferedWriter output) {
+    private int flushImportBatch(List<GisVectorFeature> batch, Runnable claimGuard, java.io.BufferedWriter output,
+            long[] invalidGeometries, List<GisVectorVO.GeometryIssue> geometryIssues) {
         if (batch.isEmpty()) return 0;
         int size = batch.size();
-        transactions.executeWithoutResult(status -> {
+        var issues = transactions.execute(status -> {
             claimGuard.run();
-            var error = mapper.firstGeometryError(batch);
-            if (error != null) throw new GeoJsonFeatureReader.FeatureReadException(error.featureIndex(), error.reason());
+            return mapper.geometryIssues(batch);
         });
+        // 拓扑校验仅记录质量问题；完整几何照常进入工作包，显示整理由现有渲染流程承担。
+        invalidGeometries[0] += issues.size();
+        for (var issue : issues) {
+            if (geometryIssues.size() >= 20) break;
+            geometryIssues.add(issue);
+        }
         try {
             for (var feature : batch) { output.write(json.writeValueAsString(feature)); output.newLine(); }
         } catch (IOException ex) { throw new IllegalStateException("工作包要素写入失败", ex); }
@@ -427,9 +435,8 @@ public class VectorLayerService {
                 target.setOriginalGroupId(group.getId()); target.setGeometryType(source.getGeometryType());
                 target.setAssignmentMode("AUTO"); target.setLayerKey("edited-" + target.getId());
                 target.setLayerName(source.getLayerName());
-                boolean unknown = "UNKNOWN_CLASSIFICATION".equals(group.getNodeType());
-                target.setEnabled(!unknown);
-                target.setStyleMode(unknown ? "UNCONFIGURED" : "INHERIT_TARGET_GROUP");
+                target.setEnabled(template.groups().get(group.getGroupKey()).path("defaultLayerEnabled").asBoolean());
+                target.setStyleMode("INHERIT_TARGET_GROUP");
                 mapper.insertLayer(target);
                 mapper.setLayerStatus(target.getId(),"READY");
             }
