@@ -157,7 +157,28 @@ public final class WmtsXmlWriter {
         }
         writeVectorLayers(writer, baseUrl, vectorLayers);
         for (TileMatrixSetDefinition definition : usedMatrixSets(layers, vectorLayers)) {
-            writeMatrixSet(writer, definition);
+            // 矩阵集定义段只列出引用它的图层的实际层级范围（所有引用层取并集），
+            // 让客户端直接从定义段读到可用层级，而不是默认展开 0-22 全金字塔。
+            int minZoom = Integer.MAX_VALUE;
+            int maxZoom = -1;
+            for (PublicationLayer.RasterLayer layer : layers) {
+                if (layer.matrixSet() == definition) {
+                    minZoom = Math.min(minZoom, layer.minZoom());
+                    maxZoom = Math.max(maxZoom, layer.maxZoom());
+                }
+            }
+            for (PublicationLayer.VectorLayerView layer : vectorLayers) {
+                if (layer.matrixSet() == definition) {
+                    minZoom = Math.min(minZoom, layer.minZoom());
+                    maxZoom = Math.max(maxZoom, layer.maxZoom());
+                }
+            }
+            if (minZoom > maxZoom) {
+                // 该矩阵集没有可确定层级的图层引用时，保持完整定义
+                minZoom = 0;
+                maxZoom = TileMatrixSetDefinition.MAX_ZOOM;
+            }
+            writeMatrixSet(writer, definition, minZoom, maxZoom);
         }
         writer.writeEndElement();
     }
@@ -338,8 +359,14 @@ public final class WmtsXmlWriter {
         writer.writeEndElement();
     }
 
-    /** 矩阵集元素顺序遵循 TileMatrixSetType：ows:Identifier、ows:SupportedCRS、WellKnownScaleSet、TileMatrix。 */
-    private static void writeMatrixSet(XMLStreamWriter writer, TileMatrixSetDefinition definition)
+    /**
+     * 矩阵集元素顺序遵循 TileMatrixSetType：ows:Identifier、ows:SupportedCRS、WellKnownScaleSet、TileMatrix。
+     *
+     * <p>TileMatrix 只输出 minZoom-maxZoom 的层级子集；标识符保持真实层级号，
+     * 其余属性均为该层级的真实值，客户端据此可直接确定可用层级范围。</p>
+     */
+    private static void writeMatrixSet(XMLStreamWriter writer,
+            TileMatrixSetDefinition definition, int minZoom, int maxZoom)
             throws XMLStreamException {
         writer.writeStartElement("", "TileMatrixSet", NAMESPACE);
         writeOwsText(writer, "Identifier", definition.id());
@@ -348,7 +375,7 @@ public final class WmtsXmlWriter {
         writer.writeStartElement("", "WellKnownScaleSet", NAMESPACE);
         writer.writeCharacters(definition.wellKnownScaleSet());
         writer.writeEndElement();
-        for (int zoom = 0; zoom <= TileMatrixSetDefinition.MAX_ZOOM; zoom++) {
+        for (int zoom = minZoom; zoom <= maxZoom; zoom++) {
             writer.writeStartElement("", "TileMatrix", NAMESPACE);
             writeOwsText(writer, "Identifier", Integer.toString(zoom));
             writeText(writer, "", NAMESPACE, "ScaleDenominator",
