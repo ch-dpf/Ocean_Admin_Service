@@ -58,7 +58,7 @@ public class ProcessingService {
     private final ProcessingWorker worker;
     private final ProcessingTaskLifecycleService taskLifecycle;
     private final ObjectMapper objectMapper;
-    private final VectorStyleService vectorStyles;
+    private final VectorStyleSchemeService vectorStyles;
     private final VectorTileProperties vectorLimits;
     private final GisDataSetMapper dataSetMapper;
     private final Validator validator;

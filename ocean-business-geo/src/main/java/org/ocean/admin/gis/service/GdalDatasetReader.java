@@ -70,6 +70,35 @@ public class GdalDatasetReader {
     @jakarta.annotation.PreDestroy
     public void closeMapWorkers() { mapWorkers.close(); }
 
+    public record DriverCapability(boolean available, String reason) { }
+
+    /** 在读取所用的同一隔离环境探测输入及中间产物驱动，结果交由能力服务缓存。 */
+    public java.util.Map<GisFileFormat, DriverCapability> probeCapabilities() {
+        try (var context = new ReadContext(() -> { })) {
+            context.timeout = Duration.ofSeconds(15);
+            Path requestFile = context.directory().resolve("request.json");
+            ObjectNode request = json.createObjectNode().put("operation", "CAPABILITIES")
+                    .put("version", properties.getGdalVersion()).put("maxMetadataBytes", properties.getGdalMaxMetadataBytes());
+            json.writeValue(requestFile.toFile(), request);
+            run(context, workerCommand(requestFile), stage -> { });
+            Path resultFile = context.directory().resolve("result.json");
+            if (!Files.isRegularFile(resultFile) || Files.size(resultFile) > properties.getGdalMaxMetadataBytes())
+                throw failure("INVALID_NATIVE_METADATA", "格式能力探测未返回有效结果");
+            JsonNode result = json.readTree(resultFile.toFile());
+            if (result.has("error")) throw failure("GDAL_UNAVAILABLE", result.path("error").path("message").asText());
+            var capabilities = new java.util.EnumMap<GisFileFormat, DriverCapability>(GisFileFormat.class);
+            for (GisFileFormat format : GisFileFormat.values()) {
+                JsonNode item = result.path(format.name());
+                if (!item.path("available").isBoolean()) throw failure("INVALID_NATIVE_METADATA", "格式能力探测结果不完整");
+                boolean available = item.path("available").asBoolean();
+                String reason = available ? null : item.path("reason").asText("读取驱动不可用");
+                capabilities.put(format, new DriverCapability(available, reason));
+            }
+            return java.util.Map.copyOf(capabilities);
+        } catch (ReaderException ex) { throw ex; }
+        catch (Exception ex) { throw failure("GDAL_UNAVAILABLE", "格式能力探测失败: " + ex.getMessage()); }
+    }
+
     /** 原文件始终只读；临时文件随上下文关闭删除，提交前须再次核验所有源。 */
     public ReadContext prepare(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
                                Consumer<ProgressStage> progress) {
@@ -693,7 +722,7 @@ public class GdalDatasetReader {
                         if (format != GisFileFormat.DWG && available.isEmpty())
                             throw failure("DRIVER_UNAVAILABLE", "缺少部署要求的读取驱动: " + format.name());
                     }
-                    outputDriver("GeoJSON"); outputDriver("GTiff");
+                    outputDriver("GeoJSON"); outputDriver("GTiff"); outputDriver("GPKG");
                     System.out.println(mapper.writeValueAsString(capabilities));
                 } catch (Exception | LinkageError ex) {
                     System.err.println("GDAL Java 能力检查失败: " + ex.getMessage()); System.exit(1);
@@ -712,6 +741,24 @@ public class GdalDatasetReader {
                 if (limit < 1024) throw failure("INVALID_GDAL_CONFIG", "GDAL 元数据限额无效");
                 Worker worker = new Worker(directory, limit);
                 initialize(request.path("version").asString());
+                if ("CAPABILITIES".equals(request.path("operation").asText())) {
+                    ObjectNode capabilities = mapper.createObjectNode();
+                    for (GisFileFormat format : GisFileFormat.values()) {
+                        ObjectNode item = capabilities.putObject(format.name());
+                        try {
+                            if (drivers(format).isEmpty()) throw failure("DRIVER_UNAVAILABLE", "当前 GDAL 缺少 " + format.name() + " 读取驱动");
+                            if (format.isVector()) {
+                                outputDriver("GeoJSON");
+                                outputDriver("GPKG");
+                            } else outputDriver("GTiff");
+                            item.put("available", true);
+                        } catch (ReaderException ex) {
+                            item.put("available", false).put("reason", ex.getMessage());
+                        }
+                    }
+                    worker.writeResult(capabilities);
+                    return;
+                }
                 if (request.has("packageOperation")) {
                     worker.writeResult(GeoPackageStore.executeNative(request, directory, mapper));
                     return;
@@ -800,7 +847,7 @@ public class GdalDatasetReader {
         private void vectors(GisFileFormat format, Path input, JsonNode options, List<String> drivers) throws Exception {
             outputDriver("GeoJSON");
             String explicit = explicitCrs(options);
-            if ((format == GisFileFormat.DXF || format == GisFileFormat.DWG || format == GisFileFormat.CSV) && explicit == null)
+            if (format.sourceCrsRequirement() == GisFileFormat.Requirement.REQUIRED && explicit == null)
                 throw failure("MISSING_CRS", "CSV 和 CAD 必须明确提供 sourceCrs");
             Vector<String> openOptions = new Vector<>();
             if (format == GisFileFormat.CSV) openOptions.addAll(List.of("X_POSSIBLE_NAMES=" + fieldOption(options, "xField"),

@@ -1,7 +1,6 @@
 package org.ocean.admin.gis.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.dto.UnifiedPublicationRequest;
 import org.ocean.admin.gis.entity.GisDataSet;
@@ -19,14 +18,11 @@ import org.ocean.admin.gis.ogc.TileMatrixSetDefinition;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.ocean.admin.gis.vo.GisPublicationVO;
-import org.ocean.admin.gis.vo.GisVectorVO;
 import org.ocean.admin.kernel.common.PageResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -58,7 +54,7 @@ public class PublicationService {
     private final GisPublicationMapper publicationMapper;
     private final GisProcessingStorageService storageService;
     private final VectorResourceService vectorResources;
-    private final VectorStyleService vectorStyles;
+    private final VectorStyleSchemeService vectorStyles;
     private final ObjectMapper objectMapper;
 
     public PageResult<List<GisPublicationVO>> getPublicationPage(
@@ -118,7 +114,7 @@ public class PublicationService {
                 throw new IllegalStateException("任务没有可发布的矢量数据集");
             }
             resource = vectorResources.freeze(dataSetId, "PUBLICATION");
-            vectorDefinition = buildVectorDefinition(dataSetId, request);
+            vectorDefinition = vectorStyles.publicationDefinition(dataSetId, request.styleSchemeIds(), request.defaultStyleSchemeId());
         } else {
             if (tileSet == null || tileSet.getTileType() != processingType
                     || !READY.equals(tileSet.getTileSetStatus())) {
@@ -276,6 +272,8 @@ public class PublicationService {
                 .maxZoom(publication.getMaxZoom())
                 .releaseVersion(releaseVersion(publication))
                 .defaultStyleId(publication.getStyleId())
+                .styles(publication.getVectorDefinition() == null ? null
+                        : objectMapper.readTree(publication.getVectorDefinition()).path("styles"))
                 .publishTime(publication.getPublishTime())
                 .updateTime(publication.getUpdateTime())
                 .build();
@@ -356,34 +354,6 @@ public class PublicationService {
             result.add(value.asDouble());
         }
         return result;
-    }
-
-    private String buildVectorDefinition(Long dataSetId, UnifiedPublicationRequest request) {
-        List<Long> ids = request.styleSchemeIds() == null || request.styleSchemeIds().isEmpty()
-                ? List.of(request.defaultStyleSchemeId() == null ? 0L : request.defaultStyleSchemeId())
-                : request.styleSchemeIds().stream().distinct().toList();
-        if (ids.isEmpty() || ids.getFirst() <= 0) {
-            List<GisVectorVO.Scheme> schemes = vectorStyles.schemes(dataSetId);
-            if (schemes.isEmpty()) {
-                throw new IllegalArgumentException("矢量数据集没有可用样式方案");
-            }
-            ids = List.of(Long.parseLong(schemes.getFirst().id()));
-        }
-        Long defaultId = request.defaultStyleSchemeId() == null
-                ? ids.getFirst() : request.defaultStyleSchemeId();
-        if (!ids.contains(defaultId)) {
-            throw new IllegalArgumentException("默认样式方案必须属于所选方案");
-        }
-        ObjectNode binding = objectMapper.createObjectNode()
-                .put("schemaVersion", 1)
-                .put("releaseVersion", UUID.randomUUID().toString())
-                .put("defaultStyleId", defaultId.toString());
-        ArrayNode styles = binding.putArray("styles");
-        for (Long id : ids) {
-            GisVectorVO.Scheme scheme = vectorStyles.scheme(dataSetId, id);
-            styles.add(objectMapper.valueToTree(scheme));
-        }
-        return binding.toString();
     }
 
     private String styleName(Long dataSetId, Long styleId) {

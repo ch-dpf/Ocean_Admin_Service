@@ -1,9 +1,13 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.storage.VectorFeatureStore;
+import org.ocean.admin.gis.mapper.GisVectorFeatureMapper;
+import org.ocean.admin.gis.mapper.GisVectorResourceMapper;
+import org.ocean.admin.gis.mapper.GisVectorStyleMapper;
+import org.ocean.admin.gis.mapper.GisVectorTileMapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.*;
-import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.progress.ProgressStage;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -27,7 +31,15 @@ import java.util.function.Consumer;
 @Service
 @RequiredArgsConstructor
 public class VectorResourceService {
-    private final GisVectorMapper mapper;
+    private final List<VectorFeatureStore> featureStores;
+
+    private final org.springframework.context.ApplicationEventPublisher events;
+
+    public record ResourceRetired() { }
+    private final GisVectorFeatureMapper gisVectorFeatureMapper;
+    private final GisVectorResourceMapper gisVectorResourceMapper;
+    private final GisVectorStyleMapper gisVectorStyleMapper;
+    private final GisVectorTileMapper gisVectorTileMapper;
     private final GdalDatasetReader reader;
     private final GeoPackageStore store;
     private final ObjectMapper json;
@@ -49,8 +61,8 @@ public class VectorResourceService {
             transactions.executeWithoutResult(tx -> {
                 guard.run();
                 rollbackCleanup(id);
-                mapper.insertResource(resource);
-                layers.forEach(layer -> mapper.assignResource(layer.getId(), id));
+                gisVectorResourceMapper.insertResource(resource);
+                layers.forEach(layer -> gisVectorFeatureMapper.assignResource(layer.getId(), id));
                 updateStatistics(result);
             });
             registered = true;
@@ -64,15 +76,15 @@ public class VectorResourceService {
     private ObjectNode workingDefinition(Long dataSetId) {
         var definition = json.createObjectNode();
         definition.set("tilePolicy", planner.policy(styles.require(dataSetId, false)));
-        definition.set("groups", json.valueToTree(mapper.groups(dataSetId)));
-        definition.set("layers", json.valueToTree(mapper.dataSetLayers(dataSetId)));
+        definition.set("groups", json.valueToTree(gisVectorStyleMapper.groups(dataSetId)));
+        definition.set("layers", json.valueToTree(gisVectorFeatureMapper.dataSetLayers(dataSetId)));
         return definition;
     }
 
     private void updateStatistics(JsonNode result) {
         for (JsonNode layer : result.path("layers")) {
             JsonNode extent = layer.get("extent");
-            mapper.updatePackageLayer(layer.path("id").asLong(), layer.path("count").asLong(),
+            gisVectorFeatureMapper.updatePackageLayer(layer.path("id").asLong(), layer.path("count").asLong(),
                     extent == null ? null : json.writeValueAsString(extent), json.writeValueAsString(layer.path("types")));
         }
     }
@@ -89,7 +101,7 @@ public class VectorResourceService {
             request.set("definition", workingDefinition(source.getDataSetId()));
             if (after != null) request.set("feature", json.valueToTree(after));
         }
-        mapper.recordFeatureChange(source.getDataSetId(), packaged ? source.getResourceId() : null,
+        gisVectorTileMapper.recordFeatureChange(source.getDataSetId(), packaged ? source.getResourceId() : null,
                 request == null ? null : json.writeValueAsString(request), !packaged,
                 before == null ? null : before.getGeometryJson(), after == null ? null : after.getGeometryJson());
         if (packaged) {
@@ -104,7 +116,7 @@ public class VectorResourceService {
         if (layer.getResourceId() == null || !"GPKG".equals(require(layer.getResourceId()).getStorageType())) return;
         ObjectNode request = json.createObjectNode().put("refreshLayerId", layer.getId());
         request.set("definition", workingDefinition(layer.getDataSetId()));
-        mapper.recordFeatureChange(layer.getDataSetId(),layer.getResourceId(),json.writeValueAsString(request),false,
+        gisVectorTileMapper.recordFeatureChange(layer.getDataSetId(),layer.getResourceId(),json.writeValueAsString(request),false,
                 layer.getGeographicExtent(), null);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCommit() { finishPending(layer.getDataSetId(), true); }
@@ -114,19 +126,19 @@ public class VectorResourceService {
     public void finishPending(Long dataSetId) { finishPending(dataSetId, false); }
 
     private void finishPending(Long dataSetId, boolean afterCommit) {
-        if (!afterCommit && mapper.pendingChanges(dataSetId).isEmpty()) return;
+        if (!afterCommit && gisVectorTileMapper.pendingChanges(dataSetId).isEmpty()) return;
         var tx = new TransactionTemplate(transactions.getTransactionManager());
         if (afterCommit || TransactionSynchronizationManager.isCurrentTransactionReadOnly())
             tx.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         tx.executeWithoutResult(status -> {
-            if (mapper.lockDataSetStyle(dataSetId) == null) return;
-            for (var change : mapper.pendingChanges(dataSetId)) {
+            if (gisVectorStyleMapper.lockDataSetStyle(dataSetId) == null) return;
+            for (var change : gisVectorTileMapper.pendingChanges(dataSetId)) {
                 var resource = require(change.resourceId());
                 try {
                     JsonNode result = store.edit(resource.getStorageKey(), change.id(), json.readTree(change.requestJson()));
                     updateStatistics(result);
-                    mapper.touchWorkingResource(resource.getId(), Files.size(store.path(resource.getStorageKey())));
-                    mapper.completeChange(change.id());
+                    gisVectorResourceMapper.touchWorkingResource(resource.getId(), Files.size(store.path(resource.getStorageKey())));
+                    gisVectorTileMapper.completeChange(change.id());
                 } catch (IOException | RuntimeException ex) {
                     throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "要素修改已登记，工作包写入尚未完成，请稍后重试读取", ex);
                 }
@@ -139,9 +151,9 @@ public class VectorResourceService {
         if (frozen != null) return store.tile(frozen.getStorageKey(),definition,z,x,y,maxBytes);
         JsonNode policy = planner.policy(styles.require(dataSetId, false));
         var tile = encoder.begin(z, x, y, policy, maxBytes);
-        List<GisVectorLayer> layers = mapper.tileLayers(dataSetId,tile.bbox());
+        List<GisVectorLayer> layers = gisVectorTileMapper.tileLayers(dataSetId,tile.bbox());
         if (layers.isEmpty()) return tile.finish();
-        var resourceMap = mapper.resources(dataSetId).stream().collect(java.util.stream.Collectors.toMap(GisVectorResource::getId, value -> value));
+        var resourceMap = gisVectorResourceMapper.resources(dataSetId).stream().collect(java.util.stream.Collectors.toMap(GisVectorResource::getId, value -> value));
         var packages = new java.util.LinkedHashMap<Long, java.util.List<GisVectorLayer>>();
         boolean allPackaged = !layers.isEmpty();
         for (var layer : layers) {
@@ -156,11 +168,11 @@ public class VectorResourceService {
             }
             ObjectNode current = json.createObjectNode();
             current.set("tilePolicy", policy);
-            current.set("groups", json.valueToTree(mapper.groups(dataSetId)));
+            current.set("groups", json.valueToTree(gisVectorStyleMapper.groups(dataSetId)));
             return store.tile(sources, current, z, x, y, maxBytes);
         }
         var groups = new java.util.HashMap<Long,String>();
-        mapper.groups(dataSetId).forEach(group -> groups.put(group.getId(),group.getGroupKey()));
+        gisVectorStyleMapper.groups(dataSetId).forEach(group -> groups.put(group.getId(),group.getGroupKey()));
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
         for (var layer : layers) {
             long after=0;
@@ -169,7 +181,7 @@ public class VectorResourceService {
                 List<GisVectorFeature> batch;
                 if (layer.getResourceId()!=null && "GPKG".equals(require(layer.getResourceId()).getStorageType()))
                     batch=features(layer,after,100,tile.bbox(),null);
-                else batch=mapper.tileFeatures(layer.getId(),after,tile.bbox());
+                else batch=gisVectorTileMapper.tileFeatures(layer.getId(),after,tile.bbox());
                 if (batch.isEmpty()) break;
                 for (var feature : batch) tile.add(feature,layer,groups.get(layer.getGroupId()));
                 after=batch.getLast().getId();
@@ -180,7 +192,7 @@ public class VectorResourceService {
 
     public void capture(GisFileMeta source, GisFileGroup group, List<GisFileMeta> members,
                         Runnable guard, Runnable heartbeat, Consumer<ProgressStage> progress) throws IOException {
-        if (mapper.sourceResource(source.getId()) != null) return;
+        if (gisVectorResourceMapper.sourceResource(source.getId()) != null) return;
         try (var context = reader.prepareSnapshot(group, members, heartbeat, progress)) {
             context.verifySources();
             long id = IdWorker.getId();
@@ -189,16 +201,16 @@ public class VectorResourceService {
             try {
                 transactions.executeWithoutResult(tx -> {
                     guard.run();
-                    if (mapper.sourceResource(source.getId()) != null) throw new IllegalStateException("原始快照已创建");
+                    if (gisVectorResourceMapper.sourceResource(source.getId()) != null) throw new IllegalStateException("原始快照已创建");
                     rollbackCleanup(id);
-                    mapper.insertResource(resource);
+                    gisVectorResourceMapper.insertResource(resource);
                     for (JsonNode node : context.packageResult().path("layers")) {
                         var layer = new GisVectorSourceLayer();
                         layer.setId(IdWorker.getId()); layer.setResourceId(id);
                         layer.setLayerKey(node.path("key").asText()); layer.setLayerName(node.path("name").asText());
                         layer.setTableName(node.path("table").asText()); layer.setFeatureCount(node.path("featureCount").asLong());
                         layer.setSourceCrs(node.path("sourceCrs").asText(null)); layer.setSchemaJson(json.writeValueAsString(node));
-                        mapper.insertSourceLayer(layer);
+                        gisVectorResourceMapper.insertSourceLayer(layer);
                     }
                 });
             } catch (RuntimeException ex) { Files.deleteIfExists(store.path(id + ".gpkg")); throw ex; }
@@ -207,17 +219,17 @@ public class VectorResourceService {
 
     public List<GisVectorResource> list(Long dataSetId) {
         styles.require(dataSetId, false);
-        return mapper.resources(dataSetId);
+        return gisVectorResourceMapper.resources(dataSetId);
     }
 
     public List<GisVectorSourceLayer> sourceLayers(Long fileId) {
-        var resource = mapper.sourceResource(fileId);
+        var resource = gisVectorResourceMapper.sourceResource(fileId);
         if (resource == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "原始快照尚未生成");
-        return mapper.sourceLayers(resource.getId());
+        return gisVectorResourceMapper.sourceLayers(resource.getId());
     }
 
     public JsonNode sourceFeatures(Long sourceLayerId, long after, int limit, Long fid) throws IOException {
-        var layer = mapper.sourceLayer(sourceLayerId);
+        var layer = gisVectorResourceMapper.sourceLayer(sourceLayerId);
         if (layer == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "原始要素集合不存在");
         var resource = require(layer.getResourceId());
         if (!"SOURCE".equals(resource.getResourceKind())) throw new IllegalArgumentException("非原始要素集合");
@@ -240,13 +252,13 @@ public class VectorResourceService {
     }
 
     public GisVectorResource require(Long id) {
-        var resource = mapper.resource(id);
+        var resource = gisVectorResourceMapper.resource(id);
         if (resource == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "矢量资源版本不存在");
         return resource;
     }
 
     public void verifySourceSnapshot(Long fileId) throws IOException {
-        var resource=mapper.sourceResource(fileId);
+        var resource=gisVectorResourceMapper.sourceResource(fileId);
         if(resource==null || !resource.getChecksum().equals(store.checksum(resource.getStorageKey())))
             throw new IllegalStateException("原始快照缺失或校验失败，禁止释放原文件");
     }
@@ -255,33 +267,24 @@ public class VectorResourceService {
     public void retire(Long id) {
         var resource=require(id);styles.require(resource.getDataSetId(),true);
         if("SOURCE".equals(resource.getResourceKind())) throw new IllegalArgumentException("原始快照保留来源追溯，不通过工作资源接口删除");
-        if(mapper.resourceReferences(id)>0) throw new ResponseStatusException(HttpStatus.CONFLICT,"资源仍被工作图层或发布记录引用");
-        mapper.retireResource(id);
+        if(gisVectorResourceMapper.resourceReferences(id)>0) throw new ResponseStatusException(HttpStatus.CONFLICT,"资源仍被工作图层或发布记录引用");
+        gisVectorResourceMapper.retireResource(id);
+        events.publishEvent(new ResourceRetired());
     }
 
     public void cleanupRetired() {
-        for(var resource:mapper.retiredResources()) {
-            if(mapper.resourceReferences(resource.getId())>0) continue;
-            try {Files.deleteIfExists(store.path(resource.getStorageKey()));mapper.markResourceCleaned(resource.getId());}
+        for(var resource:gisVectorResourceMapper.retiredResources()) {
+            if(gisVectorResourceMapper.resourceReferences(resource.getId())>0) continue;
+            try {Files.deleteIfExists(store.path(resource.getStorageKey()));gisVectorResourceMapper.markResourceCleaned(resource.getId());}
             catch(IOException ex) {org.slf4j.LoggerFactory.getLogger(VectorResourceService.class).warn("矢量旧版本清理待重试: {}",resource.getId(),ex);}
         }
     }
-
     public List<GisVectorFeature> features(GisVectorLayer layer, long after, int limit, double[] bbox, Long fid) throws IOException {
         finishPending(layer.getDataSetId());
-        if (layer.getResourceId() == null || "POSTGIS".equals(require(layer.getResourceId()).getStorageType())) {
-            if (fid != null) {
-                var feature = mapper.feature(layer.getId(), fid);
-                return feature == null ? List.of() : List.of(feature);
-            }
-            if (bbox != null) return mapper.features(layer.getId(), after, limit, bbox[0],bbox[1],bbox[2],bbox[3]);
-            return mapper.exportFeatures(layer.getId(), after, limit);
-        }
-        var resource = require(layer.getResourceId());
-        return java.util.stream.StreamSupport.stream(store.query(resource.getStorageKey(), "l_" + layer.getId(),
-                        after, limit, bbox, fid).path("items").spliterator(), false)
-                .map(row -> json.treeToValue(row.path("value"), GisVectorFeature.class)).toList();
+        var resource = layer.getResourceId() == null ? null : require(layer.getResourceId());
+        return featureStore(resource).features(layer, resource, after, limit, bbox, fid);
     }
+
 
     public void requireEditable(GisVectorLayer layer) {
         if (layer.getResourceId() != null && !"WORKING".equals(require(layer.getResourceId()).getResourceKind()))
@@ -295,33 +298,33 @@ public class VectorResourceService {
         finishPending(dataSetId);
         VectorDataSetStyleService.requireMatch(ifMatch, "\"storage-" + dataSetId + "-" + state.getDataRevision() + "\"");
         if (!Set.of("GPKG", "POSTGIS").contains(target)) throw new IllegalArgumentException("存储类型须为GPKG或POSTGIS");
-        List<GisVectorLayer> layers = mapper.dataSetLayers(dataSetId);
+        List<GisVectorLayer> layers = gisVectorFeatureMapper.dataSetLayers(dataSetId);
         if (layers.isEmpty()) throw new IllegalArgumentException("没有可转换的工作图层");
         GisVectorResource resource;
         if ("GPKG".equals(target)) {
             // 要素覆盖采用独立样式方案后才能移出外键约束的PostGIS要素表。
-            if (mapper.hasFeatureCartography(dataSetId)) throw new ResponseStatusException(HttpStatus.CONFLICT,
+            if (gisVectorStyleMapper.hasFeatureCartography(dataSetId)) throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "请先将要素配图保存为独立样式方案并移除工作区要素覆盖，再转换存储");
             resource = freeze(dataSetId, "WORKING");
             for (var layer : layers) {
-                mapper.assignResource(layer.getId(), resource.getId());
-                mapper.purgeLayerFeatures(layer.getId());
+                gisVectorFeatureMapper.assignResource(layer.getId(), resource.getId());
+                gisVectorFeatureMapper.purgeLayerFeatures(layer.getId());
             }
         } else {
             resource = new GisVectorResource(); resource.setId(IdWorker.getId()); resource.setDataSetId(dataSetId);
             resource.setResourceKind("WORKING"); resource.setStorageType("POSTGIS"); resource.setDataVersion(state.getDataRevision());
-            resource.setSizeBytes(0L); resource.setDefinitionJson("{}"); mapper.insertResource(resource);
+            resource.setSizeBytes(0L); resource.setDefinitionJson("{}"); gisVectorResourceMapper.insertResource(resource);
             var packaged = layers.stream().filter(layer -> layer.getResourceId() != null
                     && "GPKG".equals(require(layer.getResourceId()).getStorageType())).toList();
-            forEachBatch(packaged, mapper::insertFeatures);
+            forEachBatch(packaged, gisVectorFeatureMapper::insertFeatures);
             for (var layer : layers) {
-                mapper.assignResource(layer.getId(), resource.getId());
-                mapper.refreshLayer(layer.getId());
+                gisVectorFeatureMapper.assignResource(layer.getId(), resource.getId());
+                gisVectorFeatureMapper.refreshLayer(layer.getId());
             }
         }
-        mapper.bumpDataSetRevision(dataSetId, true, false);
-        for(var layer:layers) if(layer.getResourceId()!=null && mapper.resourceReferences(layer.getResourceId())==0)
-            mapper.retireResource(layer.getResourceId());
+        gisVectorStyleMapper.bumpDataSetRevision(dataSetId, true, false);
+        for(var layer:layers) if(layer.getResourceId()!=null && gisVectorResourceMapper.resourceReferences(layer.getResourceId())==0)
+            gisVectorResourceMapper.retireResource(layer.getResourceId());
         return require(resource.getId());
     }
 
@@ -339,8 +342,8 @@ public class VectorResourceService {
         var definition = json.createObjectNode();
         definition.set("map", json.valueToTree(planner.definition(state)));
         definition.set("tilePolicy", planner.policy(state));
-        definition.set("groups", json.valueToTree(mapper.groups(dataSetId)));
-        var layers = mapper.dataSetLayers(dataSetId);
+        definition.set("groups", json.valueToTree(gisVectorStyleMapper.groups(dataSetId)));
+        var layers = gisVectorFeatureMapper.dataSetLayers(dataSetId);
         if (layers.isEmpty()) throw new IllegalArgumentException("数据集没有可发布的图层");
         var layerNodes = definition.putArray("layers");
         for (var layer : layers) {
@@ -381,46 +384,32 @@ public class VectorResourceService {
             store.build(id, definition, heartbeat);
         }
         var resource = resource(id, dataSetId, null, kind, definition);
-        resource.setDataVersion(state.getDataRevision()); mapper.insertResource(resource);
+        resource.setDataVersion(state.getDataRevision()); gisVectorResourceMapper.insertResource(resource);
         return require(id);
     }
-
-    @FunctionalInterface
-    private interface FeatureBatchConsumer { void accept(List<GisVectorFeature> batch) throws IOException; }
-
-    /** 批量复制始终有界内存；每个包只打开一次，PostGIS按主键游标读取。 */
-    private void forEachBatch(List<GisVectorLayer> layers, FeatureBatchConsumer consumer) throws IOException {
-        var packages = new java.util.LinkedHashMap<Long, List<Long>>();
+    /** 按资源合并导出，保持 PostGIS 游标有界读取及 GPKG 单次打开。 */
+    private void forEachBatch(List<GisVectorLayer> layers, VectorFeatureStore.BatchConsumer consumer) throws IOException {
+        var packages = new java.util.LinkedHashMap<Long, List<GisVectorLayer>>();
         for (var layer : layers) {
-            if (layer.getResourceId() != null && "GPKG".equals(require(layer.getResourceId()).getStorageType())) {
-                packages.computeIfAbsent(layer.getResourceId(), key -> new java.util.ArrayList<>()).add(layer.getId());
-                continue;
-            }
-            long after = 0;
-            while (true) {
-                var batch = mapper.exportFeatures(layer.getId(), after, 100);
-                if (batch.isEmpty()) break;
-                consumer.accept(batch);
-                after = batch.getLast().getId();
+            var resource = layer.getResourceId() == null ? null : require(layer.getResourceId());
+            if (resource != null && "GPKG".equals(resource.getStorageType())) {
+                packages.computeIfAbsent(resource.getId(), key -> new java.util.ArrayList<>()).add(layer);
+            } else {
+                featureStore(resource).export(resource, List.of(layer), consumer);
             }
         }
         for (var entry : packages.entrySet()) {
-            long temporaryId = IdWorker.getId();
-            var output = store.path(temporaryId + ".ndjson");
-            try {
-                store.export(require(entry.getKey()).getStorageKey(), entry.getValue(), temporaryId);
-                try (var input = Files.newBufferedReader(output)) {
-                    var batch = new java.util.ArrayList<GisVectorFeature>(100);
-                    String line;
-                    while ((line = input.readLine()) != null) {
-                        batch.add(json.readValue(line, GisVectorFeature.class));
-                        if (batch.size() == 100) { consumer.accept(batch); batch.clear(); }
-                    }
-                    if (!batch.isEmpty()) consumer.accept(batch);
-                }
-            } finally { Files.deleteIfExists(output); }
+            var resource = require(entry.getKey());
+            featureStore(resource).export(resource, entry.getValue(), consumer);
         }
     }
+
+    private VectorFeatureStore featureStore(GisVectorResource resource) {
+        String type = resource == null ? "POSTGIS" : resource.getStorageType();
+        return featureStores.stream().filter(store -> store.storageType().equals(type)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("不支持的矢量存储类型: " + type));
+    }
+
 
     private GisVectorResource resource(long id, Long dataSetId, Long fileId, String kind, JsonNode definition) throws IOException {
         var resource = new GisVectorResource(); resource.setId(id); resource.setDataSetId(dataSetId);

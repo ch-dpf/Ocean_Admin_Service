@@ -8,6 +8,9 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.service.FileMetaService;
+import org.ocean.admin.gis.service.WorkspaceImportService;
+import org.ocean.admin.gis.util.FileDownloadUtil;
+import org.ocean.admin.kernel.audit.CurrentOperator;
 import org.ocean.admin.gis.dto.GisFileQuery;
 import org.ocean.admin.gis.vo.GisFileMetaVO;
 import org.ocean.admin.kernel.audit.OperationLog;
@@ -31,6 +34,8 @@ import java.util.List;
 public class FileMetaController {
 
     private final FileMetaService fileMetaService;
+    private final WorkspaceImportService workspaceImportService;
+    private final FileDownloadUtil downloads;
 
     @GetMapping("/{id}/source-layers")
     @Operation(summary = "查看导入时原始要素集合，包含空集合")
@@ -56,7 +61,6 @@ public class FileMetaController {
     @OperationLog(module = "GIS_FILE_META", type = OperationType.DELETE, description = "释放原始文件组")
     public ResponseResult<?> release(@PathVariable Long id) {
         var result = fileMetaService.releaseRawFiles(id);
-        fileMetaService.cleanupReleasedRawFiles();
         return ResponseResult.success(result);
     }
 
@@ -67,9 +71,12 @@ public class FileMetaController {
     public ResponseResult<GisFileMetaVO.WorkspaceSubmission> addWorkspaceFiles(
             @Parameter(description = "所属数据集ID", required = true)
             @RequestParam("dataSetId") Long dataSetId,
-            @Valid @RequestBody GisFileMetaVO.WorkspaceRequest request) {
+            @Valid @RequestBody GisFileMetaVO.WorkspaceRequest request,
+            HttpServletRequest servletRequest) {
+        Object current = servletRequest.getAttribute(CurrentOperator.REQUEST_ATTRIBUTE);
+        Long operatorId = current instanceof CurrentOperator operator ? operator.userId() : null;
         return ResponseResult.success("数据添加成功，请查看进度",
-                fileMetaService.addWorkspaceFiles(dataSetId, request));
+                workspaceImportService.addWorkspaceFiles(dataSetId, request, operatorId));
     }
 
     @GetMapping("/page")
@@ -101,7 +108,8 @@ public class FileMetaController {
             @PathVariable Long id,
             HttpServletRequest request,
             HttpServletResponse response) {
-        fileMetaService.downloadFile(id, request, response);
+        var file = fileMetaService.prepareDownload(id);
+        downloads.writePathToResponse(file.path(), file.originalName(), request, response);
     }
 
 }

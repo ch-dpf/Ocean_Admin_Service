@@ -2,7 +2,6 @@ package org.ocean.admin.gis.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.config.FileUploadConfig;
 import org.ocean.admin.gis.dto.GisStoredFile;
@@ -10,17 +9,13 @@ import org.ocean.admin.gis.dto.GisUploadChunkCommand;
 import org.ocean.admin.gis.dto.TaskStatus;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.entity.GisFileFormat;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.progress.*;
 import org.ocean.admin.gis.util.FileUploadUtil;
-import org.ocean.admin.kernel.audit.CurrentOperator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -42,10 +37,10 @@ public class FileUploadService {
     private final VectorDataSetStyleService styles;
     private final DataSetService dataSetService;
     private final TransactionTemplate transactions;
+    private final FileFormatService formats;
 
-    public Map<String, Object> uploadChunk(GisUploadChunkCommand command, InputStream input) {
+    public Map<String, Object> uploadChunk(GisUploadChunkCommand command, InputStream input, Long operator) {
         validate(command);
-        Long operator = operatorId();
         String id = "upload_" + (operator == null ? "0" : operator) + "_" + command.requestId();
         return progress.withExecutionLock(id, () -> {
             try { return receive(id, operator, command, input); }
@@ -161,6 +156,7 @@ public class FileUploadService {
         progress.assertExecutionLock(id);
         GisDataSet target = dataSets.selectActiveByIdForUpdate(command.dataSetId());
         if (target == null) throw new IllegalArgumentException("数据集已删除");
+        validateType(target, command.fileName());
         GisFileMeta meta = new GisFileMeta();
         meta.setId(IdWorker.getId()); meta.setDataSetId(target.getId());
         meta.setIngestProgressId(id); meta.setIngestFileIndex(command.fileIndex());
@@ -217,17 +213,11 @@ public class FileUploadService {
     }
 
     private void validateType(GisDataSet target, String name) {
-        if (!GisFileFormat.accepts(target.getCategoryId(), name))
-            throw new IllegalArgumentException("文件格式与数据集分类不匹配");
+        String reason = formats.checkAcceptance(target.getCategoryId(), name);
+        if (reason != null) throw new IllegalArgumentException(reason);
     }
     private long metric(ProgressSnapshot snapshot, String code) {
         return snapshot.metrics().stream().filter(value -> code.equals(value.code())).mapToLong(ProgressSnapshot.Metric::value).findFirst().orElse(-1);
-    }
-
-    private Long operatorId() {
-        if (!(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes)) return null;
-        HttpServletRequest request = attributes.getRequest();
-        return request.getAttribute(CurrentOperator.REQUEST_ATTRIBUTE) instanceof CurrentOperator operator ? operator.userId() : null;
     }
 
     private void consume(InputStream input, long size) {

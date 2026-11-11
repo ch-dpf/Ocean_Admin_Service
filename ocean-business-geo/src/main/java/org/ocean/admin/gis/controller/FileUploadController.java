@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriUtils;
 
+import org.ocean.admin.kernel.audit.CurrentOperator;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -64,7 +65,9 @@ public class FileUploadController {
                 offset,
                 chunkSize,
                 vectorPlacement);
+        Object current = request.getAttribute(CurrentOperator.REQUEST_ATTRIBUTE);
+        Long operatorId = current instanceof CurrentOperator operator ? operator.userId() : null;
         return ResponseResult.success(fileUploadService.uploadChunk(
-                command, request.getInputStream()));
+                command, request.getInputStream(), operatorId));
     }
 }

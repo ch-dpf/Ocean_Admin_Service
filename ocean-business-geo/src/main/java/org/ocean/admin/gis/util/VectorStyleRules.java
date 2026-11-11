@@ -245,4 +245,28 @@ public class VectorStyleRules {
     }
 
     private IllegalArgumentException invalid(String message) { return new IllegalArgumentException(message); }
+
+
+    public void validateTileFields(JsonNode filter) {
+        if (filter.isMissingNode() || filter.isNull()) return;
+        if (filter.has("conditions")) {
+            for (var child : filter.path("conditions")) validateTileFields(child);
+        } else if (!VectorTemplateRules.TILE_FIELDS.contains(filter.path("field").asText())) {
+            throw new IllegalArgumentException("地图配图条件仅支持已声明的瓦片属性");
+        }
+    }
+
+
+    /** 两个样式写入入口共用尺寸边界，错误文案由各入口保留。 */
+    public void validateSymbolSize(JsonNode symbol, String errorMessage) {
+        for (String field : List.of("radius", "width", "strokeWidth")) {
+            if (!symbol.has(field)) {
+                continue;
+            }
+            double size = symbol.path(field).asDouble();
+            if (size > 12 || size < ("strokeWidth".equals(field) ? 0 : .5)) {
+                throw new IllegalArgumentException(errorMessage);
+            }
+        }
+    }
 }

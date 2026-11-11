@@ -22,7 +22,7 @@ import java.util.function.Consumer;
 public class VectorResourceInputResolver implements GisProcessingInputResolver {
     private final VectorResourceService resources;
     private final VectorDataSetStyleService styles;
-    private final VectorStyleService schemes;
+    private final VectorStyleSchemeService schemes;
     private final GeoPackageStore store;
     private final GisProcessingStorageService storage;
     private final ProcessingTaskRecordService tasks;

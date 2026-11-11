@@ -1,5 +1,8 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.mapper.GisVectorFeatureMapper;
+import org.ocean.admin.gis.mapper.GisVectorResourceMapper;
+import org.ocean.admin.gis.mapper.GisVectorStyleMapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
@@ -7,7 +10,6 @@ import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisVectorFeature;
 import org.ocean.admin.gis.entity.GisVectorGroup;
 import org.ocean.admin.gis.entity.GisVectorLayer;
-import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.progress.ProgressStage;
 import org.ocean.admin.gis.progress.ProgressUnit;
 import org.ocean.admin.gis.util.GeoJsonFeatureReader;
@@ -46,7 +48,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class VectorLayerService {
     private static final long MAX_PAGE_BYTES = 8L * 1024 * 1024;
-    private final GisVectorMapper mapper;
+    private final GisVectorFeatureMapper gisVectorFeatureMapper;
+    private final GisVectorResourceMapper gisVectorResourceMapper;
+    private final GisVectorStyleMapper gisVectorStyleMapper;
     private final ObjectMapper json;
     private final GeoJsonFeatureReader reader;
     private final VectorTemplateRules templateRules;
@@ -109,15 +113,15 @@ public class VectorLayerService {
             throw new ImportException("MISSING_VECTOR_IMPORT_CONFIG", "文件未固定样式与归组方式，禁止猜测或重导存量数据");
         }
         var template = dataSetStyles.compile(snapshot);
-        Map<String, GisVectorGroup> targets = mapper.groups(source.getDataSetId()).stream()
+        Map<String, GisVectorGroup> targets = gisVectorStyleMapper.groups(source.getDataSetId()).stream()
                 .collect(Collectors.toMap(GisVectorGroup::getGroupKey, group -> group));
         transactions.executeWithoutResult(status -> {
             claimGuard.run();
-            if (mapper.layersBySource(source.getId()).stream().anyMatch(layer -> "READY".equals(layer.getLayerStatus()))) {
+            if (gisVectorFeatureMapper.layersBySource(source.getId()).stream().anyMatch(layer -> "READY".equals(layer.getLayerStatus()))) {
                 throw new ImportException("VECTOR_ALREADY_EXTRACTED", "已完成图层不可被元数据重试覆盖");
             }
-            mapper.deleteExtractingLayersBySource(source.getId());
-            mapper.retireUnusedWorkingResources(source.getId());
+            gisVectorFeatureMapper.deleteExtractingLayersBySource(source.getId());
+            gisVectorResourceMapper.retireUnusedWorkingResources(source.getId());
         });
         Map<String, GisVectorLayer> layers = new LinkedHashMap<>();
         Map<String, Long> counts = new LinkedHashMap<>();
@@ -162,7 +166,7 @@ public class VectorLayerService {
                             GisVectorLayer created = layer;
                             transactions.executeWithoutResult(status -> {
                                 claimGuard.run();
-                                if (mapper.insertLayer(created) != 1) throw new IllegalStateException("分类图层创建失败");
+                                if (gisVectorFeatureMapper.insertLayer(created) != 1) throw new IllegalStateException("分类图层创建失败");
                             });
                             layers.put(layerKey, layer);
                         }
@@ -212,7 +216,7 @@ public class VectorLayerService {
         int size = batch.size();
         var issues = transactions.execute(status -> {
             claimGuard.run();
-            return mapper.geometryIssues(batch);
+            return gisVectorFeatureMapper.geometryIssues(batch);
         });
         // 拓扑校验仅记录质量问题；完整几何照常进入工作包，显示整理由现有渲染流程承担。
         invalidGeometries[0] += issues.size();
@@ -258,10 +262,10 @@ public class VectorLayerService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResult<List<GisVectorVO.Layer>> page(Long dataSetId, Long groupId, Long sourceFileId, int current, int size) {
         if (current < 1 || size < 1 || size > 100 || (dataSetId != null && dataSetId < 1)) throw badRequest("页码须大于0，每页1至100条");
-        if (groupId != null && (dataSetId == null || groupId < 1 || mapper.group(dataSetId, groupId) == null))
+        if (groupId != null && (dataSetId == null || groupId < 1 || gisVectorStyleMapper.group(dataSetId, groupId) == null))
             throw badRequest("分组查询须指定正确的数据集及分组");
         if (sourceFileId != null && sourceFileId < 1) throw badRequest("来源文件ID无效");
-        Page<GisVectorLayer> page = mapper.pageLayers(new Page<>(current, size), dataSetId, groupId, sourceFileId);
+        Page<GisVectorLayer> page = gisVectorFeatureMapper.pageLayers(new Page<>(current, size), dataSetId, groupId, sourceFileId);
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords().stream().map(this::toVO).toList());
     }
 
@@ -310,11 +314,11 @@ public class VectorLayerService {
         feature.setVersion(1L); feature.setCreateTime(java.time.LocalDateTime.now()); feature.setUpdateTime(feature.getCreateTime());
         validateTopology(feature);
         boolean packaged = packaged(layer);
-        if (!packaged) mapper.insertFeatures(List.of(feature));
+        if (!packaged) gisVectorFeatureMapper.insertFeatures(List.of(feature));
         reclassify(layer,feature,!packaged);
         resources.edit(layer, null, feature);
-        if (!packaged) mapper.refreshLayer(layerId);
-        mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
+        if (!packaged) gisVectorFeatureMapper.refreshLayer(layerId);
+        gisVectorStyleMapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
         return toFeature(feature);
     }
 
@@ -338,11 +342,11 @@ public class VectorLayerService {
         if (coordinateDimension(oldGeometry) != coordinateDimension(body.get("geometry"))) throw badRequest("编辑须保留原要素的 XY/XYZ 坐标维度");
         validateTopology(feature);
         boolean packaged = packaged(layer);
-        if (!packaged && mapper.updateFeature(feature, existing.getVersion()) != 1) throw preconditionFailed();
+        if (!packaged && gisVectorFeatureMapper.updateFeature(feature, existing.getVersion()) != 1) throw preconditionFailed();
         reclassify(layer,feature,!packaged);
         resources.edit(layer, existing, feature);
-        if (!packaged) mapper.refreshLayer(layerId);
-        mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
+        if (!packaged) gisVectorFeatureMapper.refreshLayer(layerId);
+        gisVectorStyleMapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
         return toFeature(feature);
     }
 
@@ -353,10 +357,10 @@ public class VectorLayerService {
         GisVectorFeature existing = requireFeature(layerId, id);
         requireMatch(ifMatch, featureEtag(id, existing.getVersion()));
         boolean packaged = packaged(layer);
-        if (!packaged && mapper.deleteFeature(layerId, id, existing.getVersion()) != 1) throw preconditionFailed();
+        if (!packaged && gisVectorFeatureMapper.deleteFeature(layerId, id, existing.getVersion()) != 1) throw preconditionFailed();
         resources.edit(layer, existing, null);
-        if (!packaged) mapper.refreshLayer(layerId);
-        mapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
+        if (!packaged) gisVectorFeatureMapper.refreshLayer(layerId);
+        gisVectorStyleMapper.bumpDataSetRevision(layer.getDataSetId(), true, false);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -364,11 +368,11 @@ public class VectorLayerService {
         GisVectorLayer layer = requireLayer(id, true);
         if ("IMPORTING".equals(layer.getLayerStatus())) throw new ResponseStatusException(HttpStatus.CONFLICT, "正在导入的图层不能删除");
         requireMatch(ifMatch, layerEtag(id, layer.getDataVersion(), layer.getPresentationVersion()));
-        mapper.deleteLayer(id);
-        mapper.purgeLayerFeatures(id);
-        if (layer.getResourceId() != null && mapper.resourceReferences(layer.getResourceId()) == 0)
-            mapper.retireResource(layer.getResourceId());
-        mapper.bumpDataSetRevision(layer.getDataSetId(), true, true);
+        gisVectorFeatureMapper.deleteLayer(id);
+        gisVectorFeatureMapper.purgeLayerFeatures(id);
+        if (layer.getResourceId() != null && gisVectorResourceMapper.resourceReferences(layer.getResourceId()) == 0)
+            gisVectorResourceMapper.retireResource(layer.getResourceId());
+        gisVectorStyleMapper.bumpDataSetRevision(layer.getDataSetId(), true, true);
     }
 
     public GisVectorVO.Layer toVO(GisVectorLayer layer) {
@@ -397,11 +401,11 @@ public class VectorLayerService {
     private GisVectorLayer requireLayer(Long id, boolean lock) {
         if (id == null || id < 1) throw badRequest("图层ID须大于0");
         if (lock) {
-            var existing = mapper.layer(id);
+            var existing = gisVectorFeatureMapper.layer(id);
             if (existing == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "图层不存在或已删除");
-            if (mapper.lockDataSetStyle(existing.getDataSetId()) == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "数据集尚未初始化样式");
+            if (gisVectorStyleMapper.lockDataSetStyle(existing.getDataSetId()) == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "数据集尚未初始化样式");
         }
-        GisVectorLayer layer = lock ? mapper.lockLayer(id) : mapper.layer(id);
+        GisVectorLayer layer = lock ? gisVectorFeatureMapper.lockLayer(id) : gisVectorFeatureMapper.layer(id);
         if (layer == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "图层不存在或已删除");
         if (layer.getGroupId() == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "存量图层尚未分类，须单独迁移");
         return layer;
@@ -413,16 +417,16 @@ public class VectorLayerService {
 
     private Long reclassify(GisVectorLayer source, GisVectorFeature feature, boolean persist) {
         if (!"AUTO".equals(source.getAssignmentMode())) return source.getId();
-        var original = mapper.group(source.getDataSetId(),source.getOriginalGroupId());
+        var original = gisVectorStyleMapper.group(source.getDataSetId(),source.getOriginalGroupId());
         if (original != null && "UNKNOWN_CLASSIFICATION".equals(original.getNodeType())) return source.getId();
         var template = dataSetStyles.compile(dataSetStyles.require(source.getDataSetId(),false));
         String placement = original == null ? "AUTO" : template.groups().get(original.getGroupKey()).path("placement").asText("AUTO");
         var classification = templateRules.classify(template, json.readTree(feature.getPropertiesJson()), source.getGeometryType(), placement, source.getLayerName());
-        var group = mapper.groups(source.getDataSetId()).stream()
+        var group = gisVectorStyleMapper.groups(source.getDataSetId()).stream()
                 .filter(g -> g.getGroupKey().equals(classification.groupKey())).findFirst().orElseThrow();
         var target = source;
         if (!group.getId().equals(source.getGroupId())) {
-            target = mapper.layersBySource(source.getSourceFileId()).stream()
+            target = gisVectorFeatureMapper.layersBySource(source.getSourceFileId()).stream()
                     .filter(l -> group.getId().equals(l.getGroupId()) && "AUTO".equals(l.getAssignmentMode())
                         && Objects.equals(l.getSourceLayerId(), source.getSourceLayerId()) && Objects.equals(l.getResourceId(), source.getResourceId())
                         && source.getGeometryType().equals(l.getGeometryType()) && "READY".equals(l.getLayerStatus()))
@@ -437,16 +441,16 @@ public class VectorLayerService {
                 target.setLayerName(source.getLayerName());
                 target.setEnabled(template.groups().get(group.getGroupKey()).path("defaultLayerEnabled").asBoolean());
                 target.setStyleMode("INHERIT_TARGET_GROUP");
-                mapper.insertLayer(target);
-                mapper.setLayerStatus(target.getId(),"READY");
+                gisVectorFeatureMapper.insertLayer(target);
+                gisVectorFeatureMapper.setLayerStatus(target.getId(),"READY");
             }
         }
-        if (persist && mapper.reclassifyFeature(feature.getId(),source.getId(),target.getId(),classification.ruleKey()) != 1)
+        if (persist && gisVectorFeatureMapper.reclassifyFeature(feature.getId(),source.getId(),target.getId(),classification.ruleKey()) != 1)
             throw preconditionFailed();
         feature.setLayerId(target.getId()); feature.setClassificationRuleKey(classification.ruleKey());
         if (!target.getId().equals(source.getId())) {
-            if (persist) mapper.refreshLayer(target.getId());
-            mapper.bumpDataSetRevision(source.getDataSetId(),false,true);
+            if (persist) gisVectorFeatureMapper.refreshLayer(target.getId());
+            gisVectorStyleMapper.bumpDataSetRevision(source.getDataSetId(),false,true);
         }
         return target.getId();
     }
@@ -478,7 +482,7 @@ public class VectorLayerService {
     }
 
     private void validateTopology(GisVectorFeature feature) {
-        var error = mapper.firstGeometryError(List.of(feature));
+        var error = gisVectorFeatureMapper.firstGeometryError(List.of(feature));
         if (error != null) throw badRequest("无效几何: " + error.reason());
     }
 

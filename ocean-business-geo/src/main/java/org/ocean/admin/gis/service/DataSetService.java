@@ -1,5 +1,6 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.mapper.GisVectorResourceMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -47,7 +48,7 @@ import java.util.stream.Collectors;
 public class DataSetService {
 
     private final VectorDataSetStyleService vectorDataSetStyles;
-    private final org.ocean.admin.gis.mapper.GisVectorMapper vectorMapper;
+    private final GisVectorResourceMapper gisVectorResourceMapper;
     private final GisDataSetMapper gisDataSetMapper;
     private final GisFileMetaMapper gisFileMetaMapper;
     private final GisFileGroupMapper fileGroupMapper;
@@ -242,7 +243,7 @@ public class DataSetService {
                 .toList());
         processingInputMapper.detachTerminalByDataSetId(id);
         // 发布快照独立保留，其余文件资源先登记回收意图，提交后由清理任务释放。
-        vectorMapper.retireDataSetResources(id);
+        gisVectorResourceMapper.retireDataSetResources(id);
         if (gisDataSetMapper.physicallyDeleteById(id) != 1) {
             throw new IllegalStateException("数据集删除失败: " + id);
         }
