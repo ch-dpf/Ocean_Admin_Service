@@ -1,5 +1,6 @@
 package org.ocean.admin.gis.service;
 
+import it.geosolutions.imageioimpl.plugins.tiff.TIFFImageReaderSpi;
 import org.gdal.gdal.Dataset;
 import org.gdal.gdal.InfoOptions;
 import org.gdal.gdal.ProgressCallback;
@@ -22,6 +23,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import javax.imageio.stream.FileImageInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -52,6 +54,8 @@ import java.util.regex.Pattern;
 /** 在独立 Java 进程内调用 GDAL JNI，并为现有流式解析器准备临时标准数据。 */
 @Component
 public class GdalDatasetReader {
+    // 超过此值时转为小块临时 TIFF，不作为源文件解析失败的条件。
+    private static final long DIRECT_TIFF_BLOCK_BYTES = 64 * 1024 * 1024;
     private final GisProcessingProperties properties;
     private final ControlledWorkspaceResolver sources;
     private final ObjectMapper json;
@@ -200,7 +204,8 @@ public class GdalDatasetReader {
                 context.packageResult = executePackage(context, request, progress);
             } else if (format == GisFileFormat.GEOJSON) {
                 context.vectors.add(new VectorSource("default", entry.getOriginalName(), entryPath, "EPSG:4326", null, null));
-            } else if (format == GisFileFormat.GEOTIFF && !options.has("sourceCrs")) {
+            } else if (format == GisFileFormat.GEOTIFF && !options.has("sourceCrs")
+                    && !requiresTiffNormalization(entryPath)) {
                 context.rasters.add(new RasterSource("default", entry.getOriginalName(), entryPath, null, null, null));
             } else {
                 progress.accept(ProgressStage.indeterminate("NATIVE_INSPECTION", "检查原始驱动、坐标系和数据结构"));
@@ -217,6 +222,31 @@ public class GdalDatasetReader {
             catch (RuntimeException cleanup) { ex.addSuppressed(cleanup); }
             throw failure("SOURCE_READ_FAILED", "无法准备原始数据源: " + ex.getMessage());
         }
+    }
+
+    /** 只检查布局；主图、内部掩膜及已登记外部掩膜的大块交给隔离工作进程重新分块。 */
+    private boolean requiresTiffNormalization(Path path) throws IOException {
+        for (Path candidate : List.of(path, path.resolveSibling(path.getFileName() + ".msk"))) {
+            if (!Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
+            try (var input = new FileImageInputStream(candidate.toFile())) {
+                var reader = new TIFFImageReaderSpi().createReaderInstance();
+                try {
+                    reader.setInput(input, false, false);
+                    int images = reader.getNumImages(true);
+                    for (int index = 0; index < images; index++) {
+                        var type = reader.getRawImageType(index);
+                        if (type == null) return true;
+                        long bytesPerPixel = 0;
+                        for (int bits : type.getSampleModel().getSampleSize()) bytesPerPixel += (bits + 7L) / 8;
+                        long blockPixels = (long) reader.getTileWidth(index) * reader.getTileHeight(index);
+                        if (blockPixels > DIRECT_TIFF_BLOCK_BYTES / Math.max(1, bytesPerPixel)) return true;
+                    }
+                } finally {
+                    reader.dispose();
+                }
+            }
+        }
+        return false;
     }
 
     /** 复用受限工作进程执行托管包操作，JNI 不进入服务 JVM。 */
@@ -1011,7 +1041,8 @@ public class GdalDatasetReader {
                 double determinant = transform.get(1).asDouble() * transform.get(5).asDouble() - transform.get(2).asDouble() * transform.get(4).asDouble();
                 if (!Double.isFinite(determinant) || determinant == 0) throw failure("INVALID_GEOLOCATION", "栅格仿射定位不可逆");
                 if (!info.path("bands").isArray() || info.path("bands").isEmpty()) throw failure("EMPTY_RASTER", "栅格没有可读取波段");
-                Vector<String> arguments = new Vector<>(List.of("-of", "GTiff", "-co", "TILED=YES", "-co", "BIGTIFF=IF_SAFER",
+                Vector<String> arguments = new Vector<>(List.of("-of", "GTiff", "-co", "TILED=YES",
+                        "-co", "BLOCKXSIZE=256", "-co", "BLOCKYSIZE=256", "-co", "BIGTIFF=IF_SAFER",
                         "-co", "COPY_SRC_MDD=YES", "-mask", "auto"));
                 if (explicit != null) arguments.addAll(List.of("-a_srs", sourceCrs));
                 progress.accept(ProgressStage.indeterminate("NATIVE_RASTER_CONVERSION", "Java GDAL 读取原始波段、无效值与掩膜"));

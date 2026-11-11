@@ -65,7 +65,7 @@ mvn -pl ocean-bootstrap -am spring-boot:run
 
 上传或工作区扫描整批收口后，后台自动识别文件组，再进入 `EXTRACTING_METADATA`。文件组是业务管理和解析单位，单个独立文件也建立组；同一数据集可包含多个组，每个物理文件最多属于一个组。矢量组在同一次提取中生成可编辑图层与要素，所有图层 READY 后才计为解析成功。接入仍使用现有数据集、文件或工作区路径参数，不要求客户端提供分组清单。
 
-支持的矢量入口为 GeoJSON、SHP、DXF、MIF、TAB、CSV、GPX、DWG；栅格入口为 GeoTIFF、IMG、JPG/JPEG、PNG、GIF、GRIB2。GeoJSON 与 GeoTIFF 保留既有 Java 解析链路，其他格式通过 GDAL/OGR 读取真实图层或波段。GeoJSON 继续要求 RFC 7946 的 WGS84 经度、纬度顺序，接受下文列出的顶层旧式 WGS84 命名 `crs` 声明；读取配置不能将任意投影的 JSON 当作标准 GeoJSON 导入。
+支持的矢量入口为 GeoJSON、SHP、DXF、MIF、TAB、CSV、GPX、DWG；栅格入口为 GeoTIFF、IMG、JPG/JPEG、PNG、GIF、GRIB2。GeoJSON 与普通块布局的 GeoTIFF 保留既有 Java 解析链路，GeoTIFF 大块布局及其他格式通过 GDAL/OGR 读取真实图层或波段。GeoJSON 继续要求 RFC 7946 的 WGS84 经度、纬度顺序，接受下文列出的顶层旧式 WGS84 命名 `crs` 声明；读取配置不能将任意投影的 JSON 当作标准 GeoJSON 导入。
 
 业务列表使用 `GET /api/gis/file-groups/page`，默认排除重复输入追溯记录，传 `includeDuplicates=true` 可查看。详情 `GET /api/gis/file-groups/{id}` 返回组、成员与 `effectiveGroupId`；重复输入指向原规范组。`assemblyStatus` 表示完整、缺件、未识别、能力阻塞或重复，`parseStatus` 表示等待、排队、执行、完成、失败或 `REIMPORT_REQUIRED`。文件组与矢量业务分类树 `gis_vector_group` 是两个独立概念。
 
@@ -141,7 +141,7 @@ EPSG:3857 源影像允许世界边界外不超过各轴一个源像元的网格�
 
 矢量文件逐要素流式导入，与在线编辑采用独立限额：导入单要素最多100万个顶点、400万个 JSON 节点，几何和属性合计不超过32MiB；在线编辑仍限制4MiB请求体。GDAL 矢量转换统一执行 MakeValid 并输出 RFC 7946，规范化后的几何继续通过 PostGIS 拓扑校验，不忽略转换失败的要素。全球面的长经差边界按平面线段解释，不仅凭经差超过180度拒绝导入。空几何和无位置记录保留在不可变原始快照中，工作图层不生成虚构几何，并通过 `vectorImport.emptyGeometryFeatures` 返回数量；未声明或未登记的 CRS 仍须补齐，不默认猜测坐标系。
 
-栅格与 GDAL 输入在隔离的临时目录中重建，只暴露已登记组成员，避免自动借用源目录中未登记的辅助文件；原文件只读。GeoTIFF 显式配置 `sourceCrs` 时也进入 Java GDAL 工作进程，生成带投影的临时 GeoTIFF 后读取。主服务监控整个工作进程的租约、超时、日志、元数据及临时输出限额；失败或取消后终止该进程及其后代，释放 Windows 文件句柄后清理临时目录。工作进程在读取前检查原生版本和实际驱动，缺库、版本不匹配、缺驱动或不支持文件版本时明确阻塞，不切换其他读取路径。
+栅格与 GDAL 输入在隔离的临时目录中重建，只暴露已登记组成员，避免自动借用源目录中未登记的辅助文件；原文件只读。GeoTIFF 显式配置 `sourceCrs`，或主图、内部掩膜、已登记外部掩膜的内部块解码体积超过 64 MiB 时，进入 Java GDAL 工作进程，生成 256×256 分块的临时 GeoTIFF 后读取。64 MiB 只用于选择读取方式，不作为源文件解析失败的条件；转换保留源坐标系、波段、无效值及掩膜，临时产物在解析上下文关闭时清理。主服务监控整个工作进程的租约、超时、日志、元数据及临时输出限额；失败或取消后终止该进程及其后代，释放 Windows 文件句柄后清理临时目录。工作进程在读取前检查原生版本和实际驱动，缺库、版本不匹配、缺驱动或不支持文件版本时明确阻塞，不切换其他读取路径。
 
 ## 从受控服务器工作区接入数据
 
