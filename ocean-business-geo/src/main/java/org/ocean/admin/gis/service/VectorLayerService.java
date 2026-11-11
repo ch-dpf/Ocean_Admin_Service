@@ -6,6 +6,7 @@ import org.ocean.admin.gis.mapper.GisVectorStyleMapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisVectorFeature;
 import org.ocean.admin.gis.entity.GisVectorGroup;
@@ -46,6 +47,7 @@ import java.util.stream.Collectors;
 /** 矢量来源导入及图层查询、编辑；写入时保持要素与汇总版本一致。 */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class VectorLayerService {
     private static final long MAX_PAGE_BYTES = 8L * 1024 * 1024;
     private final GisVectorFeatureMapper gisVectorFeatureMapper;
@@ -69,7 +71,7 @@ public class VectorLayerService {
 
     /** 提取结果由文件元数据生命周期统一提交，导入服务不提前将图层标记为 READY。 */
     public record VectorExtraction(List<Long> layerIds, long sourceFeatures, long parts, long unknownParts,
-            long warnings, long emptyGeometryFeatures, Map<String, Long> groupCounts, GisVectorVO.GeometryQuality geometryQuality) {
+            long warnings, long emptyGeometryFeatures, Map<String, Long> groupCounts) {
         public VectorExtraction {
             layerIds = List.copyOf(layerIds);
             groupCounts = Map.copyOf(groupCounts);
@@ -204,9 +206,12 @@ public class VectorLayerService {
                     sourceFeatures, Math.max(progressTotal, sourceFeatures), ProgressUnit.FEATURE));
             if (sourceFeatures == 0 || layers.isEmpty()) throw new ImportException("EMPTY_GEOMETRY", "来源不包含可制图要素");
             resources.importWorking(resourceId, source, List.copyOf(layers.values()), claimGuard, heartbeat);
+            if (invalidGeometries[0] > 0) {
+                log.warn("矢量来源读取完成，几何拓扑问题仅记录日志: fileId={}, fileGroupId={}, invalidGeometries={}, issues={}",
+                        source.getId(), source.getFileGroupId(), invalidGeometries[0], geometryIssues);
+            }
             return new VectorExtraction(layers.values().stream().map(GisVectorLayer::getId).toList(),
-                    sourceFeatures, statistics[1], statistics[2], statistics[3] + invalidGeometries[0], emptyGeometryFeatures[0], counts,
-                    new GisVectorVO.GeometryQuality(invalidGeometries[0], geometryIssues));
+                    sourceFeatures, statistics[1], statistics[2], statistics[3], emptyGeometryFeatures[0], counts);
         } finally { java.nio.file.Files.deleteIfExists(inputPath); }
     }
 
@@ -218,7 +223,7 @@ public class VectorLayerService {
             claimGuard.run();
             return gisVectorFeatureMapper.geometryIssues(batch);
         });
-        // 拓扑校验仅记录质量问题；完整几何照常进入工作包，显示整理由现有渲染流程承担。
+        // 拓扑问题只汇总到日志，最多保留20条定位信息；完整几何照常进入工作包。
         invalidGeometries[0] += issues.size();
         for (var issue : issues) {
             if (geometryIssues.size() >= 20) break;

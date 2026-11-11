@@ -14,15 +14,6 @@
     <select id="members" resultType="org.ocean.admin.gis.entity.GisFileMeta">
         SELECT * FROM ocean_gis.gis_file_meta WHERE file_group_id=#{groupId} AND deleted=0 ORDER BY member_path,id
     </select>
-    <select id="geometryQuality" resultType="org.ocean.admin.gis.vo.GisFileGroupVO$GeometryQualityResult">
-        SELECT DISTINCT ON (file_meta_id) file_meta_id,
-            (extra_metadata #&gt; '{vectorImport,geometryQuality}')::text AS quality_json
-        FROM ocean_gis.gis_file_spatial_metadata
-        WHERE file_meta_id IN
-            <foreach collection="fileIds" item="id" open="(" separator="," close=")">#{id}</foreach>
-            AND extra_metadata #&gt; '{vectorImport,geometryQuality}' IS NOT NULL
-        ORDER BY file_meta_id, id
-    </select>
     <select id="canonical" resultType="org.ocean.admin.gis.entity.GisFileGroup">
         SELECT * FROM ocean_gis.gis_file_group WHERE data_set_id=#{dataSetId} AND fingerprint=#{fingerprint} AND deleted=0
     </select>

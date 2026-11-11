@@ -15,7 +15,6 @@ public interface GisFileGroupMapper extends BaseMapper<GisFileGroup> {
     List<GisFileGroup> lockByDataSet(@Param("dataSetId") Long dataSetId);
     List<GisFileMeta> ingestionFiles(@Param("progressId") String progressId);
     List<GisFileMeta> members(@Param("groupId") Long groupId);
-    List<org.ocean.admin.gis.vo.GisFileGroupVO.GeometryQualityResult> geometryQuality(@Param("fileIds") List<Long> fileIds);
     GisFileGroup canonical(@Param("dataSetId") Long dataSetId, @Param("fingerprint") String fingerprint);
     int attach(@Param("id") Long id, @Param("groupId") Long groupId, @Param("path") String path,
                @Param("outcome") String outcome);

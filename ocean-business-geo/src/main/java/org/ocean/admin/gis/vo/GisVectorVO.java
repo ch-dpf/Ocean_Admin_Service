@@ -30,9 +30,6 @@ public final class GisVectorVO {
 
     /** 质量问题指向原始集合及几何路径，不代表该要素被跳过或改写。 */
     public record GeometryIssue(Long sourceLayerId, Long featureIndex, String geometryPath, String reason, String location) { }
-    public record GeometryQuality(long invalidGeometries, List<GeometryIssue> issues) {
-        public GeometryQuality { issues = List.copyOf(issues); }
-    }
 
     public record StyleSummary(String styleId, String layerId, String name, boolean isDefault,
             long version, LocalDateTime createTime, LocalDateTime updateTime) { }
