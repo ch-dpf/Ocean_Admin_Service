@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 @RequiredArgsConstructor
 public class VectorDataSetStyleService {
+    private final GisDictionaryService dictionaries;
     private final GisVectorStyleMapper gisVectorStyleMapper;
     private final ObjectMapper json;
     private final VectorTemplateRules rules;
@@ -119,6 +120,7 @@ public class VectorDataSetStyleService {
     }
 
     private String templateIdForPlacement(String placement) {
+        dictionaries.requireItem("vectorPlacement", placement);
         return switch (placement) {
             case "AUTO", "UNKNOWN" -> "cn-vector-default";
             case "X_LIGHT" -> "x-institute-light";

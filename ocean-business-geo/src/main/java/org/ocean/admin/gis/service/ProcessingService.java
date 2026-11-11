@@ -51,6 +51,7 @@ public class ProcessingService {
     private static final String DEFAULT_WORKSPACE_CODE = "default";
     private static final String DEFAULT_WORKSPACE_RELATIVE_PATH = ".";
 
+    private final GisDictionaryService dictionaries;
     private final GisProcessingStorageService storageService;
     private final GisFileProcessingEngineRegistry engineRegistry;
     private final GisProcessingInputResolverRegistry inputResolverRegistry;
@@ -147,6 +148,18 @@ public class ProcessingService {
         if (type == null) {
             throw new IllegalArgumentException("处理类型不能为空");
         }
+        if (type != GisProcessingType.VECTOR && parameters instanceof ObjectNode objectParameters) {
+            ObjectNode normalized = objectParameters.deepCopy();
+            String prefix = type.name().toLowerCase(java.util.Locale.ROOT);
+            for (String field : List.of("targetCrs", "tileProfile", "outputFormat")) {
+                JsonNode value = normalized.get(field);
+                if (value == null || value.isNull() || (value.isString() && value.asText().isBlank())) {
+                    String key = prefix + Character.toUpperCase(field.charAt(0)) + field.substring(1);
+                    normalized.put(field, dictionaries.defaultCode(key));
+                }
+            }
+            parameters = normalized;
+        }
         try {
             return switch (type) {
                 case TERRAIN -> objectMapper.treeToValue(
@@ -158,7 +171,7 @@ public class ProcessingService {
                         GisProcessingParameters.VectorProcessingParameters.class);
             };
         } catch (JacksonException ex) {
-            throw new IllegalArgumentException(type.displayName() + "参数格式不正确", ex);
+            throw new IllegalArgumentException(dictionaries.label("processingType", type.name()) + "参数格式不正确", ex);
         }
     }
 
@@ -209,7 +222,7 @@ public class ProcessingService {
                     .tileSetId(created.tileSetId())
                     .taskNo(taskNo)
                     .sourceType(command.sourceType())
-                    .sourceTypeName(command.sourceType().displayName())
+                    .sourceTypeName(dictionaries.label("inputSourceType", command.sourceType().name()))
                     .processingType(command.processingType())
                     .outputKey(workspace.outputKey())
                     .totalCount((long) prepared.inputs().size())
@@ -279,6 +292,12 @@ public class ProcessingService {
         if (parameters.processingType() != type) {
             throw new IllegalArgumentException(
                     "处理类型与参数类型不一致: " + type + "/" + parameters.processingType());
+        }
+        if (type != GisProcessingType.VECTOR) {
+            String prefix = type.name().toLowerCase(java.util.Locale.ROOT);
+            dictionaries.requireItem(prefix + "TargetCrs", parameters.targetCrs());
+            dictionaries.requireItem(prefix + "TileProfile", parameters.tileProfile());
+            dictionaries.requireItem(prefix + "OutputFormat", parameters.outputFormat());
         }
         if (parameters instanceof TerrainProcessingParameters terrainParameters) {
             TerrainOptions.from(terrainParameters);

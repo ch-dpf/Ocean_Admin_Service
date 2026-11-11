@@ -27,6 +27,7 @@ import java.util.function.Consumer;
 @Service
 @RequiredArgsConstructor
 public class FileUploadService {
+    private final GisDictionaryService dictionaries;
     private final GisDataSetMapper dataSets;
     private final GisFileMetaMapper files;
     private final GisFileSpatialMetadataMapper spatial;
@@ -41,6 +42,7 @@ public class FileUploadService {
 
     public Map<String, Object> uploadChunk(GisUploadChunkCommand command, InputStream input, Long operator) {
         validate(command);
+        dictionaries.requireItem("vectorPlacement", command.vectorPlacement());
         String id = "upload_" + (operator == null ? "0" : operator) + "_" + command.requestId();
         return progress.withExecutionLock(id, () -> {
             try { return receive(id, operator, command, input); }
