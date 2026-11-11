@@ -1,10 +1,10 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.mapper.GisVectorStyleMapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import lombok.RequiredArgsConstructor;
 import org.ocean.admin.gis.entity.GisVectorDataSetStyle;
 import org.ocean.admin.gis.entity.GisVectorGroup;
-import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.util.VectorTemplateRules;
 import org.ocean.admin.gis.vo.GisVectorVO;
 import org.springframework.core.io.ClassPathResource;
@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 @RequiredArgsConstructor
 public class VectorDataSetStyleService {
-    private final GisVectorMapper mapper;
+    private final GisVectorStyleMapper gisVectorStyleMapper;
     private final ObjectMapper json;
     private final VectorTemplateRules rules;
     private final Map<String, VectorTemplateRules.Compiled> compiled = new ConcurrentHashMap<>();
@@ -51,7 +51,7 @@ public class VectorDataSetStyleService {
         ((tools.jackson.databind.node.ObjectNode) definition).remove("cartography");
         snapshot.setDefinitionJson(json.writeValueAsString(definition));
         snapshot.setTemplateChecksum(digest(bytes));
-        if (mapper.insertDataSetStyle(snapshot) != 1) throw new IllegalStateException("样式快照创建失败");
+        if (gisVectorStyleMapper.insertDataSetStyle(snapshot) != 1) throw new IllegalStateException("样式快照创建失败");
         createGroups(snapshot, definition);
     }
 
@@ -75,12 +75,12 @@ public class VectorDataSetStyleService {
             group.setSortOrder(node.path("sortOrder").asInt());
             groups.add(group);
         }
-        if (mapper.insertGroups(groups) != groups.size()) throw new IllegalStateException("默认分类目录创建失败");
+        if (gisVectorStyleMapper.insertGroups(groups) != groups.size()) throw new IllegalStateException("默认分类目录创建失败");
     }
 
     public GisVectorDataSetStyle require(Long dataSetId, boolean lock) {
         if (dataSetId == null || dataSetId < 1) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "数据集ID无效");
-        var s = lock ? mapper.lockDataSetStyle(dataSetId) : mapper.dataSetStyle(dataSetId);
+        var s = lock ? gisVectorStyleMapper.lockDataSetStyle(dataSetId) : gisVectorStyleMapper.dataSetStyle(dataSetId);
         if (s == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "矢量数据集缺少样式快照或不可用；存量初始化须单独执行");
         return s;
     }
@@ -106,8 +106,8 @@ public class VectorDataSetStyleService {
         snapshot.setCartographyJson(json.writeValueAsString(definition.remove("cartography")));
         snapshot.setDefinitionJson(json.writeValueAsString(definition));
         snapshot.setTemplateChecksum(digest(bytes));
-        mapper.deleteDataSetGroups(dataSetId);
-        if (mapper.replaceDataSetRules(snapshot) != 1) throw new IllegalStateException("业务分类规则初始化失败");
+        gisVectorStyleMapper.deleteDataSetGroups(dataSetId);
+        if (gisVectorStyleMapper.replaceDataSetRules(snapshot) != 1) throw new IllegalStateException("业务分类规则初始化失败");
         createGroups(snapshot, definition);
         return snapshot;
     }
@@ -127,7 +127,7 @@ public class VectorDataSetStyleService {
     }
 
     private void ensureTemplateCanChange(GisVectorDataSetStyle snapshot) {
-        if (mapper.hasPlacementReferences(snapshot.getDataSetId())) {
+        if (gisVectorStyleMapper.hasPlacementReferences(snapshot.getDataSetId())) {
             String name = json.readTree(snapshot.getDefinitionJson()).path("name").asText(snapshot.getTemplateId());
             throw new IllegalArgumentException("该数据集已使用“" + name + "”，请沿用当前业务分类；其他规则请接入独立数据集");
         }
@@ -155,7 +155,7 @@ public class VectorDataSetStyleService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public GisVectorVO.GroupTree groupTree(Long dataSetId) {
         var snapshot = require(dataSetId, false);
-        return new GisVectorVO.GroupTree(children(mapper.groups(dataSetId), null), groupsEtag(snapshot));
+        return new GisVectorVO.GroupTree(children(gisVectorStyleMapper.groups(dataSetId), null), groupsEtag(snapshot));
     }
     private List<GisVectorVO.Group> children(List<GisVectorGroup> groups, Long parent) {
         return groups.stream().filter(g -> Objects.equals(parent, g.getParentId())).map(g -> {
@@ -172,9 +172,9 @@ public class VectorDataSetStyleService {
     public void setEnabled(Long dataSetId, Long groupId, boolean enabled, String ifMatch) {
         var snapshot = require(dataSetId, true);
         requireMatch(ifMatch, groupsEtag(snapshot));
-        if (groupId == null || mapper.group(dataSetId, groupId) == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "当前数据集中不存在该分组");
-        if (mapper.setGroupEnabled(groupId, enabled) != 1) throw new IllegalStateException("分组更新失败");
-        mapper.bumpDataSetRevision(dataSetId, false, true);
+        if (groupId == null || gisVectorStyleMapper.group(dataSetId, groupId) == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "当前数据集中不存在该分组");
+        if (gisVectorStyleMapper.setGroupEnabled(groupId, enabled) != 1) throw new IllegalStateException("分组更新失败");
+        gisVectorStyleMapper.bumpDataSetRevision(dataSetId, false, true);
     }
 
     public static String groupsEtag(GisVectorDataSetStyle s) { return "\"groups-" + s.getDataSetId() + "-d" + s.getDataRevision() + "-p" + s.getDisplayRevision() + "\""; }
@@ -207,13 +207,13 @@ public class VectorDataSetStyleService {
         rules.compile(definition);
         String checksum = digest(json.writeValueAsBytes(definition));
         definition.remove("cartography");
-        int updated = mapper.enableUnconfiguredLayers(dataSetId);
+        int updated = gisVectorStyleMapper.enableUnconfiguredLayers(dataSetId);
         if (updated == 0 && definition.equals(json.readTree(snapshot.getDefinitionJson()))
                 && cartography.equals(json.readTree(snapshot.getCartographyJson()))) return 0;
         snapshot.setDefinitionJson(json.writeValueAsString(definition));
         snapshot.setCartographyJson(json.writeValueAsString(cartography));
         snapshot.setTemplateChecksum(checksum);
-        if (mapper.replaceDataSetRules(snapshot) != 1) throw new IllegalStateException("基础预览配置保存失败");
+        if (gisVectorStyleMapper.replaceDataSetRules(snapshot) != 1) throw new IllegalStateException("基础预览配置保存失败");
         return updated;
     }
 

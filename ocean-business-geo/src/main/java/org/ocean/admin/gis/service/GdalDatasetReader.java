@@ -1,5 +1,6 @@
 package org.ocean.admin.gis.service;
 
+import it.geosolutions.imageioimpl.plugins.tiff.TIFFImageReaderSpi;
 import org.gdal.gdal.Dataset;
 import org.gdal.gdal.InfoOptions;
 import org.gdal.gdal.ProgressCallback;
@@ -22,6 +23,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import javax.imageio.stream.FileImageInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -52,6 +54,8 @@ import java.util.regex.Pattern;
 /** 在独立 Java 进程内调用 GDAL JNI，并为现有流式解析器准备临时标准数据。 */
 @Component
 public class GdalDatasetReader {
+    // 超过此值时转为小块临时 TIFF，不作为源文件解析失败的条件。
+    private static final long DIRECT_TIFF_BLOCK_BYTES = 64 * 1024 * 1024;
     private final GisProcessingProperties properties;
     private final ControlledWorkspaceResolver sources;
     private final ObjectMapper json;
@@ -69,6 +73,35 @@ public class GdalDatasetReader {
 
     @jakarta.annotation.PreDestroy
     public void closeMapWorkers() { mapWorkers.close(); }
+
+    public record DriverCapability(boolean available, String reason) { }
+
+    /** 在读取所用的同一隔离环境探测输入及中间产物驱动，结果交由能力服务缓存。 */
+    public java.util.Map<GisFileFormat, DriverCapability> probeCapabilities() {
+        try (var context = new ReadContext(() -> { })) {
+            context.timeout = Duration.ofSeconds(15);
+            Path requestFile = context.directory().resolve("request.json");
+            ObjectNode request = json.createObjectNode().put("operation", "CAPABILITIES")
+                    .put("version", properties.getGdalVersion()).put("maxMetadataBytes", properties.getGdalMaxMetadataBytes());
+            json.writeValue(requestFile.toFile(), request);
+            run(context, workerCommand(requestFile), stage -> { });
+            Path resultFile = context.directory().resolve("result.json");
+            if (!Files.isRegularFile(resultFile) || Files.size(resultFile) > properties.getGdalMaxMetadataBytes())
+                throw failure("INVALID_NATIVE_METADATA", "格式能力探测未返回有效结果");
+            JsonNode result = json.readTree(resultFile.toFile());
+            if (result.has("error")) throw failure("GDAL_UNAVAILABLE", result.path("error").path("message").asText());
+            var capabilities = new java.util.EnumMap<GisFileFormat, DriverCapability>(GisFileFormat.class);
+            for (GisFileFormat format : GisFileFormat.values()) {
+                JsonNode item = result.path(format.name());
+                if (!item.path("available").isBoolean()) throw failure("INVALID_NATIVE_METADATA", "格式能力探测结果不完整");
+                boolean available = item.path("available").asBoolean();
+                String reason = available ? null : item.path("reason").asText("读取驱动不可用");
+                capabilities.put(format, new DriverCapability(available, reason));
+            }
+            return java.util.Map.copyOf(capabilities);
+        } catch (ReaderException ex) { throw ex; }
+        catch (Exception ex) { throw failure("GDAL_UNAVAILABLE", "格式能力探测失败: " + ex.getMessage()); }
+    }
 
     /** 原文件始终只读；临时文件随上下文关闭删除，提交前须再次核验所有源。 */
     public ReadContext prepare(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
@@ -171,7 +204,8 @@ public class GdalDatasetReader {
                 context.packageResult = executePackage(context, request, progress);
             } else if (format == GisFileFormat.GEOJSON) {
                 context.vectors.add(new VectorSource("default", entry.getOriginalName(), entryPath, "EPSG:4326", null, null));
-            } else if (format == GisFileFormat.GEOTIFF && !options.has("sourceCrs")) {
+            } else if (format == GisFileFormat.GEOTIFF && !options.has("sourceCrs")
+                    && !requiresTiffNormalization(entryPath)) {
                 context.rasters.add(new RasterSource("default", entry.getOriginalName(), entryPath, null, null, null));
             } else {
                 progress.accept(ProgressStage.indeterminate("NATIVE_INSPECTION", "检查原始驱动、坐标系和数据结构"));
@@ -188,6 +222,31 @@ public class GdalDatasetReader {
             catch (RuntimeException cleanup) { ex.addSuppressed(cleanup); }
             throw failure("SOURCE_READ_FAILED", "无法准备原始数据源: " + ex.getMessage());
         }
+    }
+
+    /** 只检查布局；主图、内部掩膜及已登记外部掩膜的大块交给隔离工作进程重新分块。 */
+    private boolean requiresTiffNormalization(Path path) throws IOException {
+        for (Path candidate : List.of(path, path.resolveSibling(path.getFileName() + ".msk"))) {
+            if (!Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
+            try (var input = new FileImageInputStream(candidate.toFile())) {
+                var reader = new TIFFImageReaderSpi().createReaderInstance();
+                try {
+                    reader.setInput(input, false, false);
+                    int images = reader.getNumImages(true);
+                    for (int index = 0; index < images; index++) {
+                        var type = reader.getRawImageType(index);
+                        if (type == null) return true;
+                        long bytesPerPixel = 0;
+                        for (int bits : type.getSampleModel().getSampleSize()) bytesPerPixel += (bits + 7L) / 8;
+                        long blockPixels = (long) reader.getTileWidth(index) * reader.getTileHeight(index);
+                        if (blockPixels > DIRECT_TIFF_BLOCK_BYTES / Math.max(1, bytesPerPixel)) return true;
+                    }
+                } finally {
+                    reader.dispose();
+                }
+            }
+        }
+        return false;
     }
 
     /** 复用受限工作进程执行托管包操作，JNI 不进入服务 JVM。 */
@@ -693,7 +752,7 @@ public class GdalDatasetReader {
                         if (format != GisFileFormat.DWG && available.isEmpty())
                             throw failure("DRIVER_UNAVAILABLE", "缺少部署要求的读取驱动: " + format.name());
                     }
-                    outputDriver("GeoJSON"); outputDriver("GTiff");
+                    outputDriver("GeoJSON"); outputDriver("GTiff"); outputDriver("GPKG");
                     System.out.println(mapper.writeValueAsString(capabilities));
                 } catch (Exception | LinkageError ex) {
                     System.err.println("GDAL Java 能力检查失败: " + ex.getMessage()); System.exit(1);
@@ -712,6 +771,24 @@ public class GdalDatasetReader {
                 if (limit < 1024) throw failure("INVALID_GDAL_CONFIG", "GDAL 元数据限额无效");
                 Worker worker = new Worker(directory, limit);
                 initialize(request.path("version").asString());
+                if ("CAPABILITIES".equals(request.path("operation").asText())) {
+                    ObjectNode capabilities = mapper.createObjectNode();
+                    for (GisFileFormat format : GisFileFormat.values()) {
+                        ObjectNode item = capabilities.putObject(format.name());
+                        try {
+                            if (drivers(format).isEmpty()) throw failure("DRIVER_UNAVAILABLE", "当前 GDAL 缺少 " + format.name() + " 读取驱动");
+                            if (format.isVector()) {
+                                outputDriver("GeoJSON");
+                                outputDriver("GPKG");
+                            } else outputDriver("GTiff");
+                            item.put("available", true);
+                        } catch (ReaderException ex) {
+                            item.put("available", false).put("reason", ex.getMessage());
+                        }
+                    }
+                    worker.writeResult(capabilities);
+                    return;
+                }
                 if (request.has("packageOperation")) {
                     worker.writeResult(GeoPackageStore.executeNative(request, directory, mapper));
                     return;
@@ -800,7 +877,7 @@ public class GdalDatasetReader {
         private void vectors(GisFileFormat format, Path input, JsonNode options, List<String> drivers) throws Exception {
             outputDriver("GeoJSON");
             String explicit = explicitCrs(options);
-            if ((format == GisFileFormat.DXF || format == GisFileFormat.DWG || format == GisFileFormat.CSV) && explicit == null)
+            if (format.sourceCrsRequirement() == GisFileFormat.Requirement.REQUIRED && explicit == null)
                 throw failure("MISSING_CRS", "CSV 和 CAD 必须明确提供 sourceCrs");
             Vector<String> openOptions = new Vector<>();
             if (format == GisFileFormat.CSV) openOptions.addAll(List.of("X_POSSIBLE_NAMES=" + fieldOption(options, "xField"),
@@ -964,7 +1041,8 @@ public class GdalDatasetReader {
                 double determinant = transform.get(1).asDouble() * transform.get(5).asDouble() - transform.get(2).asDouble() * transform.get(4).asDouble();
                 if (!Double.isFinite(determinant) || determinant == 0) throw failure("INVALID_GEOLOCATION", "栅格仿射定位不可逆");
                 if (!info.path("bands").isArray() || info.path("bands").isEmpty()) throw failure("EMPTY_RASTER", "栅格没有可读取波段");
-                Vector<String> arguments = new Vector<>(List.of("-of", "GTiff", "-co", "TILED=YES", "-co", "BIGTIFF=IF_SAFER",
+                Vector<String> arguments = new Vector<>(List.of("-of", "GTiff", "-co", "TILED=YES",
+                        "-co", "BLOCKXSIZE=256", "-co", "BLOCKYSIZE=256", "-co", "BIGTIFF=IF_SAFER",
                         "-co", "COPY_SRC_MDD=YES", "-mask", "auto"));
                 if (explicit != null) arguments.addAll(List.of("-a_srs", sourceCrs));
                 progress.accept(ProgressStage.indeterminate("NATIVE_RASTER_CONVERSION", "Java GDAL 读取原始波段、无效值与掩膜"));

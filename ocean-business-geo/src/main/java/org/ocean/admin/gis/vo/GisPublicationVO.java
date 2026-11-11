@@ -7,17 +7,17 @@ import org.ocean.admin.gis.processing.GisProcessingType;
 
 import java.time.LocalDateTime;
 
-/** 地形、影像和矢量瓦片服务共用的单协议发布记录视图。 */
+/** 任务瓦片服务与数据集 WMS 共用的单协议发布记录视图。 */
 @Data
 @Builder
 public class GisPublicationVO {
     private Long id;
     private String serviceCode;
     private String serviceName;
-    @Schema(description = "本记录唯一服务协议：WMTS 或 TMS")
+    @Schema(description = "本记录唯一服务协议：任务 WMTS/TMS 或数据集 WMS")
     private String serviceProtocol;
 
-    @Schema(description = "本记录唯一服务协议：WMTS 或 TMS")
+    @Schema(description = "本记录唯一服务协议：任务 WMTS/TMS 或数据集 WMS")
     private java.util.List<String> protocols;
 
     @Schema(description = "发布类型：TERRAIN、IMAGERY、VECTOR")
@@ -62,6 +62,11 @@ public class GisPublicationVO {
     @Schema(description = "TMS 单服务根文档地址；非 TMS 发布为空")
     private String tmsUrl;
     private String tmsTileUrlTemplate;
+
+    @Schema(description = "数据集 WMS 的发布样式版本，用于更新样式时校验版本")
+    private String releaseVersion;
+    private String defaultStyleId;
+    private tools.jackson.databind.JsonNode styles;
 
     private LocalDateTime publishTime;
     private LocalDateTime updateTime;

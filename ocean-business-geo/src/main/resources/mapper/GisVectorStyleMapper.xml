@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisVectorStyleMapper">
+    <select id="styles" resultType="org.ocean.admin.gis.entity.GisVectorStyle">
+        SELECT id, layer_id, name, is_default, version, create_time, update_time
+        FROM ocean_gis.gis_vector_style WHERE layer_id = #{layerId} ORDER BY is_default DESC, id
+    </select>
+    <select id="style" resultType="org.ocean.admin.gis.entity.GisVectorStyle">
+        SELECT id, layer_id, name, is_default, definition::text AS definition_json, version, create_time, update_time
+        FROM ocean_gis.gis_vector_style WHERE layer_id = #{layerId} AND id = #{id}
+    </select>
+    <select id="defaultStyle" resultType="org.ocean.admin.gis.entity.GisVectorStyle">
+        SELECT id, layer_id, name, is_default, definition::text AS definition_json, version, create_time, update_time
+        FROM ocean_gis.gis_vector_style WHERE layer_id = #{layerId} AND is_default
+    </select>
+    <insert id="insertStyle">
+        INSERT INTO ocean_gis.gis_vector_style(id, layer_id, name, is_default, definition)
+        VALUES(#{s.id}, #{s.layerId}, #{s.name}, #{s.isDefault}, CAST(#{s.definitionJson} AS jsonb))
+    </insert>
+    <update id="updateStyle">
+        UPDATE ocean_gis.gis_vector_style SET name = #{s.name}, definition = CAST(#{s.definitionJson} AS jsonb),
+            version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{s.id} AND layer_id = #{s.layerId} AND version = #{expected}
+    </update>
+    <update id="clearDefaultStyle">
+        UPDATE ocean_gis.gis_vector_style SET is_default = false, version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE layer_id = #{layerId} AND is_default
+    </update>
+    <update id="setDefaultStyle">
+        UPDATE ocean_gis.gis_vector_style SET is_default = true, version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND layer_id = #{layerId} AND version = #{expected}
+    </update>
+    <delete id="deleteStyle">
+        DELETE FROM ocean_gis.gis_vector_style
+        WHERE id = #{id} AND layer_id = #{layerId} AND version = #{expected} AND NOT is_default
+    </delete>
+    <sql id="dataSetStyleColumns">
+        s.id,s.data_set_id,s.template_id,s.template_version,s.schema_version,
+        s.definition::text AS definition_json,s.cartography::text AS cartography_json,s.template_checksum,s.style_version,
+        s.data_revision,s.display_revision,s.create_time,s.update_time
+    </sql>
+    <select id="dataSetStyle" resultType="org.ocean.admin.gis.entity.GisVectorDataSetStyle">
+        SELECT <include refid="org.ocean.admin.gis.mapper.GisVectorStyleMapper.dataSetStyleColumns"/> FROM ocean_gis.gis_vector_dataset_style s
+        JOIN ocean_gis.gis_data_set ds ON ds.id=s.data_set_id AND ds.deleted=0 AND ds.category_id=2
+        WHERE s.data_set_id=#{dataSetId}
+    </select>
+    <select id="lockDataSetStyle" resultType="org.ocean.admin.gis.entity.GisVectorDataSetStyle" flushCache="true">
+        SELECT <include refid="org.ocean.admin.gis.mapper.GisVectorStyleMapper.dataSetStyleColumns"/> FROM ocean_gis.gis_vector_dataset_style s
+        JOIN ocean_gis.gis_data_set ds ON ds.id=s.data_set_id AND ds.deleted=0 AND ds.category_id=2
+        WHERE s.data_set_id=#{dataSetId} FOR UPDATE OF s
+    </select>
+    <insert id="insertDataSetStyle">
+        INSERT INTO ocean_gis.gis_vector_dataset_style(id,data_set_id,template_id,template_version,schema_version,definition,cartography,template_checksum)
+        VALUES(#{s.id},#{s.dataSetId},#{s.templateId},#{s.templateVersion},#{s.schemaVersion},CAST(#{s.definitionJson} AS jsonb),CAST(#{s.cartographyJson} AS jsonb),#{s.templateChecksum})
+    </insert>
+    <insert id="insertGroups">
+        INSERT INTO ocean_gis.gis_vector_group(id,data_set_id,dataset_style_id,parent_id,group_key,group_name,
+            node_type,geometry_type,assignable,default_style_key,enabled,sort_order)
+        VALUES
+        <foreach collection="groups" item="g" separator=",">
+            (#{g.id},#{g.dataSetId},#{g.datasetStyleId},#{g.parentId,jdbcType=BIGINT},#{g.groupKey},#{g.groupName},
+             #{g.nodeType},#{g.geometryType,jdbcType=VARCHAR},#{g.assignable},#{g.defaultStyleKey,jdbcType=VARCHAR},
+             #{g.enabled},#{g.sortOrder})
+        </foreach>
+    </insert>
+    <select id="groups" resultType="org.ocean.admin.gis.entity.GisVectorGroup">
+        SELECT g.*,count(l.id) AS layer_count,COALESCE(sum(l.feature_count),0)::bigint AS feature_count
+        FROM ocean_gis.gis_vector_group g LEFT JOIN ocean_gis.gis_vector_layer l
+            ON l.group_id=g.id AND l.data_set_id=g.data_set_id AND l.deleted=0 AND l.layer_status='READY'
+        WHERE g.data_set_id=#{dataSetId} GROUP BY g.id ORDER BY g.sort_order,g.id
+    </select>
+    <select id="group" resultType="org.ocean.admin.gis.entity.GisVectorGroup">
+        SELECT * FROM ocean_gis.gis_vector_group WHERE data_set_id=#{dataSetId} AND id=#{id}
+    </select>
+    <update id="setGroupEnabled">
+        UPDATE ocean_gis.gis_vector_group SET enabled=#{enabled},version=version+1,update_time=CURRENT_TIMESTAMP WHERE id=#{id}
+    </update>
+    <update id="bumpDataSetRevision">
+        UPDATE ocean_gis.gis_vector_dataset_style SET
+            data_revision=data_revision+CASE WHEN #{data} THEN 1 ELSE 0 END,
+            display_revision=display_revision+CASE WHEN #{display} THEN 1 ELSE 0 END,
+            style_version=style_version+CASE WHEN #{display} THEN 1 ELSE 0 END,
+            update_time=CURRENT_TIMESTAMP WHERE data_set_id=#{dataSetId}
+    </update>
+    <select id="groupCartography" resultType="string">
+        SELECT COALESCE(jsonb_object_agg(g.group_key,s.definition),'{}'::jsonb)::text
+        FROM ocean_gis.gis_vector_style s JOIN ocean_gis.gis_vector_group g ON s.group_id=g.id
+        WHERE g.data_set_id=#{dataSetId} AND s.scope='GROUP'
+    </select>
+    <select id="layerCartography" resultType="string">
+        SELECT COALESCE(jsonb_object_agg(l.id::text,jsonb_build_object('enabled',l.enabled,
+            'automatic',l.assignment_mode='AUTO','configured',l.style_mode!='UNCONFIGURED',
+            'definition',CASE WHEN l.style_mode='CUSTOM' THEN s.definition END)),'{}'::jsonb)::text
+        FROM ocean_gis.gis_vector_layer l LEFT JOIN ocean_gis.gis_vector_style s ON s.layer_id=l.id AND s.is_default
+        WHERE l.data_set_id=#{dataSetId} AND l.deleted=0 AND l.layer_status='READY'
+    </select>
+    <select id="featureCartography" resultType="string">
+        SELECT COALESCE(jsonb_object_agg(f.id::text,s.definition),'{}'::jsonb)::text
+        FROM ocean_gis.gis_vector_feature f
+        JOIN ocean_gis.gis_vector_layer l ON l.id=f.layer_id AND l.deleted=0 AND l.layer_status='READY'
+        JOIN ocean_gis.gis_vector_style s ON s.feature_id=f.id AND s.scope='FEATURE'
+        WHERE l.data_set_id=#{dataSetId} AND f.deleted=0 AND f.id IN
+        <foreach collection="ids" item="id" open="(" close=")" separator=",">#{id}</foreach>
+    </select>
+    <select id="hasFeatureCartography" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM ocean_gis.gis_vector_style s
+            JOIN ocean_gis.gis_vector_feature f ON f.id=s.feature_id AND f.deleted=0
+            JOIN ocean_gis.gis_vector_layer l ON l.id=f.layer_id AND l.deleted=0 AND l.layer_status='READY'
+            WHERE s.scope='FEATURE' AND l.data_set_id=#{dataSetId})
+    </select>
+    <select id="featureKind" resultType="string">
+        SELECT l.geometry_type FROM ocean_gis.gis_vector_feature f
+        JOIN ocean_gis.gis_vector_layer l ON l.id=f.layer_id AND l.deleted=0 AND l.layer_status='READY'
+        WHERE l.data_set_id=#{dataSetId} AND f.id=#{featureId} AND f.deleted=0
+    </select>
+    <insert id="saveCartography">
+        INSERT INTO ocean_gis.gis_vector_style(id,scope,group_id,feature_id,name,definition)
+        VALUES(#{id},#{scope},
+            CASE WHEN #{scope}='GROUP' THEN #{targetId} ELSE NULL END,
+            CASE WHEN #{scope}='FEATURE' THEN #{targetId} ELSE NULL END,
+            'cartography',CAST(#{definition} AS jsonb))
+        ON CONFLICT (<choose><when test="scope == 'GROUP'">group_id</when><otherwise>feature_id</otherwise></choose>)
+        DO UPDATE SET definition=EXCLUDED.definition,version=gis_vector_style.version+1,update_time=CURRENT_TIMESTAMP
+    </insert>
+    <delete id="deleteFeatureCartography">
+        DELETE FROM ocean_gis.gis_vector_style WHERE feature_id=#{featureId} AND scope='FEATURE'
+    </delete>
+</mapper>

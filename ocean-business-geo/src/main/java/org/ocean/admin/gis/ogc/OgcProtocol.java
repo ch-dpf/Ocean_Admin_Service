@@ -2,14 +2,14 @@ package org.ocean.admin.gis.ogc;
 
 import java.util.Locale;
 
-/** 统一发布记录可声明的对外服务协议；WMS 运行时保留，但本版不再发布。 */
+/** 单协议发布记录的对外服务协议；任务发布 WMTS/TMS，数据集独立发布 WMS。 */
 public enum OgcProtocol {
 
     WMS,
     WMTS,
     TMS;
 
-    /** 发布向导可选择的协议；WMS 不在其中。 */
+    /** 任务发布向导可选择的协议；数据集 WMS 使用独立入口。 */
     public static boolean isPublishable(OgcProtocol protocol) {
         return protocol == WMTS || protocol == TMS;
     }

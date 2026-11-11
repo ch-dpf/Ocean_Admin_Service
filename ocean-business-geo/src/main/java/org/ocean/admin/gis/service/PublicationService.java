@@ -1,7 +1,6 @@
 package org.ocean.admin.gis.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.ocean.admin.gis.dto.UnifiedPublicationRequest;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisProcessingInput;
@@ -80,7 +79,8 @@ public class PublicationService {
     @Transactional(rollbackFor = Exception.class)
     public GisPublicationVO publish(GisProcessingType processingType, Long sourceTaskId,
             UnifiedPublicationRequest request) {
-        GisProcessingTask task = taskService.getRequiredForUpdate(sourceTaskId);        if (task.getProcessingType() != processingType) {
+        GisProcessingTask task = taskService.getRequiredForUpdate(sourceTaskId);
+        if (task.getProcessingType() != processingType) {
             throw new IllegalArgumentException("发布类型与任务处理类型不一致");
         }
         if (!"COMPLETED".equals(task.getTaskStatus().name())) {
@@ -237,6 +237,10 @@ public class PublicationService {
                 .tileMatrixSet(publication.getTileMatrixSet())
                 .minZoom(publication.getMinZoom())
                 .maxZoom(publication.getMaxZoom())
+                .releaseVersion(releaseVersion(publication))
+                .defaultStyleId(publication.getStyleId())
+                .styles(publication.getVectorDefinition() == null ? null
+                        : objectMapper.readTree(publication.getVectorDefinition()).path("styles"))
                 .publishTime(publication.getPublishTime())
                 .updateTime(publication.getUpdateTime())
                 .build();
@@ -258,6 +262,18 @@ public class PublicationService {
             return GisProcessingType.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (RuntimeException ex) {
             throw new IllegalArgumentException("发布类型只能为 TERRAIN、IMAGERY 或 VECTOR", ex);
+        }
+    }
+
+    private String releaseVersion(GisPublication publication) {
+        if (publication.getVectorDefinition() == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(publication.getVectorDefinition())
+                    .path("releaseVersion").asText(null);
+        } catch (RuntimeException ex) {
+            return null;
         }
     }
 

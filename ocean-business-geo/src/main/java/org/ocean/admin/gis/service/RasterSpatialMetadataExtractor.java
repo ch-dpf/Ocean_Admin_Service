@@ -37,7 +37,7 @@ public class RasterSpatialMetadataExtractor {
     private static final double MAX_MERCATOR_LATITUDE = 85.0511287798066;
     private static final double WORLD_METERS = ImageryTileOptions.WEB_MERCATOR_WORLD_SPAN;
     private static final long MAX_STRIPE_MASK_BYTES = 16 * 1024 * 1024;
-    private static final long MAX_DECODED_TILE_BYTES = 64 * 1024 * 1024;
+    private static final long MAX_DECODED_WINDOW_BYTES = 64 * 1024 * 1024;
     private static final GeometryFactory GEOMETRIES = new GeometryFactory(new PrecisionModel(), 4326);
     private final ObjectMapper objectMapper;
     private final GisProcessingProperties properties;
@@ -140,12 +140,11 @@ public class RasterSpatialMetadataExtractor {
                 }
                 long bytesPerPixel = Arrays.stream(type.getSampleModel().getSampleSize()).mapToLong(bits -> (bits + 7L) / 8).sum();
                 long tileWidth = reader.getTileWidth(0), tileHeight = reader.getTileHeight(0);
-                if (tileWidth * tileHeight > MAX_DECODED_TILE_BYTES / Math.max(1, bytesPerPixel)) {
-                    throw failure("RASTER_BLOCK_TOO_LARGE", "TIFF 内部块超出安全解码大小");
-                }
+                // 大块源文件由准备阶段重新分块；此处仅约束扫描窗口，不按源块大小拒绝文件。
+                long maximumDecodedPixels = MAX_DECODED_WINDOW_BYTES / Math.max(1, bytesPerPixel);
                 long rowBytes = (width + 7L) / 8;
                 if (rowBytes > MAX_STRIPE_MASK_BYTES) throw failure("RASTER_TOO_WIDE", "栅格宽度超出轮廓扫描缓冲区限制");
-                long maximumPixels = properties.getMetadataMaxWindowPixels();
+                long maximumPixels = Math.min(properties.getMetadataMaxWindowPixels(), maximumDecodedPixels);
                 int stripeHeight = (int) Math.max(1, Math.min(Math.min(tileHeight, 256),
                         Math.min(MAX_STRIPE_MASK_BYTES / rowBytes, maximumPixels / Math.min(width, tileWidth))));
                 int windowWidth = (int) Math.min(width, maximumPixels / stripeHeight);

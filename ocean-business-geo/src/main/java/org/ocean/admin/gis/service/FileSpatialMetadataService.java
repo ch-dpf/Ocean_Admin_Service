@@ -1,6 +1,9 @@
 package org.ocean.admin.gis.service;
 import java.io.IOException;
 
+import org.ocean.admin.gis.mapper.GisVectorFeatureMapper;
+import org.ocean.admin.gis.mapper.GisVectorResourceMapper;
+import org.ocean.admin.gis.mapper.GisVectorStyleMapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +19,6 @@ import org.ocean.admin.gis.mapper.GisFileMetaMapper;
 import org.ocean.admin.gis.mapper.GisFileGroupMapper;
 import org.ocean.admin.gis.mapper.GisDataSetMapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
-import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.processing.input.ControlledWorkspaceResolver;
 import org.ocean.admin.gis.util.GeoJsonFeatureReader;
 import org.ocean.admin.gis.util.RasterFootprintBuilder;
@@ -49,6 +51,7 @@ public class FileSpatialMetadataService {
     private final GisFileSpatialMetadataMapper spatialMapper;
     private final RasterSpatialMetadataExtractor rasterExtractor;
     private final FileGroupService fileGroups;
+    private final FileGroupAssemblyService groupAssembly;
     private final GdalDatasetReader datasetReader;
     private final VectorLayerService vectorLayers;
     private final GeoJsonFeatureReader geoJsonReader;
@@ -56,7 +59,9 @@ public class FileSpatialMetadataService {
     private final GisFileGroupMapper groupMapper;
     private final GisDataSetMapper dataSetMapper;
     private final ControlledWorkspaceResolver sources;
-    private final GisVectorMapper vectorMapper;
+    private final GisVectorFeatureMapper gisVectorFeatureMapper;
+    private final GisVectorResourceMapper gisVectorResourceMapper;
+    private final GisVectorStyleMapper gisVectorStyleMapper;
     private final VectorDataSetStyleService vectorDataSetStyles;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactions;
@@ -75,7 +80,7 @@ public class FileSpatialMetadataService {
 
     /** 扫描结束后一次放行；过期或已被删除的等待文件不再获得执行资格。 */
     public void releaseIngestion(String progressId) {
-        List<Long> released = fileGroups.assembleIngestion(progressId);
+        List<Long> released = groupAssembly.assembleIngestion(progressId);
         if (!released.isEmpty()) events.publishEvent(new MetadataReady(released));
 
     }
@@ -172,8 +177,8 @@ public class FileSpatialMetadataService {
             GisFileMeta locked = spatialMapper.lockClaim(fileId, claim.getMetadataVersion());
             if (locked == null) return;
             if (code != null) {
-                vectorMapper.deleteExtractingLayersBySource(fileId);
-                vectorMapper.retireUnusedWorkingResources(fileId);
+                gisVectorFeatureMapper.deleteExtractingLayersBySource(fileId);
+                gisVectorResourceMapper.retireUnusedWorkingResources(fileId);
             }
             spatialMapper.deleteByFileId(fileId);
             for (GisFileSpatialMetadata item : extracted) spatialMapper.insert(item);
@@ -183,10 +188,10 @@ public class FileSpatialMetadataService {
                 vectorDataSetStyles.require(claim.getDataSetId(), true);
                 for (Long layerId : extractedVector.layerIds()) {
                     // 工作包构建时已校验并登记数量和范围，不能再从 PostGIS 空表覆盖汇总。
-                    if (vectorMapper.setLayerStatus(layerId, "READY") != 1)
+                    if (gisVectorFeatureMapper.setLayerStatus(layerId, "READY") != 1)
                         throw new IllegalStateException("矢量图层提取结果提交失败: " + fileId);
                 }
-                vectorMapper.bumpDataSetRevision(claim.getDataSetId(), true, true);
+                gisVectorStyleMapper.bumpDataSetRevision(claim.getDataSetId(), true, true);
             }
             String result = code == null ? "COMPLETED" : "FAILED";
             fileMapper.update(null, new LambdaUpdateWrapper<GisFileMeta>()
@@ -256,7 +261,7 @@ public class FileSpatialMetadataService {
             if (source == null) return;
             if (group != null) {
                 boolean hadSuccess = "COMPLETED".equals(group.getParseStatus())
-                        || "REIMPORT_REQUIRED".equals(group.getParseStatus()) || vectorMapper.countSourceReferences(entryId) > 0;
+                        || "REIMPORT_REQUIRED".equals(group.getParseStatus()) || gisVectorResourceMapper.countSourceReferences(entryId) > 0;
                 group.setInputRevision(group.getInputRevision() + 1);
                 group.setFingerprint(null);
                 group.setAssemblyStatus("BLOCKED");

@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisVectorFeatureMapper">
+    <sql id="layerColumns">
+        l.id, l.data_set_id, l.source_file_id, l.resource_id, l.source_layer_id, l.layer_key, l.layer_name,
+        l.group_id, l.original_group_id, l.geometry_type, l.assignment_mode, l.enabled,
+        l.style_mode, l.presentation_version,
+        l.layer_status, l.feature_count, l.geometry_types::text AS geometry_types,
+        ST_AsGeoJSON(l.geographic_extent, 15, 0) AS geographic_extent,
+        l.data_version, l.deleted, l.create_time, l.update_time
+    </sql>
+    <sql id="featureColumns">
+        f.id, f.layer_id, f.source_layer_id, ST_AsGeoJSON(ST_ForcePolygonCCW(f.geom), 15, 0) AS geometry_json,
+        f.properties::text AS properties_json, f.source_feature_id::text AS source_feature_id,
+        f.source_feature_index, f.source_geometry_path, f.classification_rule_key,
+        f.version, f.create_time, f.update_time
+    </sql>
+    <insert id="insertLayer">
+        INSERT INTO ocean_gis.gis_vector_layer
+            (id, data_set_id, source_file_id, resource_id, source_layer_id, layer_key, layer_name, group_id, original_group_id,
+             geometry_type, assignment_mode, enabled, style_mode)
+        VALUES (#{l.id}, #{l.dataSetId}, #{l.sourceFileId}, #{l.resourceId}, #{l.sourceLayerId}, #{l.layerKey}, #{l.layerName}, #{l.groupId},
+            #{l.originalGroupId}, #{l.geometryType}, #{l.assignmentMode}, #{l.enabled}, #{l.styleMode})
+    </insert>
+    <delete id="deleteExtractingLayersBySource">
+        DELETE FROM ocean_gis.gis_vector_layer
+        WHERE source_file_id = #{fileId} AND layer_status = 'IMPORTING'
+    </delete>
+    <select id="layersBySource" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
+        SELECT <include refid="org.ocean.admin.gis.mapper.GisVectorFeatureMapper.layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        WHERE l.source_file_id = #{fileId} AND l.deleted = 0 ORDER BY l.id
+    </select>
+    <update id="setLayerStatus">
+        UPDATE ocean_gis.gis_vector_layer SET layer_status = #{status}, update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+    <select id="pageLayers" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
+        SELECT <include refid="org.ocean.admin.gis.mapper.GisVectorFeatureMapper.layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
+        WHERE l.deleted = 0 AND l.layer_status = 'READY' AND l.group_id IS NOT NULL
+        <if test="dataSetId != null">AND l.data_set_id = #{dataSetId}</if>
+        <if test="groupId != null">AND l.group_id = #{groupId}</if>
+        <if test="sourceFileId != null">AND l.source_file_id = #{sourceFileId}</if>
+        ORDER BY l.id DESC
+    </select>
+    <select id="layer" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
+        SELECT <include refid="org.ocean.admin.gis.mapper.GisVectorFeatureMapper.layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
+        WHERE l.id = #{id} AND l.deleted = 0 AND l.layer_status = 'READY'
+    </select>
+    <select id="lockLayer" resultType="org.ocean.admin.gis.entity.GisVectorLayer" flushCache="true">
+        SELECT <include refid="org.ocean.admin.gis.mapper.GisVectorFeatureMapper.layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        JOIN ocean_gis.gis_data_set ds ON ds.id = l.data_set_id AND ds.deleted = 0
+        WHERE l.id = #{id} AND l.deleted = 0 AND l.layer_status = 'READY' FOR UPDATE OF l
+    </select>
+    <update id="refreshLayer">
+        UPDATE ocean_gis.gis_vector_layer l SET
+            feature_count = s.total,
+            geographic_extent = CASE WHEN s.total = 0 THEN NULL ELSE ST_SetSRID(s.bounds::geometry,4326) END,
+            geometry_types = COALESCE(s.types, '[]'::jsonb),
+            data_version = l.data_version + 1, update_time = CURRENT_TIMESTAMP
+        FROM (SELECT count(*) AS total, ST_Extent(geom) AS bounds,
+                jsonb_agg(DISTINCT GeometryType(geom) ORDER BY GeometryType(geom)) AS types
+              FROM ocean_gis.gis_vector_feature WHERE layer_id = #{id} AND deleted = 0) s
+        WHERE l.id = #{id} AND l.deleted = 0
+    </update>
+    <update id="deleteLayer">
+        UPDATE ocean_gis.gis_vector_layer SET deleted = 1, source_file_id = NULL,
+            data_version = data_version + 1, update_time = CURRENT_TIMESTAMP WHERE id = #{id} AND deleted = 0
+    </update>
+    <select id="firstGeometryError" resultType="org.ocean.admin.gis.vo.GisVectorVO$GeometryError">
+        SELECT v.feature_index, ST_IsValidReason(v.geom) AS reason
+        FROM (VALUES
+            <foreach collection="items" item="f" separator=",">
+                (#{f.sourceFeatureIndex,jdbcType=BIGINT}, ST_GeomFromGeoJSON(#{f.geometryJson}))
+            </foreach>
+        ) v(feature_index, geom)
+        WHERE NOT ST_IsValid(v.geom) LIMIT 1
+    </select>
+    <select id="geometryIssues" resultType="org.ocean.admin.gis.vo.GisVectorVO$GeometryIssue">
+        WITH checked AS MATERIALIZED (
+            SELECT v.*, ST_IsValidDetail(ST_GeomFromGeoJSON(v.geometry_json), 0) AS validity
+            FROM (VALUES
+                <foreach collection="items" item="f" separator=",">
+                    (#{f.sourceLayerId,jdbcType=BIGINT}, #{f.sourceFeatureIndex,jdbcType=BIGINT},
+                     #{f.sourceGeometryPath}, #{f.geometryJson})
+                </foreach>
+            ) v(source_layer_id, feature_index, geometry_path, geometry_json)
+        )
+        SELECT source_layer_id, feature_index, geometry_path,
+            (validity).reason AS reason, ST_AsText((validity).location) AS location
+        FROM checked WHERE NOT (validity).valid
+        ORDER BY source_layer_id, feature_index, geometry_path
+    </select>
+    <insert id="insertFeatures">
+        INSERT INTO ocean_gis.gis_vector_feature
+            (id, layer_id, source_layer_id, geom, properties, source_feature_id, source_feature_index, source_geometry_path, classification_rule_key, version, create_time, update_time)
+        VALUES
+        <foreach collection="items" item="f" separator=",">
+            (#{f.id}, #{f.layerId}, #{f.sourceLayerId}, ST_GeomFromGeoJSON(#{f.geometryJson}),
+             CAST(#{f.propertiesJson} AS jsonb), CAST(#{f.sourceFeatureId,jdbcType=VARCHAR} AS jsonb),
+             #{f.sourceFeatureIndex,jdbcType=BIGINT}, #{f.sourceGeometryPath,jdbcType=VARCHAR},
+             #{f.classificationRuleKey,jdbcType=VARCHAR}, COALESCE(#{f.version,jdbcType=BIGINT},1),
+             COALESCE(#{f.createTime,jdbcType=TIMESTAMP},CURRENT_TIMESTAMP), COALESCE(#{f.updateTime,jdbcType=TIMESTAMP},CURRENT_TIMESTAMP))
+        </foreach>
+    </insert>
+    <select id="features" resultType="org.ocean.admin.gis.entity.GisVectorFeature">
+        WITH candidates AS (
+        SELECT f.id,f.layer_id,f.source_layer_id,NULL::text AS geometry_json,f.properties::text AS properties_json,
+            f.version,f.source_feature_id::text AS source_feature_id,f.source_feature_index,f.source_geometry_path,f.classification_rule_key
+        FROM ocean_gis.gis_vector_feature f
+        WHERE f.layer_id = #{layerId} AND f.deleted = 0 AND f.id &gt; #{afterId}
+        <if test="west != null">
+            <choose>
+                <when test="west &lt;= east">
+                    AND ST_Intersects(f.geom, ST_MakeEnvelope(#{west},#{south},#{east},#{north},4326))
+                </when>
+                <otherwise>
+                    AND (ST_Intersects(f.geom, ST_MakeEnvelope(#{west},#{south},180,#{north},4326))
+                     OR ST_Intersects(f.geom, ST_MakeEnvelope(-180,#{south},#{east},#{north},4326)))
+                </otherwise>
+            </choose>
+        </if>
+        ORDER BY f.id LIMIT #{limit}
+        ), sized AS (
+            SELECT *, COALESCE(octet_length(geometry_json),0) + COALESCE(octet_length(properties_json),4) + 256 AS row_bytes
+            FROM candidates
+        ), bounded AS (
+            SELECT *, sum(row_bytes) OVER (ORDER BY id ROWS UNBOUNDED PRECEDING) AS total_bytes FROM sized
+        )
+        SELECT * FROM bounded WHERE total_bytes - row_bytes &lt; 8388608 ORDER BY id
+    </select>
+    <select id="feature" resultType="org.ocean.admin.gis.entity.GisVectorFeature">
+        SELECT <include refid="org.ocean.admin.gis.mapper.GisVectorFeatureMapper.featureColumns"/> FROM ocean_gis.gis_vector_feature f
+        WHERE f.layer_id = #{layerId} AND f.id = #{id} AND f.deleted = 0
+    </select>
+    <update id="updateFeature">
+        UPDATE ocean_gis.gis_vector_feature SET geom = ST_GeomFromGeoJSON(#{f.geometryJson}),
+            properties = CAST(#{f.propertiesJson} AS jsonb), version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE layer_id = #{f.layerId} AND id = #{f.id} AND version = #{expected} AND deleted = 0
+    </update>
+    <update id="reclassifyFeature">
+        UPDATE ocean_gis.gis_vector_feature SET layer_id=#{targetLayerId},
+            classification_rule_key=#{ruleKey,jdbcType=VARCHAR}
+        WHERE id=#{id} AND layer_id=#{oldLayerId} AND deleted=0
+    </update>
+    <update id="deleteFeature">
+        UPDATE ocean_gis.gis_vector_feature SET deleted = 1, version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE layer_id = #{layerId} AND id = #{id} AND version = #{expected} AND deleted = 0
+    </update>
+    <update id="updatePresentation">
+        UPDATE ocean_gis.gis_vector_layer SET group_id=#{l.groupId},assignment_mode=#{l.assignmentMode},
+            enabled=#{l.enabled},style_mode=#{l.styleMode},presentation_version=presentation_version+1,
+            update_time=CURRENT_TIMESTAMP WHERE id=#{l.id} AND presentation_version=#{expected} AND deleted=0 AND layer_status='READY'
+    </update>
+    <select id="dataSetExtent" resultType="string">
+        SELECT ST_AsGeoJSON(ST_SetSRID(ST_Extent(geographic_extent)::geometry,4326))
+        FROM ocean_gis.gis_vector_layer WHERE data_set_id=#{dataSetId} AND deleted=0 AND layer_status='READY'
+    </select>
+</mapper>

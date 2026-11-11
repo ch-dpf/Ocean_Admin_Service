@@ -1,5 +1,7 @@
 package org.ocean.admin.gis.ogc;
 
+import org.ocean.admin.gis.mapper.GisVectorFeatureMapper;
+import org.ocean.admin.gis.mapper.GisVectorResourceMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.entity.GisPublication;
@@ -7,7 +9,6 @@ import org.ocean.admin.gis.entity.GisTileSet;
 import org.ocean.admin.gis.entity.GisVectorResource;
 import org.ocean.admin.gis.mapper.GisPublicationMapper;
 import org.ocean.admin.gis.mapper.GisTileSetMapper;
-import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.springframework.stereotype.Service;
@@ -36,16 +37,18 @@ public class PublicationCatalog {
 
     private final GisPublicationMapper publicationMapper;
     private final GisTileSetMapper tileSetMapper;
-    private final GisVectorMapper vectorMapper;
+    private final GisVectorFeatureMapper gisVectorFeatureMapper;
+    private final GisVectorResourceMapper gisVectorResourceMapper;
     private final GisProcessingStorageService storageService;
     private final ObjectMapper objectMapper;
 
     public PublicationCatalog(GisPublicationMapper publicationMapper,
-            GisTileSetMapper tileSetMapper, GisVectorMapper vectorMapper,
+            GisTileSetMapper tileSetMapper, GisVectorFeatureMapper gisVectorFeatureMapper, GisVectorResourceMapper gisVectorResourceMapper,
             GisProcessingStorageService storageService, ObjectMapper objectMapper) {
         this.publicationMapper = publicationMapper;
         this.tileSetMapper = tileSetMapper;
-        this.vectorMapper = vectorMapper;
+        this.gisVectorFeatureMapper = gisVectorFeatureMapper;
+        this.gisVectorResourceMapper = gisVectorResourceMapper;
         this.storageService = storageService;
         this.objectMapper = objectMapper;
     }
@@ -92,7 +95,7 @@ public class PublicationCatalog {
         return layers;
     }
 
-    /** 按服务编码加载矢量图层；仅 WMS 运行时读取，本版没有 WMS 发布记录。 */
+    /** 按服务编码加载矢量图层，供独立的数据集 WMS 服务读取。 */
     public PublicationLayer.VectorLayer loadVector(String serviceCode, String styleId) {
         GisPublication publication = selectPublished(serviceCode, OgcProtocol.WMS);
         if (publication == null) {
@@ -374,7 +377,7 @@ public class PublicationCatalog {
             return loadTaskVectorLayer(publication);
         }
         try {
-            GisVectorResource resource = vectorMapper.resource(publication.getVectorResourceId());
+            GisVectorResource resource = gisVectorResourceMapper.resource(publication.getVectorResourceId());
             if (resource == null || !READY.equals(resource.getStatus())
                     || !"GPKG".equals(resource.getStorageType())) {
                 return null;
@@ -475,7 +478,7 @@ public class PublicationCatalog {
             return WORLD_BOUNDS.clone();
         }
         try {
-            String extent = vectorMapper.dataSetExtent(dataSetId);
+            String extent = gisVectorFeatureMapper.dataSetExtent(dataSetId);
             JsonNode ring = extent == null || extent.isBlank() ? null
                     : objectMapper.readTree(extent).path("coordinates").get(0);
             if (ring == null || !ring.isArray() || ring.isEmpty()) {

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.ocean.admin.gis.mapper.GisVectorTileMapper">
+    <select id="tileLayers" resultType="org.ocean.admin.gis.entity.GisVectorLayer">
+        SELECT <include refid="org.ocean.admin.gis.mapper.GisVectorFeatureMapper.layerColumns"/> FROM ocean_gis.gis_vector_layer l
+        WHERE l.data_set_id=#{id} AND l.deleted=0 AND l.layer_status='READY'
+          AND l.geographic_extent &amp;&amp; ST_MakeEnvelope(#{b[0]},#{b[1]},#{b[2]},#{b[3]},4326)
+        ORDER BY l.id
+    </select>
+    <select id="setTileQueryTimeout" resultType="string">
+        SELECT set_config('statement_timeout', CAST(#{milliseconds} AS text), true) || set_config('jit','off',true) || set_config('plan_cache_mode','force_custom_plan',true)
+    </select>
+    <select id="tileState" resultType="org.ocean.admin.gis.entity.GisVectorDataSetStyle">
+        SELECT s.data_set_id,s.schema_version,s.data_revision,s.template_checksum
+        FROM ocean_gis.gis_vector_dataset_style s JOIN ocean_gis.gis_data_set ds
+            ON ds.id=s.data_set_id AND ds.deleted=0 AND ds.category_id=2
+        WHERE s.data_set_id=#{dataSetId}
+    </select>
+    <select id="dataSetTile" resultType="org.ocean.admin.gis.vo.GisVectorVO$TilePayload">
+        WITH eligible_layers AS MATERIALIZED (
+            SELECT l.id,l.geometry_type,l.assignment_mode,g.id AS group_id,g.group_key,p.value AS rule
+            FROM jsonb_array_elements(CAST(#{policyJson} AS jsonb)->'groups') p(value)
+            JOIN ocean_gis.gis_vector_group g ON g.data_set_id=#{dataSetId} AND g.group_key=p.value->>'groupKey'
+            JOIN ocean_gis.gis_vector_layer l ON l.data_set_id=g.data_set_id AND l.group_id=g.id
+                AND l.deleted=0 AND l.layer_status='READY'
+            WHERE CASE WHEN #{z} = (CAST(#{policyJson} AS jsonb)->>'nativeMaxZoom')::integer THEN (CAST(#{policyJson} AS jsonb)->>'displayMaxZoom')::double precision ELSE #{z} + log(2.0, (CAST(#{policyJson} AS jsonb)->>'tileSize')::numeric / 256) END &gt;= (p.value->>'minZoom')::double precision
+        ), shapes AS MATERIALIZED (
+            SELECT f.id,f.layer_id,l.group_id,l.group_key,l.geometry_type,
+                (SELECT COALESCE(jsonb_object_agg(a.key,a.value),'{}'::jsonb) FROM jsonb_each(f.properties) a
+                 WHERE jsonb_typeof(a.value) IN ('string','number','boolean')
+                   AND jsonb_exists(CAST(#{policyJson} AS jsonb)->'propertyFields',a.key)) AS properties,
+                (SELECT COALESCE(jsonb_agg(a.key),'[]'::jsonb)::text FROM jsonb_each(f.properties) a
+                 WHERE a.value='null'::jsonb
+                   AND jsonb_exists(CAST(#{policyJson} AS jsonb)->'propertyFields',a.key)) AS null_fields,
+                CASE WHEN COALESCE((l.rule->>'preserveBoundary')::boolean,false) OR l.geometry_type='POINT' OR #{z}=18
+                    THEN f.display_geom
+                    WHEN l.geometry_type='LINE' THEN ST_Simplify(f.display_geom,
+                        40075016.68557849/(power(2.0,#{z})*512)*(CAST(#{policyJson} AS jsonb)->>'simplifyPixels')::double precision)
+                    ELSE ST_SimplifyPreserveTopology(f.display_geom,
+                        40075016.68557849/(power(2.0,#{z})*512)*(CAST(#{policyJson} AS jsonb)->>'simplifyPixels')::double precision)
+                    END AS shape,
+                CASE WHEN l.geometry_type='POLYGON' THEN ST_PointOnSurface(f.display_geom) END AS anchor
+            FROM eligible_layers l JOIN ocean_gis.gis_vector_feature f ON f.layer_id=l.id AND f.deleted=0
+            LEFT JOIN LATERAL (
+                SELECT r.value FROM jsonb_array_elements(l.rule->'overrides') WITH ORDINALITY r(value,seq)
+                WHERE jsonb_array_length(l.rule->'overrides')&gt;0 AND l.assignment_mode='AUTO'
+                    AND ocean_gis.vector_filter_matches(f.properties,r.value->'filter',true)
+                ORDER BY seq LIMIT 1
+            ) r ON true
+            WHERE CASE WHEN #{z} = (CAST(#{policyJson} AS jsonb)->>'nativeMaxZoom')::integer THEN (CAST(#{policyJson} AS jsonb)->>'displayMaxZoom')::double precision ELSE #{z} + log(2.0, (CAST(#{policyJson} AS jsonb)->>'tileSize')::numeric / 256) END &gt;= COALESCE((r.value->>'minZoom')::double precision,(l.rule->>'minZoom')::double precision)
+              AND f.display_geom &amp;&amp; ST_TileEnvelope(#{z},#{x},#{y},margin =&gt; 256.0/8192)
+              -- 小视窗先排除仅包围盒相交的大面；保留简化容差及量化余量，避免漏掉瓦片边缘。
+              -- 世界和洲级视窗命中范围广，继续直接使用空间索引筛选。
+              AND (#{z} &lt; 4 OR ST_Intersects(f.display_geom,
+                  ST_TileEnvelope(#{z},#{x},#{y},margin =&gt; 257.0/8192
+                    + (CAST(#{policyJson} AS jsonb)-&gt;&gt;'simplifyPixels')::double precision/512)))
+              AND (COALESCE((l.rule->>'preserveBoundary')::boolean,false) OR #{z}=18 OR
+                CASE l.geometry_type
+                    WHEN 'POLYGON' THEN ST_Area(f.display_geom)/power(40075016.68557849/(power(2.0,#{z})*512),2)
+                        &gt;= (CAST(#{policyJson} AS jsonb)->>'polygonMinAreaPixels')::double precision
+                    WHEN 'LINE' THEN ST_Length(f.display_geom)/(40075016.68557849/(power(2.0,#{z})*512))
+                        &gt;= (CAST(#{policyJson} AS jsonb)->>'lineMinLengthPixels')::double precision
+                    ELSE true END)
+        ), representations AS (
+            SELECT id,layer_id,properties,null_fields,group_id,group_key,
+                CASE geometry_type WHEN 'POLYGON' THEN 'FILL' ELSE 'GEOMETRY' END AS role,
+                geometry_type AS category,shape AS display_geom FROM shapes
+            UNION ALL
+            -- 从真实面提取边界，再做瓦片裁剪，避免产生裁切边缘线。
+            SELECT id,layer_id,properties,null_fields,group_id,group_key,'OUTLINE','LINE',ST_Boundary(shape)
+                FROM shapes WHERE geometry_type='POLYGON'
+            UNION ALL
+            SELECT id,layer_id,properties,null_fields,group_id,group_key,'LABEL','POINT',anchor
+                FROM shapes WHERE geometry_type='POLYGON'
+                  AND ST_X(anchor)&gt;=ST_XMin(ST_TileEnvelope(#{z},#{x},#{y}))
+                  AND ST_X(anchor)&lt;ST_XMax(ST_TileEnvelope(#{z},#{x},#{y}))
+                  AND ST_Y(anchor)&gt;ST_YMin(ST_TileEnvelope(#{z},#{x},#{y}))
+                  AND ST_Y(anchor)&lt;=ST_YMax(ST_TileEnvelope(#{z},#{x},#{y}))
+        ), encoded AS (
+            SELECT o.id::text || ':' || o.role AS "_vector_representation_id",
+                o.id::text AS "_vector_feature_id",o.layer_id::text AS "_vector_layer_id",
+                o.group_id::text AS "_vector_group_id",o.group_key AS "_vector_group_key",
+                o.role AS "_vector_render_role",o.category AS "_vector_category",
+                o.properties,o.null_fields AS "_vector_null_fields",g.geom
+            FROM representations o CROSS JOIN LATERAL (
+                SELECT ST_AsMVTGeom(o.display_geom,ST_TileEnvelope(#{z},#{x},#{y}),8192,256,true) AS geom OFFSET 0
+            ) g
+            WHERE NOT ST_IsEmpty(g.geom)
+              AND ST_Dimension(g.geom)=CASE o.category WHEN 'POINT' THEN 0 WHEN 'LINE' THEN 1 ELSE 2 END
+        ), tile AS (
+            SELECT COALESCE(ST_AsMVT(encoded,'features',8192,'geom' ORDER BY "_vector_representation_id"),''::bytea) AS body FROM encoded
+        )
+        SELECT CASE WHEN octet_length(body)&lt;=#{maxBytes} THEN body END AS body,octet_length(body)::bigint AS byte_size FROM tile
+    </select>
+</mapper>

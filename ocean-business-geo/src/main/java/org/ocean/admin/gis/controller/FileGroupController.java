@@ -4,8 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.ocean.admin.gis.entity.GisFileFormat;
-import org.ocean.admin.gis.entity.GisFileGroup;
+import org.ocean.admin.gis.service.FileFormatService;
 import org.ocean.admin.gis.service.FileGroupService;
 import org.ocean.admin.gis.vo.GisFileGroupVO;
 import org.ocean.admin.kernel.audit.OperationLog;
@@ -14,9 +13,7 @@ import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 
 /** 文件组管理接口，不改变物理文件下载及删除接口的语义。 */
 @RestController
@@ -25,10 +22,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class FileGroupController {
     private final FileGroupService service;
+    private final FileFormatService formats;
 
     @GetMapping("/page")
     @Operation(summary = "分页查询逻辑文件组，默认不展示重复输入追溯记录")
-    public ResponseResult<PageResult<List<GisFileGroup>>> page(@ModelAttribute GisFileGroupVO.Query query) {
+    public ResponseResult<PageResult<List<GisFileGroupVO.Group>>> page(@ModelAttribute GisFileGroupVO.Query query) {
         return ResponseResult.success(service.page(query));
     }
 
@@ -64,11 +62,7 @@ public class FileGroupController {
 
     @GetMapping("/formats")
     @Operation(summary = "查询入口格式及必需配套文件规则")
-    public ResponseResult<List<Map<String, Object>>> formats() {
-        return ResponseResult.success(Arrays.stream(GisFileFormat.values()).map(format -> Map.<String, Object>of(
-                "format", format.name(), "vector", format.isVector(), "entryExtensions", format.entryExtensions(),
-                "requiredExtensions", format.requiredExtensions(), "optionalExtensions", format.optionalExtensions(),
-                "drivers", format.driverNames(), "requiresCoordinateOptions", format == GisFileFormat.CSV
-                        || format == GisFileFormat.DXF || format == GisFileFormat.DWG)).toList());
+    public ResponseResult<List<GisFileGroupVO.FormatCapability>> formats(@RequestParam(required = false) Long categoryId) {
+        return ResponseResult.success(formats.listCapabilities(categoryId));
     }
 }

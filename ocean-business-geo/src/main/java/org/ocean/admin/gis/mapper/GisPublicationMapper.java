@@ -20,4 +20,21 @@ public interface GisPublicationMapper extends BaseMapper<GisPublication> {
     @Delete("DELETE FROM ocean_gis.gis_publication "
             + "WHERE id = #{id} AND status = 'DISABLED' AND deleted = 0")
     int deleteDisabledPermanently(@Param("id") Long id);
+
+    /** 同时修改样式时锁定发布记录，样式修订不能覆盖停用操作。 */
+    default GisPublication lockVectorPublication(String serviceCode) {
+        return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<GisPublication>()
+                .eq(GisPublication::getServiceCode, serviceCode)
+                .eq(GisPublication::getProcessingType, "VECTOR")
+                .last("FOR UPDATE"));
+    }
+
+    @org.apache.ibatis.annotations.Update("""
+        UPDATE ocean_gis.gis_publication SET vector_definition=#{definition},style_id=#{styleId},
+            style_name=#{styleName},update_time=CURRENT_TIMESTAMP
+        WHERE id=#{id} AND vector_definition=#{expected} AND status='PUBLISHED' AND deleted=0
+            AND source_task_id IS NULL AND service_protocol='WMS'
+        """)
+    int updateDataSetStyles(@Param("id") Long id, @Param("expected") String expected,
+            @Param("definition") String definition, @Param("styleId") String styleId, @Param("styleName") String styleName);
 }

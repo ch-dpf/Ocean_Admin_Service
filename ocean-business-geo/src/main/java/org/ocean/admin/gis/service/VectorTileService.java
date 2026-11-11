@@ -1,8 +1,9 @@
 package org.ocean.admin.gis.service;
 
+import org.ocean.admin.gis.mapper.GisVectorFeatureMapper;
+import org.ocean.admin.gis.mapper.GisVectorTileMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.config.VectorTileProperties;
-import org.ocean.admin.gis.mapper.GisVectorMapper;
 import org.ocean.admin.gis.entity.GisVectorDataSetStyle;
 import org.ocean.admin.gis.vo.GisVectorVO;
 import org.springframework.dao.DataAccessException;
@@ -54,7 +55,8 @@ public class VectorTileService {
             return 1
             """, Long.class);
 
-    private final GisVectorMapper mapper;
+    private final GisVectorFeatureMapper gisVectorFeatureMapper;
+    private final GisVectorTileMapper gisVectorTileMapper;
     private final VectorDataSetStyleService snapshots;
     private final VectorRenderPlanner planner;
     private final VectorTileProperties properties;
@@ -73,9 +75,10 @@ public class VectorTileService {
     private record LocalTile(byte[] body, long expiresAt) { }
     private record TileContract(GisVectorVO.MapDefinition definition, String policy) { }
 
-    public VectorTileService(GisVectorMapper mapper, VectorDataSetStyleService snapshots, VectorRenderPlanner planner, VectorTileProperties properties,
+    public VectorTileService(GisVectorFeatureMapper gisVectorFeatureMapper, GisVectorTileMapper gisVectorTileMapper, VectorDataSetStyleService snapshots, VectorRenderPlanner planner, VectorTileProperties properties,
             @Qualifier("tileRedisTemplate") StringRedisTemplate redis, ObjectMapper json, PlatformTransactionManager transactions, VectorResourceService resources) {
-        this.mapper = mapper;
+        this.gisVectorFeatureMapper = gisVectorFeatureMapper;
+        this.gisVectorTileMapper = gisVectorTileMapper;
         this.snapshots = snapshots;
         this.planner = planner;
         this.properties = properties;
@@ -94,8 +97,8 @@ public class VectorTileService {
         resources.finishPending(dataSetId);
         return spatial(() -> {
             var definition = contract(requireState(dataSetId)).definition();
-            var extent = mapper.dataSetExtent(dataSetId);
-            return new GisVectorVO.MapDefinition(definition.dataSetId(),definition.tileVersion(),definition.dataRevision(),Long.toString(mapper.latestChange(dataSetId)),
+            var extent = gisVectorFeatureMapper.dataSetExtent(dataSetId);
+            return new GisVectorVO.MapDefinition(definition.dataSetId(),definition.tileVersion(),definition.dataRevision(),Long.toString(gisVectorTileMapper.latestChange(dataSetId)),
                     definition.minZoom(),definition.nativeMaxZoom(),definition.displayMaxZoom(),definition.tileSize(),
                     definition.tiles(),extent == null ? null : json.readTree(extent));
         });
@@ -111,8 +114,8 @@ public class VectorTileService {
         resources.finishPending(dataSetId);
         return spatial(() -> {
             var definition = contract(requireState(dataSetId)).definition();
-            long latest = mapper.latestChange(dataSetId);
-            var nodes = json.readTree(mapper.changes(dataSetId, after));
+            long latest = gisVectorTileMapper.latestChange(dataSetId);
+            var nodes = json.readTree(gisVectorTileMapper.changes(dataSetId, after));
             boolean reset = after > latest || nodes.size() > 256;
             var changes = new java.util.ArrayList<GisVectorVO.TileChange>();
             if (!reset) for (var node : nodes) changes.add(json.treeToValue(node, GisVectorVO.TileChange.class));
@@ -134,7 +137,7 @@ public class VectorTileService {
                 throw new ResponseStatusException(HttpStatus.GONE, "瓦片规则已更新，请重新读取地图定义");
             var policy = json.readTree(initial.policy());
             double margin = policy.path("buffer").asDouble(256) / policy.path("extent").asDouble(8192);
-            long revision = mapper.tileRevision(dataSetId,z,x,y,margin);
+            long revision = gisVectorTileMapper.tileRevision(dataSetId,z,x,y,margin);
             // 修订记录可能刚刚提交；必须先完成其工作包写入，才能读取该修订的缓存或数据。
             resources.finishPending(dataSetId);
             String key = TILE_PREFIX + dataSetId + ':' + tileVersion + ':' + z + ':' + x + ':' + y + ':' + revision;
@@ -157,9 +160,9 @@ public class VectorTileService {
                     var contract = contract(current);
                     if (!contract.definition().tileVersion().equals(tileVersion))
                         throw new ResponseStatusException(HttpStatus.GONE, "瓦片版本已过期，请重新读取地图定义");
-                    mapper.setTileQueryTimeout(properties.getQueryTimeoutMs());
+                    gisVectorTileMapper.setTileQueryTimeout(properties.getQueryTimeoutMs());
                     GisVectorVO.TilePayload payload;
-                    boolean packaged = mapper.hasPackageLayers(dataSetId);
+                    boolean packaged = gisVectorFeatureMapper.hasPackageLayers(dataSetId);
                     phase[0] = packaged ? "GPKG读取编码" : "PostGIS查询编码";
                     long queryStarted = System.nanoTime();
                     if (packaged) {
@@ -167,7 +170,7 @@ public class VectorTileService {
                             byte[] encoded=resources.tile(dataSetId,null,z,x,y,properties.getMaxDecodedTileBytes());
                             payload=new GisVectorVO.TilePayload(encoded,encoded.length);
                         } catch (IOException ex) { throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"读取矢量文件失败",ex); }
-                    } else payload=mapper.dataSetTile(dataSetId, contract.policy(),z,x,y,properties.getMaxDecodedTileBytes());
+                    } else payload=gisVectorTileMapper.dataSetTile(dataSetId, contract.policy(),z,x,y,properties.getMaxDecodedTileBytes());
                     long queryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStarted);
                     if (queryMs >= 1000) log.info("动态瓦片慢查询: dataset={}, tile={}/{}/{}, phase={}, queryMs={}",
                             dataSetId,z,x,y,phase[0],queryMs);
@@ -184,7 +187,7 @@ public class VectorTileService {
                     return payload.body();
                 });
                 // 生成期间编辑可能已经提交；旧结果只能属于旧修订，不能进入最新缓存或覆盖地图。
-                if (mapper.tileRevision(dataSetId,z,x,y,margin) != revision) {
+                if (gisVectorTileMapper.tileRevision(dataSetId,z,x,y,margin) != revision) {
                     if (attempt >= 2) throw new ResponseStatusException(HttpStatus.CONFLICT,"瓦片区域正在编辑，请重试");
                     byte[] latest = getTile(dataSetId,tileVersion,z,x,y,attempt+1);
                     result.complete(latest);
@@ -307,7 +310,7 @@ public class VectorTileService {
 
     private GisVectorDataSetStyle requireState(Long dataSetId) {
         if (dataSetId == null || dataSetId < 1) throw bad("数据集ID无效");
-        var state = mapper.tileState(dataSetId);
+        var state = gisVectorTileMapper.tileState(dataSetId);
         if (state == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"矢量数据集不可用");
         if (state.getSchemaVersion() != 3) throw new ResponseStatusException(HttpStatus.CONFLICT,"该数据集未使用新版分类协议，请重新导入新数据集");
         return state;
