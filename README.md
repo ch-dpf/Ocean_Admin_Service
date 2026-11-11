@@ -100,6 +100,43 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 从已管理文件提交影像或地形处理任务时，`fileMetaIds` 必须选择已完整解析栅格组的主入口。任务保存整组成员、来源、SHA、读取配置及输入修订的不可变快照，活动任务保护全组成员；执行时按该快照核验来源并准备临时 GeoTIFF，继续交给既有切片引擎。当前 `MANAGED_FILE` 不承接矢量组切片，矢量接入直接生成可编辑图层。
 
+### 按数据集生成静态瓦片
+
+`POST /api/gis/dataSet/{id}/process` 使用所选数据集创建一个任务和一个瓦片集。请求体仅包含 `taskName`（1～200字，不能全为空白）与 `parameters` 对象，处理类型由后端读取数据集分类确定，不需要提交文件 ID。前端应保留所选数据集 ID，不能仅传递数据分类。
+
+| 数据集分类 | parameters | 成果 |
+| --- | --- | --- |
+| 影像（0） | `ImageryProcessingParameters`，可传 `{}` 使用默认值 | 默认 EPSG:3857、XYZ、PNG；支持 JPEG、EPSG:4326、TMS |
+| 地形（1） | `TerrainProcessingParameters`，可传 `{}` 使用默认值 | EPSG:4326、TMS、Quantized Mesh |
+| 矢量（2） | `schemeId`、`schemeVersion`、`dataRevision`、`minZoom`、`maxZoom`、`bounds` | EPSG:3857、XYZ、PNG，使用已保存样式及指定数据修订 |
+
+影像请求示例：
+
+```json
+{
+  "taskName": "全球150米影像切片",
+  "parameters": {
+    "targetCrs": "EPSG:3857",
+    "tileProfile": "XYZ",
+    "outputFormat": "PNG",
+    "minZoom": 0,
+    "maxZoom": 10
+  }
+}
+```
+
+矢量参数示例：`{"schemeId":"123","schemeVersion":1,"dataRevision":3,"minZoom":0,"maxZoom":10,"bounds":[100,20,110,30]}`；范围为经纬度 `[west,south,east,north]`，层级为0～19。方案版本不符时拒绝提交，排队期间数据修订变化时现有矢量执行流程会明确失败，不替换为其他版本。
+
+影像和地形收集全部非重复逻辑文件组及其配套成员，空数据集、未完整解析的组、未归组文件、未就绪或不可用来源均拒绝提交。提交时再次在事务内锁定数据集、文件组和成员，核对集合、输入修订及来源快照；成功提交后新增的数据不进入本任务。源内容摘要在后台读取前后核验，不在HTTP请求中读取全部大文件内容。
+
+`gis.processing.data-set-max-input-groups` 默认10000，独立于 `/task/process-managed` 手选文件的100个上限及上传数量、大小限制。组和成员清单批量查询及锁定，仍受现有影像和矢量瓦片数量预算约束；2592个输入可提交不表示任意最高层级均可生成。
+
+影像单任务默认不限制瓦片数量，`GIS_IMAGERY_MAX_TILE_COUNT` 默认值为0；配置正数时按该数量限制，负数为无效配置。未指定 `maxZoom` 时按源分辨率计算，不会自动降低层级。例如当前72文件的全球150米影像数据集，EPSG:3857 / XYZ 的0～10级预计1087221张，0～8级预计68341张，默认配置允许规划完整的0～10级。若环境已显式设置该变量，需将其设为0才能取消数量限制。
+
+EPSG:3857 源影像允许世界边界外不超过各轴一个源像元的网格对齐余量，范围规划及重投影前裁到有效世界范围，原始像元定位保持不变。超过该余量、完全位于有效范围外，以及经纬度影像的0～360度范围仍明确拒绝；分析失败信息包含源文件名，便于定位。
+
+响应沿用 `GisBatchProcessingTaskVO`，包含 `taskId`、`taskNo`、`tileSetId`、`totalCount`、`processingType`、`sourceType`、`taskStatus`、`outputKey` 和 `progress`。影像和地形的 `totalCount` 为逻辑文件组数，矢量为一个工作数据快照。用 `GET /api/gis/task/{taskId}` 查询结果，或使用返回的 `progress` 引用跟踪执行；历史任务可用 `GET /api/gis/task/page?dataSetId={id}` 查询。生成完成后沿用已有发布与归档接口。
+
 数据库须安装 PostGIS；部署镜像使用 `postgis/postgis:16-3.5-alpine`。业务表与索引统一维护在 `db/migration/V2__init_ocean_gis.sql`。已有开发库需先补齐最终结构，再依次执行 `mvn flyway:repair`、`mvn flyway:validate`；repair 本身不会修改业务表结构。
 
 矢量文件逐要素流式导入，与在线编辑采用独立限额：导入单要素最多100万个顶点、400万个 JSON 节点，几何和属性合计不超过32MiB；在线编辑仍限制4MiB请求体。GDAL 矢量转换统一执行 MakeValid 并输出 RFC 7946，规范化后的几何继续通过 PostGIS 拓扑校验，不忽略转换失败的要素。全球面的长经差边界按平面线段解释，不仅凭经差超过180度拒绝导入。空几何和无位置记录保留在不可变原始快照中，工作图层不生成虚构几何，并通过 `vectorImport.emptyGeometryFeatures` 返回数量；未声明或未登记的 CRS 仍须补齐，不默认猜测坐标系。
@@ -284,9 +321,11 @@ DELETE /api/gis/vector/layers/{layerId}/features/{featureId}
 
 接入图层按来源图层、分类与几何类别生成。已识别图层继承数据集分类样式；未知图层默认关闭，须显式配置。自定义样式方案保存在 `gis_vector_style.definition` JSONB 中，修改样式不改写几何、要素版本或图层 dataVersion，已有要素分页游标仍可继续使用。
 
-接入弹窗的“图层业务分类”可直接选择“x院业务分类－亮色”或“x院业务分类－暗色”。两种入口均复用现有参数：本地上传使用 `Upload-Vector-Placement: X_LIGHT/X_DARK`，服务器工作区使用 `vectorPlacement: "X_LIGHT"/"X_DARK"`；不增加主题参数。`AUTO` 和 `UNKNOWN` 保持现有含义。
+接入弹窗的“图层业务分类”统一选择“x院业务分类－亮色”：本地上传使用 `Upload-Vector-Placement: X_LIGHT`，服务器工作区使用 `vectorPlacement: "X_LIGHT"`。接入参数仅支持 `AUTO`、`UNKNOWN`、`X_LIGHT`，暗色通过制图工作区的“导入 JSON”保存为独立样式方案。
 
-两份规则维护在 `ocean-business-geo/src/main/resources/vector/x-institute-light.json` 和 `x-institute-dark.json`，各包含35条业务归类规则，对应41个原始图层。分组为背景与行政区、水系与绿地、建筑、行政边界、道路、地名与标注，按照来源集合名称和几何类别匹配；源属性保持不变。首次接入时在文件登记事务中用所选完整模板替换空数据集的初始目录；数据集只固定一套业务分类，文件保存所选值。重复选择不重复建组；已有接入文件的数据集不能混入其他模板，其他规则应接入独立数据集。工作区按 x 院模板的业务目录原样展示，未匹配图层收纳在该模板内；后续接入默认沿用当前模板。重复文件仍遵循现有去重规则。
+统一分类模板维护在 `ocean-business-geo/src/main/resources/vector/x-institute-light.json`，包含39条业务归类规则及3个未知几何分类。业务目录覆盖背景与行政区、水系与绿地、建筑、行政边界、道路、地名与标注、铁路与轨道交通，按照来源集合名称和几何类别匹配；源属性保持不变。首次接入时在文件登记事务中用所选完整模板替换空数据集的初始目录；数据集只固定一套业务分类，文件保存所选值。重复选择不重复建组；已有接入文件的数据集不能混入其他分类模板。工作区按 x 院模板的业务目录原样展示，未匹配图层收纳在该模板内；后续接入默认沿用当前模板。重复文件仍遵循现有去重规则。
+
+同目录的 `x-institute-dark.json` 为可直接导入的分类样式文件，使用 `schemaVersion: 1`、`kind: "VECTOR_STYLE_RULES"`，完整覆盖相同的39个业务分类，保留116条复合渲染规则，并补齐中国铁路、OSM铁路与轨道、OSM地铁和OSM河流面附属线的暗色配置。导入复用 `POST /api/gis/vector/datasets/{id}/style-schemes/import`，按分类名称和几何类型唯一匹配到目标数据集，自动使用目标分类的样式标识，不携带运行时数据集、分类或图层ID。未知分类沿用目标数据集配置；导入不创建分类、不重复导入要素、不覆盖默认亮色配图。通用接口仍允许部分分类文件，x院暗色文件则提供完整业务分类覆盖。
 
 配图参数来自《04-当前亮色与暗色主题样式清单》及 `ocean_basemap` 已生成的SLD。规则内使用比例尺分母，最小值包含、最大值不包含；道路中间整数层级按既定端点线性递增，z12+保持最终值。`renderRules` 累计所有命中项，支持多层填充/描边、桥隧虚线、首都五角星、纯文字、字号/字体/光晕与名称回退。数据瓦片按 `tilePolicy.propertyFields` 输出声明的标量属性，PostGIS和GPKG采用同一字段契约。
 
@@ -520,7 +559,7 @@ GPKG 适合分散只读存储，不保证任意数据量和并发下都优于 Po
 
 业务显示层级统一以 Web Mercator 256 像素为基准，512 像素仍是实际 XYZ 瓦片大小。业务 z4 通常读取原生 z3；原生最高级保持18，业务显示最高级24。tilePolicy 的 zoomReferenceSize 固定256，groups.minZoom 是业务层级；PostGIS 和 GPKG 编码在入选筛选时转换，几何简化、瓦片编号、extent 和投影保持原定义。最高原生瓦片包含后续放大显示需要的要素，前端按业务规则控制显隐。
 
-x院亮色/暗色模板各有35类业务样式、116条复合规则。每条规则保留SLD比例尺分母并显式给出 [minZoom,maxZoom)；舍入误差在SLD记录精度内的整数层级归一化，9000001等实际非整数边界保留连续缩放值。样式起止层级取复合规则的覆盖范围，瓦片最早业务层级向下取整以覆盖小数边界；编译校验三者一致，防止再次出现省级面z3、绿地z9的错误摘要。省级面z4、绿地z10、建筑z13/z15分段，绿地及自然名称 [15,21)。编辑器直接展示不含结束值的边界，预览和保存均使用复合规则，仅对用户修改字段叠加补丁。
+本轮校正时，x院亮色/暗色各有35类业务样式、116条复合规则；当前统一分类及暗色导入文件均已扩展为39类，仍保留这116条复合规则，新增4类使用普通分类样式。每条复合规则保留SLD比例尺分母并显式给出 [minZoom,maxZoom)；舍入误差在SLD记录精度内的整数层级归一化，9000001等实际非整数边界保留连续缩放值。样式起止层级取复合规则的覆盖范围，瓦片最早业务层级向下取整以覆盖小数边界；编译校验三者一致，防止再次出现省级面z3、绿地z9的错误摘要。省级面z4、绿地z10、建筑z13/z15分段，绿地及自然名称 [15,21)。编辑器直接展示不含结束值的边界，预览和保存均使用复合规则，仅对用户修改字段叠加补丁。
 
 SLD核对来源为 E:/web service/geoserver-3.0.1-bin/configuration/ocean_basemap/styles，与该目录的配置说明、generate.mjs及此前GeoServer配置对话交叉核对。232条规则的比例尺、CSS符号参数及过滤结构已核验；国界69885283.003按清单修正为69885283.004。该SLD本身包含先前按清单补齐的规则，并非另获的完整原始权威版本。保留已记录的道路插值、12个重点城市、dtype/ctype/kind映射及重点城市点描边1px；大型水体mj>=500000的单位仍未提供，未擅自更改。kind字段在源要素中为字符串，因此JSON保留字符串字面量。
 

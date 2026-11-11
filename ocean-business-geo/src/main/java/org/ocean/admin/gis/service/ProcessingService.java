@@ -1,6 +1,11 @@
 package org.ocean.admin.gis.service;
 
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Validator;
+import org.ocean.admin.gis.dto.GisDataSetProcessingRequest;
+import org.ocean.admin.gis.mapper.GisDataSetMapper;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.ocean.admin.gis.config.VectorTileProperties;
 import org.ocean.admin.gis.dto.GisVectorRequests;
 import org.ocean.admin.gis.dto.GisCreateProcessingTaskRequest;
@@ -55,6 +60,47 @@ public class ProcessingService {
     private final ObjectMapper objectMapper;
     private final VectorStyleService vectorStyles;
     private final VectorTileProperties vectorLimits;
+    private final GisDataSetMapper dataSetMapper;
+    private final Validator validator;
+
+    /** 分类取自持久化数据集，客户端不能替换处理类型或指定其他数据集的文件。 */
+    public GisBatchProcessingTaskVO submitDataSet(Long dataSetId, GisDataSetProcessingRequest request) {
+        if (dataSetId == null || dataSetId < 1) {
+            throw new IllegalArgumentException("数据集ID必须为正数");
+        }
+        if (request == null || !validator.validate(request).isEmpty()
+                || !request.parameters().isObject()) {
+            throw new IllegalArgumentException("任务名称不能为空且不能超过200字，parameters必须为JSON对象");
+        }
+        var dataSet = dataSetMapper.selectById(dataSetId);
+        if (dataSet == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "数据集不存在或已删除: " + dataSetId);
+        }
+        if (GisProcessingType.VECTOR.categoryId().equals(dataSet.getCategoryId())) {
+            GisDataSetProcessingRequest.VectorParameters parameters;
+            try {
+                parameters = objectMapper.treeToValue(request.parameters(), GisDataSetProcessingRequest.VectorParameters.class);
+            } catch (JacksonException ex) {
+                throw new IllegalArgumentException("矢量切片参数格式不正确", ex);
+            }
+            if (!validator.validate(parameters).isEmpty()) {
+                throw new IllegalArgumentException("矢量切片需要有效的样式方案、方案版本、数据版本、层级和范围");
+            }
+            return submitVector(dataSetId, new GisVectorRequests.TileBuild(request.taskName(),
+                    parameters.schemeId(), parameters.schemeVersion(), parameters.dataRevision(),
+                    parameters.minZoom(), parameters.maxZoom(), parameters.bounds()), "PNG");
+        }
+        GisProcessingType type;
+        if (GisProcessingType.IMAGERY.categoryId().equals(dataSet.getCategoryId())) {
+            type = GisProcessingType.IMAGERY;
+        } else if (GisProcessingType.TERRAIN.categoryId().equals(dataSet.getCategoryId())) {
+            type = GisProcessingType.TERRAIN;
+        } else {
+            throw new IllegalArgumentException("该数据集分类不支持静态瓦片生成");
+        }
+        return submit(new GisSubmitProcessingCommand(GisInputSourceType.MANAGED_FILE, type,
+                request.taskName(), readParameters(type, request.parameters()), null, null, null, null, dataSetId));
+    }
 
     public GisBatchProcessingTaskVO submitVector(Long dataSetId, GisVectorRequests.TileBuild request, String outputFormat) {
         var scheme = vectorStyles.scheme(dataSetId, request.schemeId());
@@ -66,7 +112,7 @@ public class ProcessingService {
         if (tileCount > vectorLimits.getMaxStaticTileCount())
             throw new IllegalArgumentException("预计生成" + tileCount + "块瓦片，超过任务上限" + vectorLimits.getMaxStaticTileCount() + "，请缩小范围或层级");
         return submit(new GisSubmitProcessingCommand(GisInputSourceType.VECTOR_RESOURCE, GisProcessingType.VECTOR,
-                request.taskName(), parameters, null, null, null, null));
+                request.taskName(), parameters, null, null, null, null, null));
     }
 
     public GisBatchProcessingTaskVO submitBatch(GisCreateProcessingTaskRequest request,
@@ -75,7 +121,7 @@ public class ProcessingService {
         return submit(new GisSubmitProcessingCommand(GisInputSourceType.UPLOAD,
                 request.processingType(), request.taskName(),
                 readParameters(request.processingType(), request.parameters()), files,
-                null, null, null));
+                null, null, null, null));
     }
 
     public GisBatchProcessingTaskVO submitWorkspace(GisWorkspaceProcessingRequest request) {
@@ -83,14 +129,14 @@ public class ProcessingService {
                 request.processingType(), request.taskName(),
                 readParameters(request.processingType(), request.parameters()), null,
                 defaultIfBlank(request.workspaceCode(), DEFAULT_WORKSPACE_CODE),
-                defaultIfBlank(request.relativePath(), DEFAULT_WORKSPACE_RELATIVE_PATH), null));
+                defaultIfBlank(request.relativePath(), DEFAULT_WORKSPACE_RELATIVE_PATH), null, null));
     }
 
     public GisBatchProcessingTaskVO submitManaged(GisManagedProcessingRequest request) {
         return submit(new GisSubmitProcessingCommand(GisInputSourceType.MANAGED_FILE,
                 request.processingType(), request.taskName(),
                 readParameters(request.processingType(), request.parameters()), null,
-                null, null, request.fileMetaIds()));
+                null, null, request.fileMetaIds(), null));
     }
 
     private GisProcessingParameters readParameters(

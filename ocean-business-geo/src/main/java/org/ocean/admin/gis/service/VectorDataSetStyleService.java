@@ -122,7 +122,6 @@ public class VectorDataSetStyleService {
         return switch (placement) {
             case "AUTO", "UNKNOWN" -> "cn-vector-default";
             case "X_LIGHT" -> "x-institute-light";
-            case "X_DARK" -> "x-institute-dark";
             default -> throw new IllegalArgumentException("不支持的图层业务分类");
         };
     }
@@ -179,6 +178,45 @@ public class VectorDataSetStyleService {
     }
 
     public static String groupsEtag(GisVectorDataSetStyle s) { return "\"groups-" + s.getDataSetId() + "-d" + s.getDataRevision() + "-p" + s.getDisplayRevision() + "\""; }
+
+    /** 用户显式应用基础预览；统一更新瓦片与显示范围，已保存方案及发布快照保持独立。 */
+    @Transactional(propagation = Propagation.MANDATORY, rollbackFor = Exception.class)
+    public int applyBasicStyles(Long dataSetId, String ifMatch) {
+        var snapshot = require(dataSetId, true);
+        requireMatch(ifMatch, groupsEtag(snapshot));
+        compile(snapshot);
+        var definition = (tools.jackson.databind.node.ObjectNode) json.readTree(snapshot.getDefinitionJson());
+        var cartography = json.readTree(snapshot.getCartographyJson());
+        Set<String> groupKeys = new HashSet<>();
+        Set<String> styleKeys = new HashSet<>();
+        for (var node : definition.path("groups")) {
+            if (!"UNKNOWN_CLASSIFICATION".equals(node.path("nodeType").asText())) continue;
+            groupKeys.add(node.path("id").asText());
+            styleKeys.add(node.path("defaultStyleId").asText());
+            ((tools.jackson.databind.node.ObjectNode) node).put("defaultLayerEnabled", true);
+        }
+        for (var node : definition.path("tilePolicy").path("groups")) {
+            if (groupKeys.contains(node.path("groupKey").asText()))
+                ((tools.jackson.databind.node.ObjectNode) node).put("minZoom", 0);
+        }
+        for (var node : cartography.path("styles")) {
+            if (!styleKeys.contains(node.path("id").asText())) continue;
+            ((tools.jackson.databind.node.ObjectNode) node).put("enabled", true).put("minZoom", 0);
+        }
+        definition.set("cartography", cartography);
+        rules.compile(definition);
+        String checksum = digest(json.writeValueAsBytes(definition));
+        definition.remove("cartography");
+        int updated = mapper.enableUnconfiguredLayers(dataSetId);
+        if (updated == 0 && definition.equals(json.readTree(snapshot.getDefinitionJson()))
+                && cartography.equals(json.readTree(snapshot.getCartographyJson()))) return 0;
+        snapshot.setDefinitionJson(json.writeValueAsString(definition));
+        snapshot.setCartographyJson(json.writeValueAsString(cartography));
+        snapshot.setTemplateChecksum(checksum);
+        if (mapper.replaceDataSetRules(snapshot) != 1) throw new IllegalStateException("基础预览配置保存失败");
+        return updated;
+    }
+
     public static void requireMatch(String actual, String expected) {
         if (actual == null || actual.isBlank()) throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "须携带最新If-Match");
         if (!expected.equals(actual.trim())) throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "配置已变化，请重新读取");

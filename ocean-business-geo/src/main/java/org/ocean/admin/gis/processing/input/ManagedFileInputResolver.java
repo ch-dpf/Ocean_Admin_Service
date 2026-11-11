@@ -1,6 +1,10 @@
 package org.ocean.admin.gis.processing.input;
 
 import lombok.RequiredArgsConstructor;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.ocean.admin.gis.mapper.GisFileGroupMapper;
+import org.ocean.admin.gis.mapper.GisFileMetaMapper;
+import org.ocean.admin.gis.processing.config.GisProcessingProperties;
 import org.ocean.admin.gis.entity.GisDataSet;
 import org.ocean.admin.gis.entity.GisFileMeta;
 import org.ocean.admin.gis.entity.GisFileFormat;
@@ -13,6 +17,7 @@ import org.ocean.admin.gis.service.FileMetaService;
 import org.ocean.admin.gis.service.FileGroupService;
 import org.ocean.admin.gis.service.GdalDatasetReader;
 import org.ocean.admin.gis.progress.ProgressStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
 import org.ocean.admin.gis.processing.GisProcessingType;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -26,6 +31,8 @@ import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -38,6 +45,9 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
     private final FileGroupService fileGroups;
     private final GdalDatasetReader reader;
     private final ObjectMapper json;
+    private final GisFileGroupMapper groupMapper;
+    private final GisFileMetaMapper metaMapper;
+    private final GisProcessingProperties limits;
 
     /** 任务独占的来源清单；执行时只能读取该清单，不以当前组成员替换历史输入。 */
     public record GroupSnapshot(GisFileGroup group, List<GisFileMeta> members) {
@@ -75,29 +85,52 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
 
     @Override
     public PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo) {
-        List<Long> ids = command.fileMetaIds();
-        if (ids == null || ids.isEmpty() || ids.size() > 100
-                || new LinkedHashSet<>(ids).size() != ids.size()) {
-            throw new IllegalArgumentException("文件元数据 ID 必须为1到100个且不能重复");
+        List<GroupSnapshot> snapshots;
+        if (command.dataSetId() != null) {
+            if (command.fileMetaIds() != null) throw new IllegalArgumentException("数据集整体提交不能同时指定文件ID");
+            snapshots = dataSetSnapshots(command);
+        } else {
+            List<Long> ids = command.fileMetaIds();
+            if (ids == null || ids.isEmpty() || ids.size() > 100 || ids.stream().anyMatch(Objects::isNull)
+                    || new LinkedHashSet<>(ids).size() != ids.size()) {
+                throw new IllegalArgumentException("文件元数据 ID 必须为1到100个且不能重复或为空");
+            }
+            snapshots = new ArrayList<>(ids.size());
+            for (Long id : ids) {
+                GisFileMeta meta = getValidMeta(id, command);
+                GisFileGroup group = fileGroups.getRequired(meta.getFileGroupId());
+                if (!meta.getId().equals(group.getEntryFileId())) {
+                    throw new IllegalStateException("只支持文件组的主入口: " + id);
+                }
+                snapshots.add(new GroupSnapshot(group, fileGroups.members(group.getId()).stream()
+                        .sorted(Comparator.comparing(GisFileMeta::getId)).toList()));
+            }
         }
-        List<GisProcessingInput> inputs = new ArrayList<>(ids.size());
-        for (int i = 0; i < ids.size(); i++) {
-            GisFileMeta meta = getValidMeta(ids.get(i), command);
-            GisFileGroup group = fileGroups.getRequired(meta.getFileGroupId());
-            if (!meta.getId().equals(group.getEntryFileId()) || !"COMPLETE".equals(group.getAssemblyStatus())
+        List<GisProcessingInput> inputs = new ArrayList<>(snapshots.size());
+        Map<Long, GisDataSet> dataSets = new LinkedHashMap<>();
+        for (int i = 0; i < snapshots.size(); i++) {
+            GroupSnapshot snapshot = snapshots.get(i);
+            GisFileGroup group = snapshot.group();
+            GisFileMeta meta = snapshot.members().stream()
+                    .filter(member -> member.getId().equals(group.getEntryFileId())).findFirst().orElseThrow();
+            if (!"COMPLETE".equals(group.getAssemblyStatus())
                     || !"COMPLETED".equals(group.getParseStatus())) {
                 throw new IllegalStateException("只支持已完整解析文件组的主入口: " + meta.getId());
+            }
+            if (!"COMPLETED".equals(meta.getMetadataStatus())) {
+                throw new IllegalStateException("文件组入口尚未完成空间解析: " + meta.getId());
             }
             GisFileFormat format = GisFileFormat.valueOf(group.getFormat());
             if (!format.isRaster() || command.processingType() == GisProcessingType.VECTOR)
                 throw new IllegalArgumentException("当前已管理文件切片仅支持影像或地形栅格文件组");
-            List<GisFileMeta> members = fileGroups.members(group.getId()).stream()
-                    .sorted(Comparator.comparing(GisFileMeta::getId)).toList();
-            for (GisFileMeta member : members) {
+            GisDataSet dataSet = dataSets.computeIfAbsent(meta.getDataSetId(), id -> requireDataSet(meta));
+            if (!command.processingType().categoryId().equals(dataSet.getCategoryId())) {
+                throw new IllegalArgumentException("处理类型与文件所属数据集类别不匹配: " + meta.getId());
+            }
+            for (GisFileMeta member : snapshot.members()) {
                 if (!"READY".equals(member.getFileStatus())) throw new IllegalStateException("文件组存在未就绪成员: " + member.getId());
                 fileMetaService.resolveSourcePath(member);
             }
-            GroupSnapshot snapshot = new GroupSnapshot(group, members);
             GisProcessingInput input = new GisProcessingInput();
             input.setSequenceNo(i + 1);
             input.setInputKind("FILE");
@@ -108,7 +141,7 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
             input.setSourceGroupRevision(group.getInputRevision());
             input.setSourceGroupSnapshot(json.writeValueAsString(snapshot));
             input.setSourceDataSetId(meta.getDataSetId());
-            input.setSourceDataSetName(requireDataSet(meta).getDataSetName());
+            input.setSourceDataSetName(dataSet.getDataSetName());
             input.setSourceStorageType(meta.getStorageType());
             input.setSourceStorageKey(meta.getStorageKey());
             input.setSourceLocatorType(meta.getSourceType());
@@ -124,6 +157,36 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
         return new PreparedInputs(inputs, null);
     }
 
+    /** 批量读取数据集，不能将未解析、未归组或不可用文件静默排除。 */
+    private List<GroupSnapshot> dataSetSnapshots(GisSubmitProcessingCommand command) {
+        List<GisFileGroup> groups = groupMapper.selectList(new LambdaQueryWrapper<GisFileGroup>()
+                .eq(GisFileGroup::getDataSetId, command.dataSetId())
+                .ne(GisFileGroup::getAssemblyStatus, "DUPLICATE")
+                .isNull(GisFileGroup::getDuplicateOfGroupId)
+                .orderByAsc(GisFileGroup::getId)
+                .last("LIMIT " + (limits.getDataSetMaxInputGroups() + 1)));
+        if (groups.isEmpty()) throw new IllegalArgumentException("数据集没有可处理的文件组");
+        if (groups.size() > limits.getDataSetMaxInputGroups()) {
+            throw new IllegalArgumentException("数据集文件组超过单任务上限" + limits.getDataSetMaxInputGroups()
+                    + "，可调整gis.processing.data-set-max-input-groups");
+        }
+        Map<Long, List<GisFileMeta>> members = new LinkedHashMap<>();
+        for (GisFileGroup group : groups) {
+            if (!"COMPLETE".equals(group.getAssemblyStatus()) || !"COMPLETED".equals(group.getParseStatus())) {
+                throw new IllegalStateException("数据集存在未完整解析的文件组: " + group.getId());
+            }
+            members.put(group.getId(), new ArrayList<>());
+        }
+        for (GisFileMeta file : metaMapper.selectDataSetProcessingFiles(command.dataSetId())) {
+            List<GisFileMeta> groupMembers = members.get(file.getFileGroupId());
+            if (groupMembers == null) {
+                throw new IllegalStateException("数据集存在未归组文件或文件组已变化，请完成解析后重新提交: " + file.getId());
+            }
+            groupMembers.add(file);
+        }
+        return groups.stream().map(group -> new GroupSnapshot(group, members.get(group.getId()))).toList();
+    }
+
     @Override
     public List<Path> resolveRuntime(List<GisProcessingInput> inputs) {
         return inputs.stream().map(input -> {
@@ -136,28 +199,25 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
     @Override
     public RuntimeInputs openRuntime(List<GisProcessingInput> inputs, Runnable heartbeat, Consumer<ProgressStage> progress) {
         List<GdalDatasetReader.ReadContext> contexts = new ArrayList<>();
-        List<GroupSnapshot> snapshots = new ArrayList<>();
+        List<GroupSnapshot> snapshots = inputs.stream().map(this::readSnapshot).toList();
         List<Path> paths = new ArrayList<>();
         try {
-            progress.accept(ProgressStage.indeterminate("SOURCE_VERIFYING", "核验提交快照中的全部源文件内容"));
-            for (GisProcessingInput input : inputs) {
-                GroupSnapshot snapshot = readSnapshot(input);
-                verifyManifest(snapshot, heartbeat);
+            verifyManifest(snapshots, heartbeat, progress, "SOURCE_VERIFYING", "核验源文件");
+            for (GroupSnapshot snapshot : snapshots) {
                 var context = reader.prepare(snapshot.group(), snapshot.members(), heartbeat, progress);
                 contexts.add(context);
                 if (!context.vectors().isEmpty() || context.rasters().isEmpty())
                     throw new IllegalStateException("已管理文件组未产生可处理的标准栅格");
                 paths.addAll(context.rasters().stream().map(GdalDatasetReader.RasterSource::geoTiffPath).toList());
-                snapshots.add(snapshot);
             }
         } catch (RuntimeException ex) {
             try { closeContexts(contexts); } catch (RuntimeException cleanup) { ex.addSuppressed(cleanup); }
             throw ex;
         }
         return new RuntimeInputs(paths, () -> {
-            progress.accept(ProgressStage.indeterminate("SOURCE_VERIFYING", "切片完成，复核全部源文件仍与提交快照一致"));
+            progress.accept(ProgressStage.indeterminate("SOURCE_REVERIFYING", "切片完成，复核源文件"));
             for (var context : contexts) context.verifySources();
-            for (GroupSnapshot snapshot : snapshots) verifyManifest(snapshot, heartbeat);
+            verifyManifest(snapshots, heartbeat, progress, "SOURCE_REVERIFYING", "复核源文件");
         }, () -> closeContexts(contexts));
     }
 
@@ -175,26 +235,47 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
     }
 
     /** 内容摘要在后台读取前后核验，提交请求只校验来源定位，不同步扫描大文件。 */
-    private void verifyManifest(GroupSnapshot snapshot, Runnable heartbeat) {
-        for (GisFileMeta member : snapshot.members()) {
+    private void verifyManifest(List<GroupSnapshot> snapshots, Runnable heartbeat,
+            Consumer<ProgressStage> progress, String code, String message) {
+        List<GisFileMeta> members = snapshots.stream().flatMap(snapshot -> snapshot.members().stream()).toList();
+        long totalBytes = 0;
+        for (GisFileMeta member : members) totalBytes = Math.addExact(totalBytes, member.getSizeBytes());
+        Consumer<ProgressStage> reporter = ProgressStage.throttled(progress);
+        reporter.accept(totalBytes == 0 ? ProgressStage.indeterminate(code, message)
+                : ProgressStage.determinate(code, message, 0, totalBytes, ProgressUnit.BYTE));
+        long verifiedBytes = 0;
+        byte[] buffer = new byte[1024 * 1024];
+        for (GisFileMeta member : members) {
+            heartbeat.run();
             Path path = fileMetaService.resolveSourcePath(member);
+            String detail = message + ": " + member.getMemberPath();
             try (InputStream input = Files.newInputStream(path)) {
                 MessageDigest digest = MessageDigest.getInstance("SHA-256");
-                byte[] buffer = new byte[1024 * 1024];
                 int count;
                 long size = 0;
                 while ((count = input.read(buffer)) != -1) {
                     heartbeat.run();
                     digest.update(buffer, 0, count);
                     size += count;
+                    if (size > member.getSizeBytes())
+                        throw new IllegalStateException("处理输入成员大小与提交快照不一致: " + member.getId());
+                    // 摘要和来源定位验证通过前，不发布本阶段完成事件。
+                    long completed = verifiedBytes + size;
+                    if (completed < totalBytes)
+                        reporter.accept(ProgressStage.determinate(code, detail, completed, totalBytes, ProgressUnit.BYTE));
                 }
                 if (!Objects.equals(member.getSizeBytes(), size)
                         || !member.getSha256().equalsIgnoreCase(HexFormat.of().formatHex(digest.digest())))
                     throw new IllegalStateException("处理输入成员内容与提交快照不一致: " + member.getId());
                 fileMetaService.resolveSourcePath(member);
+                verifiedBytes += size;
+                if (verifiedBytes < totalBytes)
+                    reporter.accept(ProgressStage.determinate(code, detail, verifiedBytes, totalBytes, ProgressUnit.BYTE));
             } catch (IllegalStateException ex) { throw ex; }
             catch (Exception ex) { throw new IllegalStateException("无法核验处理输入成员: " + member.getId(), ex); }
         }
+        if (totalBytes > 0)
+            reporter.accept(ProgressStage.determinate(code, message + "完成", totalBytes, totalBytes, ProgressUnit.BYTE));
     }
 
     private void closeContexts(List<GdalDatasetReader.ReadContext> contexts) {

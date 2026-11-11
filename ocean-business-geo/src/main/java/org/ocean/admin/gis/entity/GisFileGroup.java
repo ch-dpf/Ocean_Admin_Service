@@ -3,6 +3,7 @@ package org.ocean.admin.gis.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -28,6 +29,9 @@ public class GisFileGroup {
     private String readOptionsJson;
     private String errorCode;
     private String errorMessage;
+    /** 从当前解析元数据读取，不增加文件组存储字段。 */
+    @TableField(exist = false)
+    private tools.jackson.databind.JsonNode geometryQuality;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
     @TableLogic

@@ -16,6 +16,7 @@ import org.ocean.admin.kernel.audit.OperationType;
 import org.ocean.admin.kernel.common.PageResult;
 import org.ocean.admin.kernel.common.ResponseResult;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -111,5 +112,17 @@ public class PublicationController {
             @PathVariable String serviceCode) {
         return ResponseResult.success("GIS服务已停用",
                 publicationService.disable(processingType, serviceCode));
+    }
+
+    @DeleteMapping("/{processingType}/{serviceCode}")
+    @Operation(summary = "移除已停用的GIS服务",
+            description = "删除发布记录及其样式版本，保留数据集、处理任务和处理成果")
+    @OperationLog(module = "GIS_PUBLICATION", type = OperationType.DELETE,
+            description = "移除已停用的GIS服务")
+    public ResponseResult<Void> remove(
+            @PathVariable GisProcessingType processingType,
+            @PathVariable String serviceCode) {
+        publicationService.remove(processingType, serviceCode);
+        return ResponseResult.success();
     }
 }

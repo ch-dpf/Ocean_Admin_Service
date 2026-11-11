@@ -173,6 +173,23 @@ public class PublicationService {
         return toVO(recordService.disable(processingType, serviceCode, "GIS服务"));
     }
 
+    /** 仅移除已停用的发布记录，保留来源数据和处理成果供再次发布。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void remove(GisProcessingType processingType, String serviceCode) {
+        GisPublication publication = recordService.getRequired(processingType, serviceCode);
+        if (publication.getSourceTaskId() != null) {
+            // 与发布、任务删除使用同一把任务锁，避免移除时并发恢复发布或清理成果。
+            taskService.getRequiredForUpdate(publication.getSourceTaskId());
+        }
+        if (!PublicationRecordService.DISABLED.equals(publication.getStatus())) {
+            throw new IllegalStateException("只有已停用的服务可以移除，请先停用服务");
+        }
+        // 删除时再次校验状态，防止等待任务锁期间服务已经重新发布。
+        if (publicationMapper.deleteDisabledPermanently(publication.getId()) != 1) {
+            throw new IllegalStateException("服务状态已变化，请刷新列表后重试");
+        }
+    }
+
     /** 统一发布视图：JSON 文本列反序列化，单值地址字段从单协议 URL 映射派生。 */
     private GisPublicationVO toVO(GisPublication publication) {
         String protocol = publication.getServiceProtocol();

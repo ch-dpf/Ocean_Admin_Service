@@ -14,5 +14,6 @@ public record GisSubmitProcessingCommand(
         List<MultipartFile> uploadFiles,
         String workspaceCode,
         String relativePath,
-        List<Long> fileMetaIds) {
+        List<Long> fileMetaIds,
+        Long dataSetId) {
 }

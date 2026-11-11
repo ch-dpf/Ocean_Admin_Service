@@ -228,7 +228,6 @@ public class ProcessingTaskRecordService {
                         .eq(GisProcessingTask::getId, taskId)
                         .eq(GisProcessingTask::getTaskStatus, TaskStatus.QUEUED)
                         .set(GisProcessingTask::getTaskStatus, TaskStatus.RUNNING)
-                        .set(GisProcessingTask::getCurrentStage, "PROCESSING")
                         .set(GisProcessingTask::getStartTime, LocalDateTime.now())
                         .set(GisProcessingTask::getUpdateTime, LocalDateTime.now()));
         if (updated != 1) {
@@ -270,7 +269,6 @@ public class ProcessingTaskRecordService {
                         .eq(GisProcessingTask::getId, taskId)
                         .eq(GisProcessingTask::getTaskStatus, TaskStatus.RUNNING)
                         .set(GisProcessingTask::getTaskStatus, status)
-                        .set(GisProcessingTask::getCurrentStage, "FINISHED")
                         .set(GisProcessingTask::getFinishTime, LocalDateTime.now())
                         .set(GisProcessingTask::getUpdateTime, LocalDateTime.now()));
         if (updated != 1) {
@@ -291,7 +289,6 @@ public class ProcessingTaskRecordService {
                         .setSql("failed_count = GREATEST(failed_count, "
                                 + "total_count - completed_count)")
                         .set(GisProcessingTask::getTaskStatus, TaskStatus.FAILED)
-                        .set(GisProcessingTask::getCurrentStage, "FAILED")
                         .set(GisProcessingTask::getErrorMessage,
                                 abbreviate(errorMessage, 1000))
                         .set(GisProcessingTask::getFinishTime, LocalDateTime.now())
@@ -315,7 +312,6 @@ public class ProcessingTaskRecordService {
         result.setCompletedCount(task.getCompletedCount());
         result.setFailedCount(task.getFailedCount());
         result.setTaskStatus(task.getTaskStatus());
-        result.setCurrentStage(task.getCurrentStage());
         result.setErrorMessage(task.getErrorMessage());
         result.setStartTime(task.getStartTime());
         result.setFinishTime(task.getFinishTime());

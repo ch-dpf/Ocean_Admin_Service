@@ -111,8 +111,8 @@ public class FileMetaService {
         if (dataSet == null) {
             throw new IllegalArgumentException("数据集不存在或已删除");
         }
-        if (request.vectorPlacement() != null && !Set.of("AUTO", "UNKNOWN", "X_LIGHT", "X_DARK").contains(request.vectorPlacement())) {
-            throw new IllegalArgumentException("矢量归组方式须为AUTO、UNKNOWN、X_LIGHT或X_DARK");
+        if (request.vectorPlacement() != null && !Set.of("AUTO", "UNKNOWN", "X_LIGHT").contains(request.vectorPlacement())) {
+            throw new IllegalArgumentException("矢量归组方式须为AUTO、UNKNOWN或X_LIGHT");
         }
         if (request.vectorPlacement() != null && !Long.valueOf(2).equals(dataSet.getCategoryId())) {
             throw new IllegalArgumentException("仅矢量数据集支持设置矢量归组方式");
