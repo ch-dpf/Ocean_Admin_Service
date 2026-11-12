@@ -10,7 +10,6 @@ import org.ocean.admin.gis.util.VectorTileEncoder;
 import org.ocean.admin.gis.util.VectorTemplateRules;
 import org.ocean.admin.gis.util.VectorStyleRules;
 import org.springframework.stereotype.Service;
-import tools.jackson.core.JsonToken;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -536,38 +535,20 @@ public class GeoPackageStore {
                 srs.ImportFromEPSG(4326);
                 try {
                     Layer output = createLayer(target, "l_0", srs);
-                    long count = 0;
+                    long[] count = {0};
                     ObjectNode fields = json.createObjectNode();
-                    ObjectNode envelope = json.createObjectNode();
-                    var nodeReader = json.readerFor(JsonNode.class).without(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-                    try (var parser = json.createParser(input.toFile())) {
-                        if (parser.nextToken() != JsonToken.START_OBJECT) throw new IllegalArgumentException("GeoJSON 根对象无效");
-                        while (parser.nextToken() != JsonToken.END_OBJECT) {
-                            String name = parser.currentName(); parser.nextToken();
-                            if ("features".equals(name)) {
-                                if (parser.currentToken() != JsonToken.START_ARRAY) throw new IllegalArgumentException("features 须为数组");
-                                while (parser.nextToken() != JsonToken.END_ARRAY) {
-                                    JsonNode feature = nodeReader.readValue(parser);
-                                    append(output, ++count, feature, feature.get("geometry"), json);
-                                    for (String field : feature.path("properties").propertyNames())
-                                        fields.put(field, "JSON");
-                                }
-                            } else envelope.set(name, nodeReader.readValue(parser));
-                        }
-                    }
-                    if ("Feature".equals(envelope.path("type").asText())) {
-                        append(output, ++count, envelope, envelope.get("geometry"), json);
-                        for (String field : envelope.path("properties").propertyNames()) fields.put(field, "JSON");
-                    } else if (!"FeatureCollection".equals(envelope.path("type").asText()))
-                        throw new IllegalArgumentException("原始 GeoJSON 须为 Feature 或 FeatureCollection");
+                    var content = new org.ocean.admin.gis.util.GeoJsonFeatureReader(json).readSource(input, feature -> {
+                        append(output, ++count[0], feature, feature.get("geometry"), json);
+                        for (String field : feature.path("properties").propertyNames()) fields.put(field, "JSON");
+                    }, () -> { });
                     ObjectNode layer = layers.addObject().put("key", "default").put("name", input.getFileName().toString())
-                            .put("table", "l_0").put("featureCount", count).put("sourceCrs", "EPSG:4326");
-                    layer.set("fields", fields); layer.set("sourceEnvelope", envelope);
+                            .put("table", "l_0").put("featureCount", count[0]).put("sourceCrs", "EPSG:4326");
+                    layer.set("fields", fields); layer.set("sourceEnvelope", content.envelope());
                 } finally { srs.delete(); }
             } else {
                 var options = new Vector<String>();
                 JsonNode readOptions = request.path("options");
-                if ("CSV".equals(request.path("format").asText())) {
+                if ("CSV".equals(request.path("format").asText()) && readOptions.hasNonNull("xField")) {
                     options.add("X_POSSIBLE_NAMES=" + readOptions.path("xField").asText());
                     options.add("Y_POSSIBLE_NAMES=" + readOptions.path("yField").asText());
                 }
@@ -600,6 +581,21 @@ public class GeoPackageStore {
                                 ObjectNode value = json.createObjectNode().put("type", "Feature").put("id", feature.GetFID());
                                 Geometry geometry = feature.GetGeometryRef();
                                 value.set("geometry", geometry == null ? json.nullNode() : json.readTree(geometry.ExportToJson()));
+                                // WKB保留曲线、M值与每个几何字段，显示用GeoJSON不替代原始几何语义。
+                                var originalGeometries = value.putArray("sourceGeometries");
+                                for (int geometryIndex = 0; geometryIndex < feature.GetGeomFieldCount(); geometryIndex++) {
+                                    var original = feature.GetGeomFieldRef(geometryIndex);
+                                    var field = feature.GetGeomFieldDefnRef(geometryIndex);
+                                    try {
+                                        var originalDescription = originalGeometries.addObject().put("name", field.GetName());
+                                        originalDescription.put("wkb", original == null ? null : java.util.Base64.getEncoder().encodeToString(original.ExportToWkb()));
+                                        var reference = field.GetSpatialRef();
+                                        if (reference != null) {
+                                            try { originalDescription.put("sourceCrs", reference.ExportToWkt()); }
+                                            finally { reference.delete(); }
+                                        }
+                                    } finally { field.delete(); }
+                                }
                                 var attributes = value.putObject("properties");
                                 for (int f = 0; f < definition.GetFieldCount(); f++) {
                                     var field = definition.GetFieldDefn(f);

@@ -48,6 +48,7 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
     private final GisFileGroupMapper groupMapper;
     private final GisFileMetaMapper metaMapper;
     private final GisProcessingProperties limits;
+    private final org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper spatialMetadata;
 
     /** 任务独占的来源清单；执行时只能读取该清单，不以当前组成员替换历史输入。 */
     public record GroupSnapshot(GisFileGroup group, List<GisFileMeta> members) {
@@ -107,6 +108,9 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
             }
         }
         List<GisProcessingInput> inputs = new ArrayList<>(snapshots.size());
+        var descriptions = spatialMetadata.selectByFileIds(snapshots.stream()
+                .map(snapshot -> snapshot.group().getEntryFileId()).toList(), false).stream()
+                .collect(java.util.stream.Collectors.groupingBy(org.ocean.admin.gis.entity.GisFileSpatialMetadata::getFileMetaId));
         Map<Long, GisDataSet> dataSets = new LinkedHashMap<>();
         for (int i = 0; i < snapshots.size(); i++) {
             GroupSnapshot snapshot = snapshots.get(i);
@@ -126,6 +130,25 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
             GisDataSet dataSet = dataSets.computeIfAbsent(meta.getDataSetId(), id -> requireDataSet(meta));
             if (!command.processingType().categoryId().equals(dataSet.getCategoryId())) {
                 throw new IllegalArgumentException("处理类型与文件所属数据集类别不匹配: " + meta.getId());
+            }
+            var layers = descriptions.getOrDefault(meta.getId(), List.of());
+            if (layers.isEmpty()) throw new IllegalArgumentException("文件组缺少标准栅格资源描述，请重新解析: " + group.getId());
+            var selection = command.parameters().raster();
+            var selectedKeys = selection == null ? null : selection.layerKeys();
+            if (selectedKeys != null && !layers.stream().map(org.ocean.admin.gis.entity.GisFileSpatialMetadata::getLayerKey)
+                    .collect(java.util.stream.Collectors.toSet()).containsAll(selectedKeys))
+                throw new IllegalArgumentException("文件组不包含所选栅格集合: " + group.getId());
+            for (var layer : layers) {
+                if (selectedKeys != null && !selectedKeys.contains(layer.getLayerKey())) continue;
+                try {
+                    var metadata = json.readTree(layer.getExtraMetadata());
+                    if (metadata.path("validPixelCount").asLong(-1) == 0)
+                        throw new IllegalArgumentException("所选栅格集合没有有效像元，不能生成处理成果");
+                    GdalDatasetReader.planRaster(metadata.path("sourceMetadata").path("sourceDataset"),
+                            command.parameters());
+                } catch (IllegalArgumentException ex) {
+                    throw new IllegalArgumentException(meta.getOriginalName() + " / " + layer.getLayerKey() + ": " + ex.getMessage(), ex);
+                }
             }
             for (GisFileMeta member : snapshot.members()) {
                 if (!"READY".equals(member.getFileStatus())) throw new IllegalStateException("文件组存在未就绪成员: " + member.getId());
@@ -197,14 +220,15 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
     }
 
     @Override
-    public RuntimeInputs openRuntime(List<GisProcessingInput> inputs, Runnable heartbeat, Consumer<ProgressStage> progress) {
+    public RuntimeInputs openRuntime(List<GisProcessingInput> inputs,
+            org.ocean.admin.gis.dto.GisProcessingParameters parameters, Runnable heartbeat, Consumer<ProgressStage> progress) {
         List<GdalDatasetReader.ReadContext> contexts = new ArrayList<>();
         List<GroupSnapshot> snapshots = inputs.stream().map(this::readSnapshot).toList();
         List<Path> paths = new ArrayList<>();
         try {
             verifyManifest(snapshots, heartbeat, progress, "SOURCE_VERIFYING", "核验源文件");
             for (GroupSnapshot snapshot : snapshots) {
-                var context = reader.prepare(snapshot.group(), snapshot.members(), heartbeat, progress);
+                var context = reader.prepareProcessing(snapshot.group(), snapshot.members(), parameters, heartbeat, progress);
                 contexts.add(context);
                 if (!context.vectors().isEmpty() || context.rasters().isEmpty())
                     throw new IllegalStateException("已管理文件组未产生可处理的标准栅格");

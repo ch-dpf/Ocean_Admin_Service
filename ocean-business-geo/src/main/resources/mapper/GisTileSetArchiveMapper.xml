@@ -15,6 +15,7 @@
         a.archive_name,
         a.archive_format,
         a.archive_status,
+        a.progress_epoch,
         a.current_stage,
         a.total_file_count,
         a.processed_file_count,
@@ -29,12 +30,7 @@
         a.version,
         CASE
             WHEN a.archive_status = 'COMPLETED' THEN 100
-            WHEN a.total_bytes &gt; 0
-                THEN CAST((a.processed_bytes::NUMERIC * 100) / a.total_bytes AS INTEGER)
-            WHEN a.total_file_count &gt; 0
-                THEN CAST((a.processed_file_count::NUMERIC * 100)
-                    / a.total_file_count AS INTEGER)
-            ELSE 0
+            ELSE NULL
         END AS packing_percent,
         CASE
             WHEN a.archive_status = 'COMPLETED' AND a.storage_key IS NOT NULL THEN TRUE

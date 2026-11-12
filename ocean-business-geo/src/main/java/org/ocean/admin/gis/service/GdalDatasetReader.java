@@ -1,11 +1,11 @@
 package org.ocean.admin.gis.service;
 
-import it.geosolutions.imageioimpl.plugins.tiff.TIFFImageReaderSpi;
 import org.gdal.gdal.Dataset;
 import org.gdal.gdal.InfoOptions;
 import org.gdal.gdal.ProgressCallback;
 import org.gdal.gdal.TranslateOptions;
 import org.gdal.gdal.VectorTranslateOptions;
+import org.gdal.gdal.WarpOptions;
 import org.gdal.gdal.gdal;
 import org.gdal.gdalconst.gdalconstConstants;
 import org.gdal.ogr.Layer;
@@ -13,17 +13,18 @@ import org.gdal.osr.SpatialReference;
 import org.ocean.admin.gis.entity.GisFileFormat;
 import org.ocean.admin.gis.entity.GisFileGroup;
 import org.ocean.admin.gis.entity.GisFileMeta;
+import org.ocean.admin.gis.dto.GisProcessingParameters;
+import org.ocean.admin.gis.dto.ImageryProcessingParameters;
+import org.ocean.admin.gis.dto.TerrainProcessingParameters;
 import org.ocean.admin.gis.processing.config.GisProcessingProperties;
 import org.ocean.admin.gis.processing.input.ControlledWorkspaceResolver;
 import org.ocean.admin.gis.progress.ProgressStage;
 import org.ocean.admin.gis.progress.ProgressUnit;
 import org.springframework.stereotype.Component;
-import tools.jackson.core.JsonToken;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-import javax.imageio.stream.FileImageInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -54,8 +55,6 @@ import java.util.regex.Pattern;
 /** 在独立 Java 进程内调用 GDAL JNI，并为现有流式解析器准备临时标准数据。 */
 @Component
 public class GdalDatasetReader {
-    // 超过此值时转为小块临时 TIFF，不作为源文件解析失败的条件。
-    private static final long DIRECT_TIFF_BLOCK_BYTES = 64 * 1024 * 1024;
     private final GisProcessingProperties properties;
     private final ControlledWorkspaceResolver sources;
     private final ObjectMapper json;
@@ -75,6 +74,82 @@ public class GdalDatasetReader {
     public void closeMapWorkers() { mapWorkers.close(); }
 
     public record DriverCapability(boolean available, String reason) { }
+
+    /** 处理准备契约在提交和执行阶段共用，避免已知的输入问题进入切片队列。 */
+    public record RasterPlan(String purpose, String targetCrs, List<Integer> bands,
+                             List<Double> displayRange, double elevationScale, double elevationOffset,
+                             String resampling, boolean palette) { }
+
+    public static RasterPlan planRaster(JsonNode info, GisProcessingParameters parameters) {
+        JsonNode sourceBands = info.path("bands");
+        if (!sourceBands.isArray() || sourceBands.isEmpty())
+            throw new IllegalArgumentException("栅格资源缺少波段描述，请重新解析来源");
+        boolean terrain = parameters instanceof TerrainProcessingParameters;
+        if (!terrain && !(parameters instanceof ImageryProcessingParameters))
+            throw new IllegalArgumentException("栅格只能生成影像或地形输入");
+        var selection = parameters.raster();
+        List<Integer> selected = selection == null ? null : selection.bands();
+        if (selected == null) {
+            if (sourceBands.size() == 1) selected = List.of(1);
+            else if (!terrain) {
+                List<Integer> colors = new ArrayList<>();
+                for (String color : List.of("Red", "Green", "Blue", "Alpha")) {
+                    List<Integer> matches = new ArrayList<>();
+                    for (int index = 0; index < sourceBands.size(); index++) {
+                        if (color.equals(sourceBands.get(index).path("colorInterpretation").asText())) matches.add(index + 1);
+                    }
+                    if (matches.size() == 1) colors.add(matches.getFirst());
+                    else if (!color.equals("Alpha") || !matches.isEmpty()) {
+                        colors.clear();
+                        break;
+                    }
+                }
+                if (colors.size() == 3 || colors.size() == 4) selected = List.copyOf(colors);
+                else if (sourceBands.size() == 2
+                        && "Gray".equals(sourceBands.get(0).path("colorInterpretation").asText())
+                        && "Alpha".equals(sourceBands.get(1).path("colorInterpretation").asText())) selected = List.of(1, 2);
+            }
+        }
+        if (selected == null) throw new IllegalArgumentException(terrain
+                ? "数据包含多个波段，无法自动确定高程内容，暂不能生成地形"
+                : "数据没有明确的颜色组合，暂不能自动生成影像");
+        if (terrain && selected.size() != 1) throw new IllegalArgumentException("地形处理必须选择一个高程波段");
+        for (int band : selected) {
+            if (band > sourceBands.size()) throw new IllegalArgumentException("选择的波段不存在: " + band);
+            if (sourceBands.get(band - 1).path("type").asText().startsWith("C"))
+                throw new IllegalArgumentException("复数波段须明确转换为实数物理量后处理");
+        }
+        List<Double> range = selection == null ? null : selection.displayRange();
+        boolean palette = selected.size() == 1
+                && "Palette".equals(sourceBands.get(selected.getFirst() - 1).path("colorInterpretation").asText());
+        if (!terrain && !palette && range == null && selected.stream().anyMatch(index ->
+                !"Byte".equals(sourceBands.get(index - 1).path("type").asText())))
+            throw new IllegalArgumentException("数据需要明确的显示数值范围，暂不能自动生成影像");
+        double scale = 1;
+        double offset = 0;
+        if (terrain) {
+            JsonNode band = sourceBands.get(selected.getFirst() - 1);
+            String unit = band.path("unit").asText("").trim().toLowerCase(Locale.ROOT);
+            if (selection != null && selection.elevationScale() != null) scale = selection.elevationScale();
+            else if (Set.of("m", "meter", "meters", "metre", "metres").contains(unit)) scale = 1;
+            else if (Set.of("ft", "foot", "feet").contains(unit)) scale = 0.3048;
+            else throw new IllegalArgumentException("数据未明确高程单位，无法自动换算为米，暂不能生成地形");
+            offset = band.path("offset").asDouble(0) * scale
+                    + (selection == null || selection.elevationOffset() == null ? 0 : selection.elevationOffset());
+            scale *= band.path("scale").asDouble(1);
+            if (!Double.isFinite(scale) || !Double.isFinite(offset) || scale == 0)
+                throw new IllegalArgumentException("高程波段比例或偏移无效");
+        }
+        String target = parameters.targetCrs();
+        if (!Set.of("EPSG:4326", "EPSG:3857").contains(target) || terrain && !"EPSG:4326".equals(target))
+            throw new IllegalArgumentException("处理目标坐标系不受支持");
+        String resampling = terrain ? ((TerrainProcessingParameters) parameters).interpolationType()
+                : ((ImageryProcessingParameters) parameters).resampling();
+        if (!Set.of("NEAREST", "BILINEAR").contains(resampling.toUpperCase(Locale.ROOT)))
+            throw new IllegalArgumentException("重采样算法必须为NEAREST或BILINEAR");
+        return new RasterPlan(terrain ? "TERRAIN" : "IMAGERY", target, List.copyOf(selected), range, scale, offset,
+                "NEAREST".equalsIgnoreCase(resampling) ? "near" : "bilinear", palette);
+    }
 
     /** 在读取所用的同一隔离环境探测输入及中间产物驱动，结果交由能力服务缓存。 */
     public java.util.Map<GisFileFormat, DriverCapability> probeCapabilities() {
@@ -106,17 +181,23 @@ public class GdalDatasetReader {
     /** 原文件始终只读；临时文件随上下文关闭删除，提交前须再次核验所有源。 */
     public ReadContext prepare(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
                                Consumer<ProgressStage> progress) {
-        return prepare(group, members, heartbeat, progress, false);
+        return prepare(group, members, heartbeat, progress, false, null);
+    }
+
+    /** 按任务中固定的用途生成引擎输入，源数据及所有原始波段保持不变。 */
+    public ReadContext prepareProcessing(GisFileGroup group, List<GisFileMeta> members,
+            GisProcessingParameters parameters, Runnable heartbeat, Consumer<ProgressStage> progress) {
+        return prepare(group, members, heartbeat, progress, false, parameters);
     }
 
     /** 原始快照与制图转换独立执行，空层或无效制图数据也可留存供检查。 */
     public ReadContext prepareSnapshot(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
                                        Consumer<ProgressStage> progress) {
-        return prepare(group, members, heartbeat, progress, true);
+        return prepare(group, members, heartbeat, progress, true, null);
     }
 
     private ReadContext prepare(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
-                                Consumer<ProgressStage> progress, boolean snapshotOnly) {
+                                Consumer<ProgressStage> progress, boolean snapshotOnly, GisProcessingParameters parameters) {
         if (group == null || members == null || members.isEmpty()) throw failure("MISSING_GROUP", "文件组没有可读取成员");
         GisFileFormat format;
         try { format = GisFileFormat.valueOf(group.getFormat()); }
@@ -204,12 +285,9 @@ public class GdalDatasetReader {
                 context.packageResult = executePackage(context, request, progress);
             } else if (format == GisFileFormat.GEOJSON) {
                 context.vectors.add(new VectorSource("default", entry.getOriginalName(), entryPath, "EPSG:4326", null, null));
-            } else if (format == GisFileFormat.GEOTIFF && !options.has("sourceCrs")
-                    && !requiresTiffNormalization(entryPath)) {
-                context.rasters.add(new RasterSource("default", entry.getOriginalName(), entryPath, null, null, null));
             } else {
                 progress.accept(ProgressStage.indeterminate("NATIVE_INSPECTION", "检查原始驱动、坐标系和数据结构"));
-                prepareWithWorker(context, format, entryPath, entry.getOriginalName(), options, progress);
+                prepareWithWorker(context, format, entryPath, entry.getOriginalName(), options, parameters, progress);
             }
             context.verifySources();
             return context;
@@ -222,31 +300,6 @@ public class GdalDatasetReader {
             catch (RuntimeException cleanup) { ex.addSuppressed(cleanup); }
             throw failure("SOURCE_READ_FAILED", "无法准备原始数据源: " + ex.getMessage());
         }
-    }
-
-    /** 只检查布局；主图、内部掩膜及已登记外部掩膜的大块交给隔离工作进程重新分块。 */
-    private boolean requiresTiffNormalization(Path path) throws IOException {
-        for (Path candidate : List.of(path, path.resolveSibling(path.getFileName() + ".msk"))) {
-            if (!Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
-            try (var input = new FileImageInputStream(candidate.toFile())) {
-                var reader = new TIFFImageReaderSpi().createReaderInstance();
-                try {
-                    reader.setInput(input, false, false);
-                    int images = reader.getNumImages(true);
-                    for (int index = 0; index < images; index++) {
-                        var type = reader.getRawImageType(index);
-                        if (type == null) return true;
-                        long bytesPerPixel = 0;
-                        for (int bits : type.getSampleModel().getSampleSize()) bytesPerPixel += (bits + 7L) / 8;
-                        long blockPixels = (long) reader.getTileWidth(index) * reader.getTileHeight(index);
-                        if (blockPixels > DIRECT_TIFF_BLOCK_BYTES / Math.max(1, bytesPerPixel)) return true;
-                    }
-                } finally {
-                    reader.dispose();
-                }
-            }
-        }
-        return false;
     }
 
     /** 复用受限工作进程执行托管包操作，JNI 不进入服务 JVM。 */
@@ -299,13 +352,17 @@ public class GdalDatasetReader {
 
     /** 主进程只传递受控文件组参数，不在服务 JVM 中加载 JNI。 */
     private void prepareWithWorker(ReadContext context, GisFileFormat format, Path input, String sourceName,
-                                   JsonNode options, Consumer<ProgressStage> progress) throws Exception {
+                                   JsonNode options, GisProcessingParameters parameters, Consumer<ProgressStage> progress) throws Exception {
         Path directory = context.directory();
         ObjectNode request = json.createObjectNode();
         request.put("format", format.name());
         request.put("input", input.toString());
         request.put("sourceName", sourceName);
         request.set("options", options);
+        if (parameters != null) {
+            request.put("processingType", parameters.processingType().name());
+            request.set("parameters", json.valueToTree(parameters));
+        }
         request.put("version", properties.getGdalVersion());
         request.put("maxMetadataBytes", properties.getGdalMaxMetadataBytes());
         Path requestFile = directory.resolve("request.json");
@@ -322,11 +379,15 @@ public class GdalDatasetReader {
             throw failure("INVALID_NATIVE_METADATA", "GDAL 工作进程结果结构无效");
         for (JsonNode source : result.path("vectors")) {
             context.vectors.add(new VectorSource(source.path("key").asString(), source.path("name").asString(),
-                    resultPath(directory, source), source.path("sourceCrs").asString(), source.get("sourceExtent"), source.get("metadata")));
+                    resultPath(directory, source), source.path("sourceCrs").asString(null), source.get("sourceExtent"), source.get("metadata")));
         }
         for (JsonNode source : result.path("rasters")) {
+            Path rasterPath = resultPath(directory, source);
+            JsonNode footprint = source.path("metadata").path("footprintFile");
+            Path footprintPath = footprint.isString()
+                    ? resultPath(directory, json.createObjectNode().put("path", footprint.asText())) : rasterPath;
             context.rasters.add(new RasterSource(source.path("key").asString(), source.path("name").asString(),
-                    resultPath(directory, source), source.path("sourceCrs").asString(), source.get("sourceExtent"), source.get("metadata")));
+                    rasterPath, footprintPath, source.path("sourceCrs").asString(null), source.get("sourceExtent"), source.get("metadata")));
         }
         if (context.vectors.isEmpty() && context.rasters.isEmpty()) throw failure("EMPTY_DATASET", "GDAL 工作进程未生成空间数据");
     }
@@ -555,7 +616,7 @@ public class GdalDatasetReader {
 
     public record VectorSource(String key, String name, Path geoJsonPath, String sourceCrs,
                                JsonNode sourceExtent, JsonNode metadata) { }
-    public record RasterSource(String key, String name, Path geoTiffPath, String sourceCrs,
+    public record RasterSource(String key, String name, Path geoTiffPath, Path footprintPath, String sourceCrs,
                                JsonNode sourceExtent, JsonNode metadata) { }
     private record SourceSnapshot(GisFileMeta member, Path path, long size, long modifiedAt, Object fileKey) { }
 
@@ -803,7 +864,15 @@ public class GdalDatasetReader {
                 if (drivers.isEmpty()) throw failure("DRIVER_UNAVAILABLE", "当前 GDAL 未安装 " + format.name() + " 读取驱动");
                 worker.progress.accept(ProgressStage.indeterminate("NATIVE_INSPECTION", "Java GDAL 检查原始数据结构"));
                 if (format.isVector()) worker.vectors(format, input, options, drivers);
-                else worker.raster(input, request.path("sourceName").asString(), options, drivers);
+                else {
+                    GisProcessingParameters parameters = switch (request.path("processingType").asText("")) {
+                        case "IMAGERY" -> mapper.treeToValue(request.path("parameters"), ImageryProcessingParameters.class);
+                        case "TERRAIN" -> mapper.treeToValue(request.path("parameters"), TerrainProcessingParameters.class);
+                        case "" -> null;
+                        default -> throw failure("INVALID_READ_OPTIONS", "栅格处理用途无效");
+                    };
+                    worker.raster(input, request.path("sourceName").asString(), options, drivers, parameters);
+                }
                 worker.writeResult(worker.result);
                 return;
             } catch (ReaderException ex) {
@@ -840,6 +909,7 @@ public class GdalDatasetReader {
             gdal.SetConfigOption("GDAL_HTTP_TIMEOUT", "1");
             gdal.SetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".ocean-disabled-network");
             gdal.SetConfigOption("GDAL_NUM_THREADS", "1");
+            gdal.SetConfigOption("OGR_ARC_STEPSIZE", "1");
             gdal.SetConfigOption("GDAL_CACHEMAX", "64");
             gdal.UseExceptions(); org.gdal.ogr.ogr.UseExceptions(); org.gdal.osr.osr.UseExceptions();
             gdal.AllRegister();
@@ -878,9 +948,9 @@ public class GdalDatasetReader {
             outputDriver("GeoJSON");
             String explicit = explicitCrs(options);
             if (format.sourceCrsRequirement() == GisFileFormat.Requirement.REQUIRED && explicit == null)
-                throw failure("MISSING_CRS", "CSV 和 CAD 必须明确提供 sourceCrs");
+                throw failure("MISSING_CRS", "CAD 必须明确提供 sourceCrs");
             Vector<String> openOptions = new Vector<>();
-            if (format == GisFileFormat.CSV) openOptions.addAll(List.of("X_POSSIBLE_NAMES=" + fieldOption(options, "xField"),
+            if (format == GisFileFormat.CSV && options.hasNonNull("xField")) openOptions.addAll(List.of("X_POSSIBLE_NAMES=" + fieldOption(options, "xField"),
                     "Y_POSSIBLE_NAMES=" + fieldOption(options, "yField"), "KEEP_GEOM_COLUMNS=YES", "AUTODETECT_TYPE=NO"));
             Dataset source = open(input, true, drivers, openOptions);
             try {
@@ -890,71 +960,61 @@ public class GdalDatasetReader {
                     if (layer == null) continue;
                     try {
                         String name = layer.GetName();
-                        if (name == null || name.isBlank() || name.startsWith("-") || name.chars().anyMatch(c -> c < 32) || !names.add(name))
+                        if (name == null || name.isBlank() || name.chars().anyMatch(c -> c < 32) || !names.add(name))
                             throw failure("INVALID_LAYER_NAME", "源图层名为空、重名或无法安全选择");
                         ObjectNode description = describeLayer(layer);
-                        if (format == GisFileFormat.CSV) validateCsvFields(description, options);
+                        if (format == GisFileFormat.CSV && options.hasNonNull("xField")) validateCsvFields(description, options);
                         JsonNode geometryFields = description.path("geometryFields");
-                        if (geometryFields.isEmpty() || description.path("featureCount").asLong(-1) == 0) continue;
-                        if (geometryFields.size() != 1) throw failure("MULTIPLE_GEOMETRY_FIELDS", "源图层包含多个几何字段，须明确选择后读取");
-                        JsonNode geometry = geometryFields.get(0);
-                        String sourceCrs = explicit != null ? explicit : text(geometry.path("coordinateSystem").path("wkt"));
-                        if (sourceCrs == null) throw failure("MISSING_CRS", "源图层 " + name + " 缺少源坐标系");
-                        String parsedCrs = geotoolsCrs(sourceCrs);
-                        String filename = "vector-" + result.path("vectors").size() + ".geojson";
-                        Path output = directory.resolve(filename);
-                        Vector<String> arguments = new Vector<>(List.of("-f", "GeoJSON", "-t_srs", "EPSG:4326",
-                                "-s_srs", sourceCrs, "-makevalid", "-lco", "RFC7946=YES", "-lco", "WRAPDATELINE=YES",
-                                "-lco", "COORDINATE_PRECISION=15", "-preserve_fid", name));
-                        progress.accept(ProgressStage.indeterminate("NATIVE_VECTOR_CONVERSION", "Java GDAL 转换源图层: " + name));
-                        VectorTranslateOptions translate = new VectorTranslateOptions(arguments);
-                        ProgressCallback callback = callback("NATIVE_VECTOR_CONVERSION", "转换源图层: " + name);
-                        Dataset converted = null;
-                        try {
-                            converted = gdal.VectorTranslate(output.toString(), source, translate, callback);
-                            if (converted == null) throw failure("EMPTY_NATIVE_OUTPUT", "GDAL 没有生成标准矢量数据");
-                            if (converted.Close() != gdalconstConstants.CE_None) throw failure("NATIVE_READ_FAILED", "GDAL 矢量输出关闭失败");
-                        } finally {
-                            if (converted != null) converted.delete(); callback.delete(); translate.delete();
+                        for (int geometryIndex = 0; geometryIndex < Math.max(1, geometryFields.size()); geometryIndex++) {
+                            JsonNode geometry = geometryFields.isEmpty() ? json.createObjectNode() : geometryFields.get(geometryIndex);
+                            String sourceCrs = explicit != null ? explicit : text(geometry.path("coordinateSystem").path("wkt"));
+                            if (sourceCrs == null && !geometryFields.isEmpty()) throw failure("MISSING_CRS", "源图层 " + name + " 缺少源坐标系");
+                            String parsedCrs = sourceCrs == null ? null : geotoolsCrs(sourceCrs);
+                            String filename = "vector-" + result.path("vectors").size() + ".geojson";
+                            Path output = directory.resolve(filename);
+                            Vector<String> arguments = new Vector<>(List.of("-f", "GeoJSON", "-makevalid",
+                                    "-nlt", "CONVERT_TO_LINEAR", "-lco", "RFC7946=YES", "-lco", "WRAPDATELINE=YES",
+                                    "-lco", "COORDINATE_PRECISION=15", "-preserve_fid"));
+                            if (sourceCrs != null) arguments.addAll(List.of("-t_srs", "EPSG:4326", "-s_srs", sourceCrs));
+                            if (geometryFields.size() > 1) {
+                                List<String> selectedFields = new ArrayList<>();
+                                for (JsonNode field : description.path("fields"))
+                                    selectedFields.add("\"" + field.path("name").asText().replace("\"", "\"\"") + "\"");
+                                selectedFields.add("\"" + geometry.path("name").asText().replace("\"", "\"\"") + "\"");
+                                arguments.addAll(List.of("-select", String.join(",", selectedFields)));
+                            }
+                            if (name.startsWith("-")) arguments.addAll(List.of("-sql", "SELECT * FROM \"" + name.replace("\"", "\"\"") + "\""));
+                            else arguments.add(name);
+                            progress.accept(ProgressStage.indeterminate("NATIVE_VECTOR_CONVERSION", "Java GDAL 转换源图层: " + name));
+                            VectorTranslateOptions translate = new VectorTranslateOptions(arguments);
+                            ProgressCallback callback = callback("NATIVE_VECTOR_CONVERSION", "转换源图层: " + name);
+                            Dataset converted = null;
+                            try {
+                                converted = gdal.VectorTranslate(output.toString(), source, translate, callback);
+                                if (converted == null) throw failure("EMPTY_NATIVE_OUTPUT", "GDAL 没有生成标准矢量数据");
+                                if (converted.Close() != gdalconstConstants.CE_None) throw failure("NATIVE_READ_FAILED", "GDAL 矢量输出关闭失败");
+                            } finally {
+                                if (converted != null) converted.delete(); callback.delete(); translate.delete();
+                            }
+                            requireOutput(output);
+                            ObjectNode metadata = json.createObjectNode();
+                            org.gdal.gdal.Driver sourceDriver = source.GetDriver();
+                            try { metadata.put("driver", sourceDriver.getShortName()); }
+                            finally { sourceDriver.delete(); }
+                            metadata.set("sourceLayer", description); metadata.set("readOptions", options); metadata.put("sourceCrs", sourceCrs);
+                            metadata.putObject("geometryProcessing").put("makeValid", true).put("wrapDateline", true)
+                                    .put("outputStandard", "RFC7946").put("rawSnapshotUnchanged", true);
+                            String collectionKey = stableKey("layer", name);
+                            metadata.put("sourceCollectionKey", collectionKey);
+                            metadata.put("geometryField", geometry.path("name").asText(""));
+                            ((ObjectNode) metadata.path("geometryProcessing")).put("curveStepDegrees", 1);
+                            String key = geometryFields.size() > 1 ? stableKey("geometry", name + ":" + geometryIndex) : collectionKey;
+                            append("vectors", key, name, filename, parsedCrs, geometry.get("extent"), metadata);
                         }
-                        requireOutput(output);
-                        if (!hasFeatures(output)) {
-                            Files.delete(output);
-                            continue;
-                        }
-                        ObjectNode metadata = json.createObjectNode();
-                        org.gdal.gdal.Driver sourceDriver = source.GetDriver();
-                        try { metadata.put("driver", sourceDriver.getShortName()); }
-                        finally { sourceDriver.delete(); }
-                        metadata.set("sourceLayer", description); metadata.set("readOptions", options); metadata.put("sourceCrs", sourceCrs);
-                        metadata.putObject("geometryProcessing").put("makeValid", true).put("wrapDateline", true)
-                                .put("outputStandard", "RFC7946").put("rawSnapshotUnchanged", true);
-                        append("vectors", stableKey("layer", name), name, filename, parsedCrs, geometry.get("extent"), metadata);
                     } finally { layer.delete(); }
                 }
             } finally { source.delete(); }
-            if (result.path("vectors").isEmpty()) throw failure("EMPTY_GEOMETRY", "数据源不包含非空空间图层");
-        }
-
-        /** 未知计数的 GPX 等空层不应使有效图层失败；只流式检查临时输出数组的首个元素。 */
-        private boolean hasFeatures(Path output) throws IOException {
-            try (var parser = json.createParser(output.toFile())) {
-                if (parser.nextToken() != JsonToken.START_OBJECT) throw failure("INVALID_NATIVE_METADATA", "标准矢量输出不是对象");
-                while (parser.nextToken() != JsonToken.END_OBJECT) {
-                    if (parser.currentToken() != JsonToken.PROPERTY_NAME) throw failure("INVALID_NATIVE_METADATA", "标准矢量输出结构无效");
-                    String name = parser.currentName();
-                    JsonToken token = parser.nextToken();
-                    if (name.equals("features")) {
-                        if (token != JsonToken.START_ARRAY) throw failure("INVALID_NATIVE_METADATA", "标准矢量输出缺少要素数组");
-                        JsonToken first = parser.nextToken();
-                        if (first == JsonToken.END_ARRAY) return false;
-                        if (first == JsonToken.START_OBJECT) return true;
-                        throw failure("INVALID_NATIVE_METADATA", "标准矢量输出的要素结构无效");
-                    }
-                    parser.skipChildren();
-                }
-            }
-            throw failure("INVALID_NATIVE_METADATA", "标准矢量输出缺少要素数组");
+            if (result.path("vectors").isEmpty()) throw failure("EMPTY_DATASET", "数据源不包含可读取集合");
         }
 
         /** 只查询驱动可直接提供的统计，未知值不强制遍历源要素。 */
@@ -1022,45 +1082,276 @@ public class GdalDatasetReader {
             }
         }
 
-        private void raster(Path input, String sourceName, JsonNode options, List<String> drivers) throws Exception {
+        /** 一份容器可产生多个栅格集合；集合键与原始子数据集编号绑定。 */
+        private void raster(Path input, String sourceName, JsonNode options, List<String> drivers,
+                            GisProcessingParameters parameters) throws Exception {
             outputDriver("GTiff");
             Dataset source = open(input, false, drivers, new Vector<>());
             try {
-                InfoOptions infoOptions = new InfoOptions(new Vector<>(List.of("-json")));
-                JsonNode info;
-                try { info = json.readTree(gdal.GDALInfo(source, infoOptions)); }
-                finally { infoOptions.delete(); }
-                String explicit = explicitCrs(options);
-                String sourceCrs = explicit != null ? explicit : text(info.path("coordinateSystem").path("wkt"));
-                if (sourceCrs == null) throw failure("MISSING_CRS", "栅格缺少源坐标系，须提供投影配套文件或 sourceCrs");
-                // GetGeoTransform 的失败默认值也可为单位矩阵；以 GDALInfo 的真实字段判断定位是否存在。
+                JsonNode info = rasterInfo(source);
+                boolean found = false;
+                JsonNode subdatasets = info.path("metadata").path("SUBDATASETS");
+                boolean hasSubdatasets = subdatasets.propertyNames().stream().anyMatch(field -> field.matches("SUBDATASET_[1-9][0-9]*_NAME"));
+                if (source.GetRasterCount() > 0 && !hasSubdatasets) {
+                    rasterDataset(source, info, "default", sourceName, options, parameters);
+                    found = true;
+                }
+                for (String field : subdatasets.propertyNames()) {
+                    if (!field.matches("SUBDATASET_[1-9][0-9]*_NAME")) continue;
+                    String name = subdatasets.path(field).asText();
+                    // 只能打开当前受控入口内部的子数据集，禁止外部数据源和虚拟网络路径。
+                    if (!name.contains(input.toString()) || name.contains("/vsi") || name.contains("://"))
+                        throw failure("INVALID_MEMBER_PATH", "子数据集引用超出受控来源");
+                    Dataset subset = gdal.OpenEx(name, gdalconstConstants.OF_READONLY | gdalconstConstants.OF_RASTER,
+                            new Vector<>(drivers), new Vector<>());
+                    if (subset == null) throw failure("NATIVE_READ_FAILED", "子数据集无法读取: " + field);
+                    try {
+                        String key = "subdataset:" + field.substring(11, field.length() - 5);
+                        rasterDataset(subset, rasterInfo(subset), key, sourceName + " / " + key, options, parameters);
+                        found = true;
+                    } finally { subset.delete(); }
+                }
+                if (!found) throw failure("EMPTY_RASTER", "数据源没有栅格集合");
+                if (result.path("rasters").isEmpty()) throw failure("INPUT_OPTIONS_REQUIRED", "选定的栅格集合不存在");
+            } finally { source.delete(); }
+        }
+
+        private JsonNode rasterInfo(Dataset source) {
+            InfoOptions options = new InfoOptions(new Vector<>(List.of("-json", "-mdd", "all")));
+            try { return json.readTree(gdal.GDALInfo(source, options)); }
+            finally { options.delete(); }
+        }
+
+        /** 来源数值保留在原始文件；标准化过程和业务派生规则随元数据记录。 */
+        private void rasterDataset(Dataset source, JsonNode info, String key, String sourceName, JsonNode options,
+                                   GisProcessingParameters parameters) throws Exception {
+            if (parameters != null && parameters.raster() != null && parameters.raster().layerKeys() != null
+                    && !parameters.raster().layerKeys().contains(key)) return;
+            String explicit = explicitCrs(options);
+            String sourceCrs = explicit != null ? explicit : text(info.path("coordinateSystem").path("wkt"));
+            boolean affine = info.path("geoTransform").isArray() && info.path("geoTransform").size() == 6;
+            boolean gcps = info.path("gcps").path("gcpList").isArray() && !info.path("gcps").path("gcpList").isEmpty();
+            boolean rpc = !info.path("metadata").path("RPC").isEmpty();
+            if (sourceCrs == null && gcps) sourceCrs = text(info.path("gcps").path("coordinateSystem").path("wkt"));
+            if (sourceCrs == null && rpc) sourceCrs = "EPSG:4326";
+            if (sourceCrs == null) throw failure("MISSING_CRS", "栅格缺少源坐标系，请补充 sourceCrs");
+            if (!affine && !gcps && !rpc) throw failure("MISSING_GEOLOCATION", "栅格缺少仿射、GCP或RPC定位信息");
+            if (affine) {
                 JsonNode transform = info.path("geoTransform");
-                if (!transform.isArray() || transform.size() != 6) throw failure("MISSING_GEOLOCATION", "栅格没有仿射定位，须提供地理参考配套文件");
                 for (JsonNode coefficient : transform)
-                    if (!coefficient.isNumber() || !Double.isFinite(coefficient.asDouble())) throw failure("INVALID_GEOLOCATION", "栅格仿射定位包含无效数值");
-                double determinant = transform.get(1).asDouble() * transform.get(5).asDouble() - transform.get(2).asDouble() * transform.get(4).asDouble();
-                if (!Double.isFinite(determinant) || determinant == 0) throw failure("INVALID_GEOLOCATION", "栅格仿射定位不可逆");
-                if (!info.path("bands").isArray() || info.path("bands").isEmpty()) throw failure("EMPTY_RASTER", "栅格没有可读取波段");
+                    if (!coefficient.isNumber() || !Double.isFinite(coefficient.asDouble()))
+                        throw failure("INVALID_GEOLOCATION", "栅格定位包含无效数值");
+                double determinant = transform.get(1).asDouble() * transform.get(5).asDouble()
+                        - transform.get(2).asDouble() * transform.get(4).asDouble();
+                if (!Double.isFinite(determinant) || determinant == 0)
+                    throw failure("INVALID_GEOLOCATION", "栅格仿射定位不可逆");
+            }
+            if (source.GetRasterCount() == 0) throw failure("EMPTY_RASTER", "集合没有可读取波段");
+            RasterPlan plan = parameters == null ? null : planRaster(info, parameters);
+            String filename = "raster-" + result.path("rasters").size() + ".tif";
+            Path output = directory.resolve(filename);
+            Vector<String> select = new Vector<>(List.of("-of", "VRT"));
+            if (explicit != null) select.addAll(List.of("-a_srs", sourceCrs));
+            if (plan != null) {
+                // 派生数值可合法等于源NoData；有效性在数值变换前独立保存。
+                select.addAll(List.of("-a_nodata", "none"));
+                for (int band : plan.bands()) select.addAll(List.of("-b", Integer.toString(band)));
+                if (plan.palette()) select.addAll(List.of("-expand", "rgba"));
+                if ("IMAGERY".equals(plan.purpose())) {
+                    select.addAll(List.of("-ot", "Byte"));
+                    if (!plan.palette()) {
+                        for (int index = 1; index <= plan.bands().size(); index++) {
+                            boolean alpha = index == plan.bands().size() && (index == 2 || index == 4);
+                            if (alpha) {
+                                // 透明度按GDAL的满量程约定转换，不能套用颜色亮度范围。
+                                JsonNode band = info.path("bands").get(plan.bands().get(index - 1) - 1);
+                                int bits = band.path("metadata").path("IMAGE_STRUCTURE").path("NBITS").asInt(0);
+                                double maximum = bits > 0 && bits <= 64 ? Math.scalb(1d, bits) - 1
+                                        : switch (band.path("type").asText()) {
+                                            case "UInt16" -> 65535;
+                                            case "Int16" -> 32767;
+                                            default -> 255;
+                                        };
+                                select.addAll(List.of("-scale_" + index, "0", Double.toString(maximum), "0", "255"));
+                            } else if (plan.displayRange() != null) {
+                                select.addAll(List.of("-scale_" + index, plan.displayRange().get(0).toString(),
+                                        plan.displayRange().get(1).toString(), "0", "255", "-exponent_" + index, "1"));
+                            }
+                        }
+                    }
+                    if (!plan.palette()) select.addAll(List.of("-colorinterp", switch (plan.bands().size()) {
+                        case 1 -> "gray";
+                        case 2 -> "gray,alpha";
+                        case 3 -> "red,green,blue";
+                        default -> "red,green,blue,alpha";
+                    }));
+                } else {
+                    select.addAll(List.of("-ot", "Float32", "-scale", "0", "1", Double.toString(plan.elevationOffset()),
+                            Double.toString(plan.elevationOffset() + plan.elevationScale())));
+                }
+            }
+            TranslateOptions selection = new TranslateOptions(select);
+            Dataset selected = null;
+            try {
+                selected = gdal.Translate(directory.resolve(filename + ".vrt").toString(), source, selection);
+                if (selected == null) throw failure("EMPTY_NATIVE_OUTPUT", "无法准备标准栅格波段");
+                if (plan != null) {
+                    Path validityPath = directory.resolve(filename + ".validity.tif");
+                    writeFootprintProxy(source, validityPath, plan.bands());
+                    if (selected.CreateMaskBand(gdalconstConstants.GMF_PER_DATASET) != gdalconstConstants.CE_None)
+                        throw failure("NATIVE_READ_FAILED", "无法创建处理输入有效性掩膜");
+                    var firstBand = selected.GetRasterBand(1);
+                    var mask = firstBand.GetMaskBand();
+                    try {
+                        // VRT只描述来源，固定文件名不包含外部输入；不向虚拟波段写入像元。
+                        String maskSource = "<SimpleSource><SourceFilename relativeToVRT=\"1\">"
+                                + filename + ".validity.tif</SourceFilename><SourceBand>1</SourceBand></SimpleSource>";
+                        if (mask.SetMetadataItem("source_0", maskSource, "new_vrt_sources") != gdalconstConstants.CE_None)
+                            throw failure("NATIVE_READ_FAILED", "无法关联处理输入有效性掩膜");
+                    } finally { mask.delete(); firstBand.delete(); }
+                }
                 Vector<String> arguments = new Vector<>(List.of("-of", "GTiff", "-co", "TILED=YES",
-                        "-co", "BLOCKXSIZE=256", "-co", "BLOCKYSIZE=256", "-co", "BIGTIFF=IF_SAFER",
-                        "-co", "COPY_SRC_MDD=YES", "-mask", "auto"));
-                if (explicit != null) arguments.addAll(List.of("-a_srs", sourceCrs));
-                progress.accept(ProgressStage.indeterminate("NATIVE_RASTER_CONVERSION", "Java GDAL 读取原始波段、无效值与掩膜"));
-                TranslateOptions translate = new TranslateOptions(arguments);
-                ProgressCallback callback = callback("NATIVE_RASTER_CONVERSION", "转换栅格波段");
-                Path output = directory.resolve("raster.tif");
+                        "-co", "BLOCKXSIZE=256", "-co", "BLOCKYSIZE=256", "-co", "BIGTIFF=IF_SAFER"));
+                boolean warp = plan != null || !affine;
+                String target = plan == null ? "EPSG:4326" : plan.targetCrs();
+                String algorithm = plan == null ? "near" : plan.resampling();
+                ProgressCallback callback = callback("NATIVE_RASTER_CONVERSION", "标准化栅格集合: " + sourceName);
                 Dataset converted = null;
                 try {
-                    converted = gdal.Translate(output.toString(), source, translate, callback);
-                    if (converted == null) throw failure("EMPTY_NATIVE_OUTPUT", "GDAL 没有生成标准栅格数据");
-                    if (converted.Close() != gdalconstConstants.CE_None) throw failure("NATIVE_READ_FAILED", "GDAL 栅格输出关闭失败");
+                    if (warp) {
+                        arguments.addAll(List.of("-t_srs", target, "-r", algorithm, "-et", "0", "-wm", "64"));
+                        if (!affine && rpc) arguments.add("-rpc");
+                        else if (!affine && gcps) arguments.add("-tps");
+                        else arguments.addAll(List.of("-s_srs", sourceCrs));
+                        if (affine && plan != null) {
+                            SpatialReference reference = new SpatialReference();
+                            try {
+                                reference.SetFromUserInput(sourceCrs);
+                                if (reference.IsGeographic() == 1) {
+                                    double[] transform = source.GetGeoTransform();
+                                    double west = transform[0];
+                                    double east = west + source.GetRasterXSize() * transform[1];
+                                    if (transform[2] == 0 && transform[4] == 0 && west >= 0 && east > 180) {
+                                        double south = transform[3] + source.GetRasterYSize() * transform[5];
+                                        double north = transform[3];
+                                        double latitude = "EPSG:3857".equals(target) ? 85.0511287798066 : 90;
+                                        arguments.addAll(List.of("-te_srs", sourceCrs, "-te", "-180",
+                                                Double.toString(Math.max(-latitude, south)), "180",
+                                                Double.toString(Math.min(latitude, north))));
+                                    }
+                                }
+                            } finally { reference.delete(); }
+                        }
+                        if (plan != null && "IMAGERY".equals(plan.purpose())) arguments.add("-dstalpha");
+                        if (plan != null && "TERRAIN".equals(plan.purpose())) arguments.addAll(List.of("-dstnodata", "nan"));
+                        WarpOptions warping = new WarpOptions(arguments);
+                        try { converted = gdal.Warp(output.toString(), new Dataset[]{selected}, warping, callback); }
+                        finally { warping.delete(); }
+                    } else {
+                        arguments.addAll(List.of("-co", "COPY_SRC_MDD=YES", "-mask", "auto"));
+                        TranslateOptions translation = new TranslateOptions(arguments);
+                        try { converted = gdal.Translate(output.toString(), selected, translation, callback); }
+                        finally { translation.delete(); }
+                    }
+                    if (converted == null) throw failure("EMPTY_NATIVE_OUTPUT", "GDAL 没有生成标准栅格");
+                    if (plan != null) {
+                        for (int index = 1; index <= converted.GetRasterCount(); index++) {
+                            var band = converted.GetRasterBand(index);
+                            try {
+                                band.SetScale(1); band.SetOffset(0);
+                                band.SetUnitType("TERRAIN".equals(plan.purpose()) ? "m" : "");
+                            } finally { band.delete(); }
+                        }
+                    }
+                    ObjectNode metadata = json.createObjectNode();
+                    metadata.set("sourceDataset", info); metadata.set("readOptions", options);
+                    metadata.set("normalizedDataset", rasterInfo(converted));
+                    if (plan == null && metadata.path("normalizedDataset").path("bands").valueStream().anyMatch(band ->
+                            !Set.of("Byte", "UInt16", "Int16", "UInt32", "Int32", "Float32", "Float64")
+                                    .contains(band.path("type").asText()))) {
+                        String footprintFile = filename + ".footprint.tif";
+                        writeFootprintProxy(converted, directory.resolve(footprintFile), null);
+                        metadata.put("footprintFile", footprintFile);
+                    }
+                    ObjectNode normalization = metadata.putObject("normalization");
+                    normalization.put("resampled", warp).put("resampling", warp ? algorithm : "NONE")
+                            .put("coordinateErrorThresholdPixels", 0).put("rawSourceUnchanged", true);
+                    if (plan != null) metadata.set("processingPlan", json.valueToTree(plan));
+                    if (converted.Close() != gdalconstConstants.CE_None) throw failure("NATIVE_READ_FAILED", "标准栅格关闭失败");
+                    requireOutput(output);
+                    append("rasters", key, sourceName, filename, geotoolsCrs(sourceCrs), info.get("cornerCoordinates"), metadata);
                 } finally {
-                    if (converted != null) converted.delete(); callback.delete(); translate.delete();
+                    if (converted != null) converted.delete();
+                    callback.delete();
                 }
-                requireOutput(output);
-                ObjectNode metadata = json.createObjectNode(); metadata.set("sourceDataset", info); metadata.set("readOptions", options);
-                append("rasters", "default", sourceName, "raster.tif", geotoolsCrs(sourceCrs), info.get("cornerCoordinates"), metadata);
-            } finally { source.delete(); }
+            } finally {
+                if (selected != null) selected.delete();
+                selection.delete();
+            }
+        }
+
+        /** 原生按所选波段固定有效性，供轮廓提取和处理转换复用，原始数值不降精度。 */
+        private void writeFootprintProxy(Dataset source, Path path, List<Integer> selectedBands) {
+            int width = source.GetRasterXSize(), height = source.GetRasterYSize();
+            var driver = gdal.GetDriverByName("GTiff");
+            Dataset proxy;
+            try {
+                proxy = driver.Create(path.toString(), width, height, 1, gdalconstConstants.GDT_Byte,
+                        new String[]{"TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256", "BIGTIFF=IF_SAFER"});
+            } finally { driver.delete(); }
+            if (proxy == null) throw failure("EMPTY_NATIVE_OUTPUT", "无法创建有效性代理");
+            try {
+                proxy.SetProjection(source.GetProjection()); proxy.SetGeoTransform(source.GetGeoTransform());
+                var output = proxy.GetRasterBand(1);
+                try {
+                    output.SetNoDataValue(0);
+                    for (int y = 0; y < height; y += 256) {
+                        for (int x = 0; x < width; x += 256) {
+                            int columns = Math.min(256, width - x), rows = Math.min(256, height - y);
+                            byte[] valid = new byte[columns * rows];
+                            for (int index = 1; index <= source.GetRasterCount(); index++) {
+                                if (selectedBands != null && !selectedBands.contains(index)) continue;
+                                var band = source.GetRasterBand(index);
+                                var mask = band.GetMaskBand();
+                                try {
+                                    if (band.GetColorInterpretation() == gdalconstConstants.GCI_AlphaBand) continue;
+                                    byte[] values = new byte[valid.length];
+                                    if (mask.ReadRaster(x, y, columns, rows, values) != gdalconstConstants.CE_None)
+                                        throw failure("NATIVE_READ_FAILED", "有效性掩膜读取失败");
+                                    String type = gdal.GetDataTypeName(band.GetRasterDataType());
+                                    boolean complex = type.startsWith("C");
+                                    double[] numbers = type.contains("Float") ? new double[valid.length * (complex ? 2 : 1)] : null;
+                                    if (numbers != null && band.ReadRaster(x, y, columns, rows, columns, rows,
+                                            complex ? gdalconstConstants.GDT_CFloat64 : gdalconstConstants.GDT_Float64, numbers) != gdalconstConstants.CE_None)
+                                        throw failure("NATIVE_READ_FAILED", "特殊波段数值读取失败");
+                                    for (int pixel = 0; pixel < valid.length; pixel++) {
+                                        if (values[pixel] == 0) continue;
+                                        int component = pixel * (complex ? 2 : 1);
+                                        if (numbers == null || Double.isFinite(numbers[component])
+                                                && (!complex || Double.isFinite(numbers[component + 1]))) valid[pixel] = 1;
+                                    }
+                                } finally { mask.delete(); band.delete(); }
+                            }
+                            for (int index = 1; index <= source.GetRasterCount(); index++) {
+                                var band = source.GetRasterBand(index);
+                                try {
+                                    if (band.GetColorInterpretation() != gdalconstConstants.GCI_AlphaBand) continue;
+                                    double[] alpha = new double[valid.length];
+                                    if (band.ReadRaster(x, y, columns, rows, alpha) != gdalconstConstants.CE_None)
+                                        throw failure("NATIVE_READ_FAILED", "透明度读取失败");
+                                    for (int pixel = 0; pixel < valid.length; pixel++)
+                                        if (!Double.isFinite(alpha[pixel]) || alpha[pixel] <= 0) valid[pixel] = 0;
+                                } finally { band.delete(); }
+                            }
+                            if (output.WriteRaster(x, y, columns, rows, valid) != gdalconstConstants.CE_None)
+                                throw failure("NATIVE_READ_FAILED", "有效性代理写入失败");
+                        }
+                        progress.accept(ProgressStage.determinate("RASTER_VALIDITY", "扫描特殊波段有效像元",
+                                Math.min(height, y + 256), height, ProgressUnit.OPERATION));
+                    }
+                } finally { output.delete(); }
+                if (proxy.Close() != gdalconstConstants.CE_None) throw failure("NATIVE_READ_FAILED", "有效性代理关闭失败");
+            } finally { proxy.delete(); }
         }
 
         private ProgressCallback callback(String code, String message) {

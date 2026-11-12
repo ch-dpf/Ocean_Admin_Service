@@ -6,6 +6,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.listener.ChannelTopic;
 import lombok.extern.slf4j.Slf4j;
+import org.ocean.admin.gis.progress.ProgressSnapshot;
 import org.ocean.admin.kernel.realtime.EventMessage;
 import org.ocean.admin.kernel.realtime.RealtimeEventPublisher;
 import org.springframework.beans.factory.annotation.Value;
@@ -162,7 +163,11 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
         if (stopped.get()) return;
         try {
             EventMessage<?> message = objectMapper.readValue(json, EventMessage.class);
-            Frame frame = new Frame(json, json.getBytes(StandardCharsets.UTF_8).length + 64L, false);
+            ProgressSnapshot.Revision revision = null;
+            if (Set.of("gis.progress.created", "gis.progress.updated", "gis.progress.finished").contains(message.type()))
+                revision = objectMapper.convertValue(message.data(), ProgressSnapshot.class).revision();
+            Frame frame = new Frame(json, json.getBytes(StandardCharsets.UTF_8).length + 64L, false,
+                    message.type(), message.source(), message.subject(), revision);
             for (Connection connection : connections.values())
                 if (connection.accepts(message.type())) connection.offer(frame);
         } catch (RuntimeException ex) { log.warn("GIS实时消息接收失败", ex); }
@@ -209,8 +214,11 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
         connections.clear();
     }
 
-    private record Frame(String data, long bytes, boolean opening) {
-        static Frame comment(String text, boolean opening) { return new Frame(text, 64, opening); }
+    private record Frame(String data, long bytes, boolean opening, String type, String source, String subject,
+                         ProgressSnapshot.Revision revision) {
+        static Frame comment(String text, boolean opening) {
+            return new Frame(text, 64, opening, null, null, null, null);
+        }
     }
 
     private final class Connection {
@@ -265,6 +273,26 @@ public class GisRealtimeSsePublisher implements RealtimeEventPublisher {
             boolean schedule = false;
             synchronized (this) {
                 if (closed.get()) return;
+                if (frame.revision != null) {
+                    // 完整快照允许合并未发送的中间更新；创建、结束及其他业务事件仍保留。
+                    for (Frame queued : pending) {
+                        if (queued.revision == null || !frame.source.equals(queued.source)
+                                || !frame.subject.equals(queued.subject)) continue;
+                        if (queued.revision.epoch() > frame.revision.epoch()
+                                || (queued.revision.epoch() == frame.revision.epoch()
+                                    && queued.revision.sequence() >= frame.revision.sequence())) return;
+                    }
+                    var iterator = pending.iterator();
+                    while (iterator.hasNext()) {
+                        Frame queued = iterator.next();
+                        if ("gis.progress.updated".equals(queued.type) && frame.source.equals(queued.source)
+                                && frame.subject.equals(queued.subject)) {
+                            iterator.remove();
+                            pendingCount--;
+                            pendingBytes -= queued.bytes;
+                        }
+                    }
+                }
                 overflow = pendingCount >= maxPendingMessages || frame.bytes > maxPendingBytes - pendingBytes;
                 if (!overflow) {
                     pending.addLast(frame);

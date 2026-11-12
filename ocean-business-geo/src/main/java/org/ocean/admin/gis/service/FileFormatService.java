@@ -29,7 +29,7 @@ public class FileFormatService {
     private final AtomicBoolean refreshing = new AtomicBoolean();
     private volatile Map<GisFileFormat, GdalDatasetReader.DriverCapability> capabilities = Map.of();
 
-    /** 原生环境只在受限工作进程中检查，失败时明确关闭接收并定期恢复探测。 */
+    /** 原生环境只在受限工作进程中检查；能力影响解析，不影响原始文件接收。 */
     @PostConstruct
     public synchronized void refreshCapabilities() {
         try {
@@ -40,7 +40,7 @@ public class FileFormatService {
             for (GisFileFormat format : GisFileFormat.values())
                 failed.put(format, new GdalDatasetReader.DriverCapability(false, reason));
             capabilities = Map.copyOf(failed);
-            log.warn("文件格式能力探测失败，暂停接收空间文件", ex);
+            log.warn("文件格式能力探测失败，已接收文件等待读取环境恢复", ex);
         }
     }
 
@@ -74,17 +74,12 @@ public class FileFormatService {
                 }).toList();
     }
 
-    /** 返回拒绝原因；null 表示主文件或配套文件属于当前可解析格式。 */
+    /** 返回接收拒绝原因；驱动和配置是否就绪由文件组的解析状态单独表达。 */
     public String checkAcceptance(Long categoryId, String fileName) {
-        String reason = "当前数据集不支持接收此格式：" + fileName;
-        var snapshot = capabilities;
         for (GisFileFormat format : GisFileFormat.values()) {
-            if (!format.supportsCategory(categoryId) || !format.acceptsMember(fileName)) continue;
-            var runtime = snapshot.get(format);
-            if (runtime != null && runtime.available()) return null;
-            reason = runtime == null ? "格式能力尚未就绪，请稍后重试。" : runtime.reason();
+            if (format.supportsCategory(categoryId) && format.acceptsMember(fileName)) return null;
         }
-        return reason;
+        return "当前数据集不支持接收此格式：" + fileName;
     }
 
     public String availabilityError(GisFileFormat format) {
@@ -112,6 +107,10 @@ public class FileFormatService {
         if (crs.matches("(?i)EPSG:[1-9][0-9]*")) epsg.validateCode(crs);
         String x = options.path("xField").asText("").trim();
         String y = options.path("yField").asText("").trim();
+        if (requireComplete && format == GisFileFormat.CSV && (x.isEmpty() != y.isEmpty()))
+            return "CSV坐标列须同时提供X、Y字段";
+        if (requireComplete && format == GisFileFormat.CSV && !x.isEmpty() && crs.isEmpty())
+            return "CSV坐标列须明确源坐标系";
         if (!x.isEmpty() && x.equals(y)) return "X、Y字段必须不同";
         return null;
     }

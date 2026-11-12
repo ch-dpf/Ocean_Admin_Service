@@ -221,6 +221,13 @@ public class PublicationService {
         Map<String, String> capabilitiesUrls = readStringMap(publication.getCapabilitiesUrlsJson());
         Map<String, String> serviceUrls = readStringMap(publication.getServiceUrlsJson());
         Map<String, String> tileUrlTemplates = readStringMap(publication.getTileUrlTemplatesJson());
+        List<Double> bounds = readDoubleList(publication.getBoundsWgs84Json());
+        TileMatrixSetDefinition matrixSet = TileMatrixSetDefinition.resolve(publication.getTileMatrixSet());
+        if (matrixSet != null && bounds.size() == 4) {
+            double[] normalized = matrixSet.normalizeWgs84Bounds(new double[]{
+                    bounds.get(0), bounds.get(1), bounds.get(2), bounds.get(3)});
+            bounds = List.of(normalized[0], normalized[1], normalized[2], normalized[3]);
+        }
         GisTileSet tileSet = publication.getTileSetId() == null ? null
                 : tileSetMapper.selectById(publication.getTileSetId());
         GisDataSet dataSet = publication.getDataSetId() == null ? null
@@ -237,7 +244,7 @@ public class PublicationService {
                 .serviceProtocol(protocol)
                 .protocols(protocol == null ? List.of() : List.of(protocol))
                 .processingType(processingType(publication.getProcessingType()))
-                .boundsWgs84(readDoubleList(publication.getBoundsWgs84Json()))
+                .boundsWgs84(bounds)
                 .styleId(publication.getStyleId())
                 .styleName(publication.getStyleName())
                 .capabilitiesUrls(capabilitiesUrls)

@@ -47,14 +47,14 @@ public class ProgressSnapshotProvider {
                     .eq(GisTileSetArchive::getArchiveNo, id));
             if (r == null) return null;
             long epoch = Math.max(1, r.getProgressEpoch());
-            boolean known = r.getTotalFileCount() > 0;
+            boolean completed = r.getArchiveStatus() == TaskStatus.COMPLETED;
             return snapshot(id, null, "GIS_TILE_SET_ARCHIVE", null, r.getArchiveName(), r.getArchiveStatus(),
-                    r.getCurrentStage(), new ProgressSummary(1, r.getArchiveStatus() == TaskStatus.COMPLETED ? 1 : 0,
+                    r.getArchiveStatus().name(), new ProgressSummary(1, completed ? 1 : 0,
                             r.getArchiveStatus() == TaskStatus.FAILED ? 1 : 0, ProgressUnit.FILE),
-                    List.of(new Metric("PACKED_FILES", "已打包文件", r.getProcessedFileCount(),
-                                    known ? r.getTotalFileCount() : null, ProgressUnit.FILE),
+                    completed ? List.of(new Metric("PACKED_FILES", "已打包文件", r.getProcessedFileCount(),
+                                    r.getTotalFileCount(), ProgressUnit.FILE),
                             new Metric("PACKED_BYTES", "已打包源字节", r.getProcessedBytes(),
-                                    known ? r.getTotalBytes() : null, ProgressUnit.BYTE)),
+                                    r.getTotalBytes(), ProgressUnit.BYTE)) : List.of(),
                     new Resource("TILE_SET_ARCHIVE", id, "/api/gis/tile-set-archives/" + id),
                     r.getErrorMessage(), r.getStartTime(), r.getFinishTime(), epoch);
         }

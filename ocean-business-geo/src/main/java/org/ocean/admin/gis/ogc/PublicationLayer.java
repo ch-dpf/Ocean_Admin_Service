@@ -27,6 +27,9 @@ public final class PublicationLayer {
             String taskGpkgPath,
             JsonNode taskDefinition,
             JsonNode taskScheme) {
+        public RasterLayer {
+            wgs84Bounds = matrixSet.normalizeWgs84Bounds(wgs84Bounds);
+        }
     }
 
     /** 动态矢量发布记录对应的冻结 GPKG 图层。 */
@@ -88,6 +91,9 @@ public final class PublicationLayer {
             List<StyleOption> styles,
             String defaultStyleId,
             String releaseVersion) {
+        public VectorLayerView {
+            wgs84Bounds = matrixSet.normalizeWgs84Bounds(wgs84Bounds);
+        }
     }
 
     /** 能力文档列出的一套可切换样式。 */
@@ -103,5 +109,8 @@ public final class PublicationLayer {
             int minZoom,
             int maxZoom,
             double[] wgs84Bounds) {
+        public TileArtifact {
+            wgs84Bounds = matrixSet.normalizeWgs84Bounds(wgs84Bounds);
+        }
     }
 }

@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 /** 组详情携带物理成员，解析配置仅作用于该逻辑数据源。 */
 public record GisFileGroupVO(Group group, Long effectiveGroupId, List<GisFileMeta> members) {
-    /** 后端统一维护的格式能力，运行环境不可用时禁止新接收。 */
+    /** 后端统一维护的格式目录与读取能力；运行环境不可用时保留接收、阻塞解析。 */
     public record FormatCapability(String format, List<Integer> categoryIds,
             List<String> entryExtensions, List<String> requiredExtensions, List<String> optionalExtensions,
             boolean available, String unavailableReason,
