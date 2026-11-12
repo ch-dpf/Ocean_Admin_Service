@@ -50,7 +50,7 @@ GeoJSON 文件顶层受支持的旧式 WGS84 命名 CRS 通过共用规则校验
 
 文件登记时固定 `vector_placement`（AUTO 或 UNKNOWN）和 `vector_dataset_style_id`，通过复合外键限制快照属于同一数据集。逐要素匹配分类；GeometryCollection 按递归分量拆分，MultiPoint、MultiLineString、MultiPolygon 保持整体。一个文件组按来源图层、初始分类业务键与几何类别生成多个业务图层，`(source_file_id,layer_key)` 唯一。`source_feature_index`、`source_geometry_path`、`source_feature_id`、`classification_rule_key` 保存来源引用；原始 properties 不被归一化结果覆盖。分批写入的数据仅在文件组整体提取完成、所有图层切为 READY 后可查询和编辑；失败时清理未完成图层及其要素。成功图层不重复导入。
 
-拓扑质量检查保存于 `gis_file_spatial_metadata.extra_metadata.vectorImport.geometryQuality`：`invalidGeometries` 统计无效几何分量，`issues` 最多保留20条来源集合、零起始要素下标、几何路径、原因及WGS84问题位置。GeometryCollection 的多个问题分量分别计数。文件组列表与详情从当前已完成解析元数据读取该摘要，不增加数据表或修复数据文件。拓扑问题不会阻止文件导入，原始快照及工作要素不自动修复；仅现有显示缓存和渲染过程整理几何。结构损坏、无效坐标和在线编辑的几何有效性校验仍会阻止相关操作。
+非阻断的拓扑质量问题仅记录后端日志，不再写入 `gis_file_spatial_metadata.extra_metadata.vectorImport`。日志包含无效几何分量总数及最多20条来源集合、零起始要素下标、几何路径、原因和WGS84问题位置；GeometryCollection 的多个问题分量分别计数。文件组列表与详情不读取几何质量摘要，已有元数据中的摘要不影响“解析完成”的展示、筛选和统计，无需修改表结构或重导数据。拓扑问题不会阻止文件导入，原始快照及工作要素不自动修复；仅现有显示缓存和渲染过程整理几何。结构损坏、无效坐标和在线编辑的几何有效性校验仍会阻止相关操作。
 
 要素更新通过 version 校验，服务层在图层行锁内执行修改，同事务重算数量、范围和几何类型并递增 data_version。最后一个要素删除后范围为空。图层逻辑删除后所有要素退出查询并解除来源文件引用；未删除图层会阻止来源文件删除或变更。
 

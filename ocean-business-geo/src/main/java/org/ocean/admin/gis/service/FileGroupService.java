@@ -97,7 +97,6 @@ public class FileGroupService {
     @Transactional(readOnly = true)
     public GisFileGroupVO detail(Long id) {
         GisFileGroup group = getRequired(id);
-        attachGeometryQuality(List.of(group));
         return new GisFileGroupVO(GisFileGroupVO.Group.from(group), group.getDuplicateOfGroupId() == null ? id : group.getDuplicateOfGroupId(), members(id));
     }
 
@@ -117,20 +116,7 @@ public class FileGroupService {
                 .ne(!Boolean.TRUE.equals(query.includeDuplicates()), GisFileGroup::getAssemblyStatus, "DUPLICATE")
                 .orderByDesc(GisFileGroup::getCreateTime).orderByDesc(GisFileGroup::getId);
         Page<GisFileGroup> page = groups.selectPage(new Page<>(current, size), where);
-        attachGeometryQuality(page.getRecords());
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords().stream().map(GisFileGroupVO.Group::from).toList());
-    }
-
-    private void attachGeometryQuality(List<GisFileGroup> records) {
-        Map<Long, GisFileGroup> completed = new LinkedHashMap<>();
-        for (var group : records) {
-            if ("COMPLETED".equals(group.getParseStatus()) && group.getEntryFileId() != null
-                    && !"DUPLICATE".equals(group.getAssemblyStatus())) completed.put(group.getEntryFileId(), group);
-        }
-        if (completed.isEmpty()) return;
-        for (var result : groups.geometryQuality(List.copyOf(completed.keySet()))) {
-            completed.get(result.fileMetaId()).setGeometryQuality(json.readTree(result.qualityJson()));
-        }
     }
 
     public void updateOptions(Long id, GisFileGroupVO.Options options) {

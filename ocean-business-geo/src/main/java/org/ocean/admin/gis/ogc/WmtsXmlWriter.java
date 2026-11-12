@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * WMTS 1.0.0 能力文档与 OGC 异常报告的 XML 输出。
  *
- * <p>元素命名空间与出现顺序遵循 OGC 08-068r2 的 wmtsGetCapabilities_response.xsd：
+ * <p>元素命名空间与出现顺序遵循 OGC 07-057r7 的 wmtsGetCapabilities_response.xsd：
  * 图层与矩阵集元素属于 WMTS 命名空间，通用描述元素属于 OWS 命名空间。</p>
  */
 public final class WmtsXmlWriter {
@@ -205,16 +205,16 @@ public final class WmtsXmlWriter {
     }
 
     /**
-     * 图层元素顺序遵循 LayerType：ows:Title、ows:Identifier、ows:WGS84BoundingBox、
-     * Style、Format、TileMatrixSetLink、ResourceURL。
+     * 图层先输出 OWS 描述与范围，再输出标识及 WMTS 专用元素：ows:Title、ows:Abstract、
+     * ows:WGS84BoundingBox、ows:Identifier、Style、Format、TileMatrixSetLink、ResourceURL。
      */
     private static void writeLayer(XMLStreamWriter writer, String baseUrl,
             PublicationLayer.RasterLayer layer) throws XMLStreamException {
         writer.writeStartElement("", "Layer", NAMESPACE);
         writeOwsText(writer, "Title", layer.serviceName());
-        writeOwsText(writer, "Identifier", layer.serviceCode());
         writeOwsText(writer, "Abstract", "已发布 OGC 服务: " + layer.serviceCode());
         writeBoundingBox(writer, layer);
+        writeOwsText(writer, "Identifier", layer.serviceCode());
 
         writer.writeStartElement("", "Style", NAMESPACE);
         writer.writeAttribute("isDefault", "true");
@@ -258,7 +258,6 @@ public final class WmtsXmlWriter {
         PublicationLayer.VectorLayerView first = views.getFirst();
         writer.writeStartElement("", "Layer", NAMESPACE);
         writeOwsText(writer, "Title", first.serviceName());
-        writeOwsText(writer, "Identifier", identifier);
         writeOwsText(writer, "Abstract", "已发布 OGC 服务: " + identifier);
         writer.writeStartElement("ows", "WGS84BoundingBox", OWS_NAMESPACE);
         writeOwsText(writer, "LowerCorner",
@@ -266,12 +265,13 @@ public final class WmtsXmlWriter {
         writeOwsText(writer, "UpperCorner",
                 first.wgs84Bounds()[2] + " " + first.wgs84Bounds()[3]);
         writer.writeEndElement();
+        writeOwsText(writer, "Identifier", identifier);
         for (PublicationLayer.StyleOption style : first.styles()) {
             writer.writeStartElement("", "Style", NAMESPACE);
             writer.writeAttribute("isDefault",
                     Boolean.toString(style.id().equals(first.defaultStyleId())));
-            writeOwsText(writer, "Identifier", style.id());
             writeOwsText(writer, "Title", style.name());
+            writeOwsText(writer, "Identifier", style.id());
             writer.writeEndElement();
         }
         writer.writeStartElement("", "Format", NAMESPACE);
@@ -279,6 +279,9 @@ public final class WmtsXmlWriter {
         writer.writeEndElement();
         for (PublicationLayer.VectorLayerView view : views) {
             writeVectorMatrixSetLink(writer, view);
+        }
+        // LayerType 要求先列完矩阵集链接，再输出全部瓦片资源模板。
+        for (PublicationLayer.VectorLayerView view : views) {
             writer.writeStartElement("", "ResourceURL", NAMESPACE);
             writer.writeAttribute("format", view.mediaType());
             writer.writeAttribute("resourceType", "tile");
@@ -294,12 +297,13 @@ public final class WmtsXmlWriter {
             PublicationLayer.VectorLayerView layer) throws XMLStreamException {
         writer.writeStartElement("", "TileMatrixSetLink", NAMESPACE);
         writeText(writer, "", NAMESPACE, "TileMatrixSet", layer.matrixSet().id());
+        if (!canWriteMatrixLimits(layer.matrixSet(), layer.minZoom(), layer.maxZoom(),
+                layer.wgs84Bounds())) {
+            writer.writeEndElement();
+            return;
+        }
         writer.writeStartElement("", "TileMatrixSetLimits", NAMESPACE);
         for (int zoom = layer.minZoom(); zoom <= layer.maxZoom(); zoom++) {
-            if (layer.matrixSet().matrixWidth(zoom) < 2
-                    || layer.matrixSet().matrixHeight(zoom) < 2) {
-                continue;
-            }
             TileMatrixSetDefinition.MatrixLimits limits =
                     layer.matrixSet().limits(zoom, layer.wgs84Bounds());
             writer.writeStartElement("", "TileMatrixLimits", NAMESPACE);
@@ -329,20 +333,36 @@ public final class WmtsXmlWriter {
         writer.writeStartElement("", "TileMatrixSet", NAMESPACE);
         writer.writeCharacters(layer.matrixSet().id());
         writer.writeEndElement();
-        if (layer.minZoom() <= layer.maxZoom()) {
+        if (canWriteMatrixLimits(layer.matrixSet(), layer.minZoom(), layer.maxZoom(),
+                layer.wgs84Bounds())) {
             writer.writeStartElement("", "TileMatrixSetLimits", NAMESPACE);
             for (int zoom = layer.minZoom(); zoom <= layer.maxZoom(); zoom++) {
-                // 单瓦片矩阵（1x1 或 1 行）没有可限定的行列范围，且 MaxTileRow/MaxTileCol
-                // 在 OGC 结构中要求为正整数，此处跳过以免能力文档校验失败。
-                if (layer.matrixSet().matrixWidth(zoom) < 2
-                        || layer.matrixSet().matrixHeight(zoom) < 2) {
-                    continue;
-                }
                 writeMatrixLimits(writer, layer, zoom);
             }
             writer.writeEndElement();
         }
         writer.writeEndElement();
+    }
+
+    /**
+     * 仅在所有层级都能合法表达时输出可选的范围限制，避免遗漏实际可用层级。
+     *
+     * <p>WMTS 1.0 Schema 将 MaxTileRow、MaxTileCol 定义为正整数。
+     * 最大行列号为零时省略整个限制段，保留矩阵定义与图层地理范围；
+     * 不输出空限制段，也不为通过校验而扩大实际覆盖范围。</p>
+     */
+    private static boolean canWriteMatrixLimits(TileMatrixSetDefinition matrixSet,
+            int minZoom, int maxZoom, double[] bounds) {
+        if (minZoom > maxZoom) {
+            return false;
+        }
+        for (int zoom = minZoom; zoom <= maxZoom; zoom++) {
+            TileMatrixSetDefinition.MatrixLimits limits = matrixSet.limits(zoom, bounds);
+            if (limits.maxRow() == 0 || limits.maxCol() == 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 按图层地理范围收窄矩阵集，提示客户端只请求实际有数据的瓦片。 */
