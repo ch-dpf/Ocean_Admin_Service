@@ -60,7 +60,7 @@ public class FileUploadService {
         if (dataSet == null) throw new IllegalArgumentException("数据集不存在或已删除");
         validateType(dataSet, command.fileName());
         if (!Long.valueOf(2).equals(dataSet.getCategoryId()) && command.vectorPlacement().startsWith("X_"))
-            throw new IllegalArgumentException("仅矢量数据集支持选择x院业务分类");
+            throw new IllegalArgumentException("仅矢量数据集支持选择内置图层业务分类1");
         if (Long.valueOf(2).equals(dataSet.getCategoryId()))
             styles.validatePlacement(dataSet.getId(), command.vectorPlacement());
         ProgressSnapshot snapshot = progress.get(id);

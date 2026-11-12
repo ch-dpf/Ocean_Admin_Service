@@ -3,7 +3,7 @@
   "kind": "VECTOR_DATASET_STYLE_TEMPLATE",
   "templateId": "cn-vector-default",
   "templateVersion": 4,
-  "name": "矢量数据集默认业务分类与样式",
+  "name": "内置图层业务分类2",
   "description": "按最新分类映射与OSM-bright层级组织独立的数据规则和配图规则。",
   "provenance": {
     "classificationWorkbook": {

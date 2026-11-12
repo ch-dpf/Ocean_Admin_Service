@@ -478,7 +478,7 @@
   "vectorPlacement": [
     {
       "code": "AUTO",
-      "label": "自动识别业务分类",
+      "label": "内置图层业务分类2",
       "sort": 10
     },
     {
@@ -488,7 +488,7 @@
     },
     {
       "code": "X_LIGHT",
-      "label": "x院业务分类－亮色",
+      "label": "内置图层业务分类1",
       "sort": 30
     }
   ],

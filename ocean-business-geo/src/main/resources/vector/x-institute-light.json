@@ -3,7 +3,7 @@
   "kind": "VECTOR_DATASET_STYLE_TEMPLATE",
   "templateId": "x-institute-light",
   "templateVersion": 3,
-  "name": "x院业务分类－亮色",
+  "name": "内置图层业务分类1",
   "description": "依据原始图层和当前亮色与暗色主题样式清单配置业务分类、比例尺与配图。",
   "provenance": {
     "excluded": [
@@ -84,7 +84,7 @@
       "parentId": null,
       "geometryType": null,
       "assignable": false,
-      "name": "x院业务分类－亮色",
+      "name": "内置图层业务分类1",
       "sortOrder": 100,
       "id": "x-light"
     },
