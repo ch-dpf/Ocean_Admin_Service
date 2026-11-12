@@ -924,9 +924,8 @@ CREATE TABLE ocean_gis.gis_publication (
     CONSTRAINT ck_gis_publication_status
         CHECK (status IN ('PUBLISHED', 'DISABLED')),
     CONSTRAINT ck_gis_publication_source CHECK ((tile_set_id IS NOT NULL) <> (vector_resource_id IS NOT NULL)),
-    CONSTRAINT ck_gis_publication_protocol CHECK (service_protocol IN ('WMTS', 'TMS', 'TERRAIN')),
     CONSTRAINT ck_gis_publication_protocol CHECK (
-        (tile_set_id IS NOT NULL AND service_protocol IN ('WMTS', 'TMS')) OR
+        (tile_set_id IS NOT NULL AND service_protocol IN ('WMTS', 'TMS', 'TERRAIN')) OR
         (vector_resource_id IS NOT NULL AND source_task_id IS NULL
             AND processing_type = 'VECTOR' AND service_protocol = 'WMS')),
     CONSTRAINT ck_gis_publication_deleted

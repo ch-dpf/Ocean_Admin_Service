@@ -141,9 +141,15 @@ public enum TileMatrixSetDefinition {
         return worldWidth / ((double) matrixWidth(zoom) * TILE_SIZE);
     }
 
-    /** TMS 1.0.0 的 profile 标识，与切片矩阵集一一对应。 */
+    /**
+     * TMS 1.0.0 的 profile 标识，必须与实际分辨率序列一致。
+     *
+     * <p>WebMercatorQuad 零级为 1x1，不符合 global-mercator 从 2x2 起步的约束，
+     * 因此使用 none，由 Origin 和各级 units-per-pixel 明确描述矩阵。
+     * WorldCRS84Quad 零级为 2x1，符合 global-geodetic 的约束。</p>
+     */
     public String tmsProfile() {
-        return this == WEB_MERCATOR_QUAD ? "global-mercator" : "global-geodetic";
+        return this == WEB_MERCATOR_QUAD ? "none" : "global-geodetic";
     }
 
     /**
