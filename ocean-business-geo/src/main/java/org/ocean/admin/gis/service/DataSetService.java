@@ -16,14 +16,17 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.ocean.admin.gis.mapper.GisFileSpatialMetadataMapper;
 import org.ocean.admin.gis.mapper.GisProcessingInputMapper;
 import org.ocean.admin.gis.util.FileUploadUtil;
+import org.ocean.admin.gis.dto.TaskStatus;
+import org.ocean.admin.gis.progress.RealtimeProgressService;
 import org.ocean.admin.gis.vo.GisDataSetVO;
 import org.ocean.admin.kernel.common.PageResult;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -56,7 +59,7 @@ public class DataSetService {
     private final GisFileSpatialMetadataMapper spatialMetadataMapper;
     private final FileUploadUtil fileUploadUtil;
     private final ObjectMapper objectMapper;
-    private final ApplicationEventPublisher events;
+    private final RealtimeProgressService progress;
 
     /** 按固定分类返回全部未删除数据集数量，空分类补零。 */
     @Transactional(readOnly = true)
@@ -223,8 +226,21 @@ public class DataSetService {
         if (groups.stream().anyMatch(group -> java.util.Set.of("QUEUED", "RUNNING").contains(group.getParseStatus())))
             throw new IllegalStateException("数据集仍有文件组正在解析，请等待结束");
         List<GisFileMeta> files = gisFileMetaMapper.selectAllByDataSetIdForUpdate(id);
-        if (files.stream().anyMatch(file -> java.util.Set.of("WAITING", "QUEUED", "RUNNING").contains(file.getMetadataStatus()))) {
+        if (files.stream().anyMatch(file -> java.util.Set.of("QUEUED", "RUNNING").contains(file.getMetadataStatus())
+                || ("WAITING".equals(file.getMetadataStatus())
+                    && !("UPLOAD".equals(file.getSourceType()) && file.getIngestProgressId() != null
+                         && file.getIngestProgressId().startsWith("upload_"))))) {
             throw new IllegalStateException("数据集仍有文件正在提取空间元数据，请等待处理结束后重试");
+        }
+        // WAITING 上传文件尚未交给解析器；即使进度缓存丢失，也可凭数据库关联结束这批接入。
+        List<String> uploadProgressIds = files.stream()
+                .filter(file -> "UPLOAD".equals(file.getSourceType()))
+                .map(GisFileMeta::getIngestProgressId)
+                .filter(java.util.Objects::nonNull)
+                .filter(progressId -> progressId.startsWith("upload_"))
+                .distinct().sorted().toList();
+        for (String progressId : uploadProgressIds) {
+            progress.lockExecutionUntilTransactionCompletion(progressId);
         }
         List<GisFileMeta> unsupportedStorage = files.stream()
                 .filter(file -> "UPLOAD".equals(file.getSourceType()))
@@ -248,8 +264,33 @@ public class DataSetService {
         if (gisDataSetMapper.physicallyDeleteById(id) != 1) {
             throw new IllegalStateException("数据集删除失败: " + id);
         }
-        fileUploadUtil.deleteEmptyDataSetDirectory(id);
-        events.publishEvent(new FileSpatialMetadataService.MetadataProgress(files.stream().map(GisFileMeta::getId).toList(), false));
+        for (String progressId : uploadProgressIds) progress.assertExecutionLock(progressId);
+        // 删除后已无法通过文件 ID 查询接入关联，提交回调必须使用删除前捕获的进度 ID。
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                for (String progressId : uploadProgressIds) {
+                    try {
+                        var snapshot = progress.getCached(progressId);
+                        if (snapshot != null && !snapshot.status().isTerminal()) {
+                            progress.finish(snapshot.handle(), TaskStatus.FAILED, "数据集已删除，文件接入已结束");
+                        }
+                    } catch (RuntimeException ex) {
+                        log.warn("数据集删除后结束进度失败: dataSetId={}, progressId={}", id, progressId, ex);
+                    }
+                    try {
+                        fileUploadUtil.deleteBatchDirectory(progressId);
+                    } catch (RuntimeException ex) {
+                        log.warn("数据集删除后清理分块失败，等待过期清理: dataSetId={}, progressId={}", id, progressId, ex);
+                    }
+                }
+                try {
+                    fileUploadUtil.deleteEmptyDataSetDirectory(id);
+                } catch (RuntimeException ex) {
+                    log.warn("数据集已删除，清理空目录失败: {}", id, ex);
+                }
+            }
+        });
         log.info("删除数据集成功: id={}, name={}, fileCount={}",
                 id, dataSet.getDataSetName(), files.size());
     }

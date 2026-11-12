@@ -61,7 +61,7 @@ public class VectorLayerService {
     private final VectorResourceService resources;
 
     /** 一个源图层对应一份已转换为 WGS84 的标准 GeoJSON，源键须在同一主入口内唯一且稳定。 */
-    public record ImportLayer(String sourceLayerKey, String sourceLayerName, Path geoJsonPath, long featureCount) {
+    public record ImportLayer(String sourceLayerKey, String sourceCollectionKey, String sourceLayerName, Path geoJsonPath, long featureCount) {
         public ImportLayer {
             if (sourceLayerKey == null || sourceLayerKey.isBlank()) throw new IllegalArgumentException("源图层键不能为空");
             Objects.requireNonNull(geoJsonPath, "源图层 GeoJSON 路径不能为空");
@@ -141,7 +141,7 @@ public class VectorLayerService {
             for (ImportLayer input : inputs) {
                 String layerName = importLayerName(source, input);
                 Long sourceLayerId = resources.sourceLayers(source.getId()).stream()
-                        .filter(layer -> input.sourceLayerKey().equals(layer.getLayerKey())).map(layer -> layer.getId())
+                        .filter(layer -> input.sourceCollectionKey().equals(layer.getLayerKey())).map(layer -> layer.getId())
                         .findFirst().orElseThrow(() -> new IllegalStateException("原始集合身份缺失"));
                 sourceFeatures += reader.read(input.geoJsonPath(), parsed -> {
                     JsonNode properties = json.readTree(parsed.properties());
@@ -204,8 +204,8 @@ public class VectorLayerService {
         try {
             progress.accept(ProgressStage.determinate("VECTOR_IMPORTING", "源要素处理结束；已提交几何 " + committedParts[0] + " 个",
                     sourceFeatures, Math.max(progressTotal, sourceFeatures), ProgressUnit.FEATURE));
-            if (sourceFeatures == 0 || layers.isEmpty()) throw new ImportException("EMPTY_GEOMETRY", "来源不包含可制图要素");
-            resources.importWorking(resourceId, source, List.copyOf(layers.values()), claimGuard, heartbeat);
+            // 空集合和无位置记录已进入来源资源，不为它们创建虚构的空间工作图层。
+            if (!layers.isEmpty()) resources.importWorking(resourceId, source, List.copyOf(layers.values()), claimGuard, heartbeat);
             if (invalidGeometries[0] > 0) {
                 log.warn("矢量来源读取完成，几何拓扑问题仅记录日志: fileId={}, fileGroupId={}, invalidGeometries={}, issues={}",
                         source.getId(), source.getFileGroupId(), invalidGeometries[0], geometryIssues);

@@ -25,7 +25,6 @@ public class VectorResourceInputResolver implements GisProcessingInputResolver {
     private final VectorStyleSchemeService schemes;
     private final GeoPackageStore store;
     private final GisProcessingStorageService storage;
-    private final ProcessingTaskRecordService tasks;
     private final TransactionTemplate transactions;
     private final ObjectMapper json;
 
@@ -52,9 +51,10 @@ public class VectorResourceInputResolver implements GisProcessingInputResolver {
         return List.of(storage.workspaceFromOutputKey(inputs.getFirst().getStorageKey()).tempPath().resolve("source.gpkg"));
     }
 
-    @Override public RuntimeInputs openRuntime(List<GisProcessingInput> inputs, Runnable heartbeat, Consumer<ProgressStage> progress) {
+    @Override public RuntimeInputs openRuntime(List<GisProcessingInput> inputs,
+            org.ocean.admin.gis.dto.GisProcessingParameters processingParameters, Runnable heartbeat, Consumer<ProgressStage> progress) {
         var paths = resolveRuntime(inputs);
-        var parameters = (VectorProcessingParameters) tasks.readParameters(tasks.getRequired(inputs.getFirst().getTaskId()));
+        var parameters = (VectorProcessingParameters) processingParameters;
         progress.accept(ProgressStage.indeterminate("VECTOR_SNAPSHOT", "固定工作数据及分类规则"));
         transactions.executeWithoutResult(tx -> {
             var state = styles.require(parameters.dataSetId(), true);

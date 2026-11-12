@@ -18,7 +18,9 @@ public class ProgressController {
     private final RealtimeProgressService progressService;
 
     @GetMapping("/{progressId}")
-    @Operation(summary = "查询长耗时流程的完整进度快照")
+    @Operation(summary = "补查长耗时流程的完整进度快照",
+            description = "用于首次登记、SSE重连和页面恢复时按已知progressId补查；日常变化由SSE推送，"
+                    + "无需周期轮询。本接口不发现未知的进度编号，也不重新执行接入任务。")
     public ResponseResult<ProgressSnapshot> get(@PathVariable String progressId) {
         return ResponseResult.success(progressService.query(progressId));
     }

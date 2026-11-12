@@ -96,7 +96,6 @@ public class TileSetArchiveWorker {
             long totalBytes = totalBytes(files);
             log.info("静态瓦片集归档源文件扫描完成: archiveNo={}, totalFiles={}, totalBytes={}",
                     archive.getArchiveNo(), files.size(), totalBytes);
-            archiveService.initializeProgress(archive.getId(), files.size(), totalBytes);
 
             progressService.update(progressHandle,
                     ProgressUpdate.stageChanged(ProgressStage.determinate("PACKING", "正在打包静态瓦片集",
@@ -182,8 +181,8 @@ public class TileSetArchiveWorker {
                         processedBytes = Math.addExact(processedBytes, read);
                         long now = System.nanoTime();
                         if (now - lastProgressTime >= PROGRESS_INTERVAL_NANOS) {
-                            progressService.update(progressHandle, ProgressUpdate.metric(
-                                    "PACKED_BYTES", "已打包源字节", processedBytes, totalBytes, ProgressUnit.BYTE));
+                            reportProgress(archive, processedFiles, processedBytes,
+                                    files.size(), totalBytes, progressHandle);
                             lastProgressTime = now;
                         }
                     }
@@ -254,7 +253,7 @@ public class TileSetArchiveWorker {
     private void reportProgress(
             GisTileSetArchive archive, long processedFiles, long processedBytes,
             long totalFiles, long totalBytes, Handle progressHandle) {
-        archiveService.updateProgress(archive.getId(), processedFiles, processedBytes);
+        // 中间工作量只进入 Redis 和 SSE，归档完成后一次性保存最终统计。
         int percent = totalBytes > 0
                 ? (int) Math.min(100, (double) processedBytes * 100 / totalBytes)
                 : (int) Math.min(100, (double) processedFiles * 100 / totalFiles);

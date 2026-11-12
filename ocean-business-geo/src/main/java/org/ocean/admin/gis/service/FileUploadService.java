@@ -111,11 +111,15 @@ public class FileUploadService {
                 || (command.lastFile() && previousBytes + command.fileSize() != command.totalSize()))
             throw new IllegalArgumentException("文件大小合计与声明总量不一致");
         storage.ensureFreeSpace(Math.addExact(command.chunkSize(), config.getMinFreeSpace().toBytes()));
+        ProgressSnapshot.Handle handle = snapshot.handle();
         Consumer<ProgressStage> report = ProgressStage.throttled(work -> {
             spatial.renewIngestionWaiting(id, LocalDateTime.now().plus(config.getIdleTimeout()));
-            progress.update(progress.handle(id), ProgressUpdate.stageChanged(ProgressStage.determinate("UPLOADING",
-                    "接收文件：" + command.fileName(), Math.min(command.totalSize(), previousBytes +
-                    (work.unit() == ProgressUnit.BYTE && work.completed() != null ? work.completed() : command.offset())),
+            // 校验读取从零开始，但文件此时已接收完整，不能让传输字节随校验进度回退。
+            long receivedBytes = "VERIFYING".equals(work.code()) ? command.fileSize()
+                    : work.completed() == null ? command.offset() : work.completed();
+            String message = "VERIFYING".equals(work.code()) ? "校验文件：" : "接收文件：";
+            progress.update(handle, ProgressUpdate.stageChanged(ProgressStage.determinate("UPLOADING",
+                    message + command.fileName(), Math.min(command.totalSize(), previousBytes + receivedBytes),
                     command.totalSize(), ProgressUnit.BYTE)),
                     ProgressUpdate.activeFilesChanged(List.of(new ProgressSnapshot.FileWork(Integer.toString(command.fileIndex()),
                             command.fileName(), work, TaskStatus.RUNNING, 0))));
@@ -180,6 +184,11 @@ public class FileUploadService {
     private void beginExtraction(String id, GisUploadChunkCommand command) {
         ProgressSnapshot current = progress.query(id);
         if (current.status().isTerminal()) return;
+        // 末片响应丢失后的重试只读取当前解析结果，不能清空正在执行的文件和阶段进度。
+        if ("EXTRACTING_METADATA".equals(current.stage().code())) {
+            progress.refreshIngestion(id);
+            return;
+        }
         long count = files.selectCount(new LambdaQueryWrapper<GisFileMeta>().eq(GisFileMeta::getIngestProgressId, id));
         if (count != command.fileCount()) throw new IllegalStateException("整批文件尚未登记完成");
         progress.update(current.handle(), ProgressUpdate.stageChanged(ProgressStage.determinate("EXTRACTING_METADATA",

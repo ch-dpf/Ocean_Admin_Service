@@ -64,7 +64,7 @@ public class ProcessingWorker {
 
             taskLifecycle.start(taskId, progressHandle, "开始执行切片引擎");
             inputMapper.updateTaskStatus(taskId, "RUNNING", null);
-            try (var runtime = inputResolverRegistry.require(sourceType).openRuntime(inputs, () -> {
+            try (var runtime = inputResolverRegistry.require(sourceType).openRuntime(inputs, parameters, () -> {
                 if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("切片任务已中断");
             }, progress -> taskLifecycle.reportProgress(progressHandle, progress))) {
                 List<Path> paths = runtime.paths();

@@ -127,7 +127,9 @@ public class FileSpatialMetadataService {
                 preserveSource(item, source.sourceCrs(), source.sourceExtent(), source.metadata(), group.getFormat());
                 metadata.add(item);
                 long count = objectMapper.readTree(item.getExtraMetadata()).path("featureCount").asLong();
-                vectorInputs.add(new VectorLayerService.ImportLayer(source.key(), source.name(), source.geoJsonPath(), count));
+                String collectionKey = source.metadata() == null ? source.key()
+                        : source.metadata().path("sourceCollectionKey").asText(source.key());
+                vectorInputs.add(new VectorLayerService.ImportLayer(source.key(), collectionKey, source.name(), source.geoJsonPath(), count));
             }
             if (!vectorInputs.isEmpty()) {
                 vectorResult = vectorLayers.importSource(claim, vectorInputs, claimGuard, heartbeat, progress);
@@ -144,11 +146,13 @@ public class FileSpatialMetadataService {
             for (var source : context.rasters()) {
                 heartbeat.run();
                 GisFileSpatialMetadata item = newMetadata(claim, source.key(), source.name());
-                rasterExtractor.extract(source.geoTiffPath(), item, Long.valueOf(1).equals(dataSet.getCategoryId()), heartbeat, progress);
+                rasterExtractor.extract(source.footprintPath(), item, Long.valueOf(1).equals(dataSet.getCategoryId()), heartbeat, progress);
+                item.setBandCount(source.metadata().path("sourceDataset").path("bands").size());
                 preserveSource(item, source.sourceCrs(), source.sourceExtent(), source.metadata(), group.getFormat());
                 metadata.add(item);
             }
-            if (metadata.isEmpty()) throw new MetadataException("EMPTY_DATASET", "文件组中没有可定位的空间图层");
+            if (metadata.isEmpty() && vectorResult == null)
+                throw new MetadataException("EMPTY_DATASET", "文件组中没有可读取的数据集合");
             context.verifySources();
         } catch (ControlledWorkspaceResolver.SourceException ex) {
             errorCode = ex.code(); errorMessage = ex.getMessage();
@@ -183,7 +187,8 @@ public class FileSpatialMetadataService {
             spatialMapper.deleteByFileId(fileId);
             for (GisFileSpatialMetadata item : extracted) spatialMapper.insert(item);
             GisFileMeta point = extracted.isEmpty() ? null : spatialMapper.selectRepresentativePoint(fileId);
-            if (!extracted.isEmpty() && point == null) throw new IllegalStateException("空间元数据缺少代表点: " + fileId);
+            if (extracted.stream().anyMatch(item -> item.getGeographicExtent() != null) && point == null)
+                throw new IllegalStateException("空间元数据缺少代表点: " + fileId);
             if (extractedVector != null) {
                 vectorDataSetStyles.require(claim.getDataSetId(), true);
                 for (Long layerId : extractedVector.layerIds()) {
@@ -239,6 +244,10 @@ public class FileSpatialMetadataService {
             try { metadata.setSourceCrsCode(CRS.lookupIdentifier(crs, true)); }
             catch (Exception ignored) { metadata.setSourceCrsCode(null); }
             metadata.setSourceUnit(crs.getCoordinateSystem().getAxis(0).getUnit().toString());
+        } else {
+            metadata.setSourceCrsCode(null);
+            metadata.setSourceCrsWkt(null);
+            metadata.setSourceUnit(null);
         }
         // 未知源范围用 JSON null 表示，不能保留标准化数据的经纬度范围并标成源投影。
         metadata.setSourceExtent(sourceExtent == null ? "null" : objectMapper.writeValueAsString(sourceExtent));
@@ -351,16 +360,18 @@ public class FileSpatialMetadataService {
             }, 0);
             if (parser.nextToken() != null) throw new MetadataException("INVALID_GEOJSON", "GeoJSON 根节点之后存在额外内容");
         }
-        if (bounds.extent.isNull()) throw new MetadataException("EMPTY_GEOMETRY", "GeoJSON 不包含可定位的几何坐标");
         metadata.setDataKind("VECTOR");
         metadata.setExtentKind("VECTOR_ENVELOPE");
         metadata.setSourceCrsCode("OGC:CRS84");
         metadata.setSourceCrsWkt(CRS.decode("EPSG:4326", true).toWKT());
         metadata.setSourceUnit("degree");
-        metadata.setSourceExtent(objectMapper.writeValueAsString(Map.of(
-                "lowerCorner", new double[]{bounds.extent.getMinX(), bounds.extent.getMinY()},
-                "upperCorner", new double[]{bounds.extent.getMaxX(), bounds.extent.getMaxY()})));
-        metadata.setGeographicExtent(new WKTWriter().write(GEOMETRIES.toGeometry(bounds.extent)));
+        metadata.setSourceExtent("null");
+        if (!bounds.extent.isNull()) {
+            metadata.setSourceExtent(objectMapper.writeValueAsString(Map.of(
+                    "lowerCorner", new double[]{bounds.extent.getMinX(), bounds.extent.getMinY()},
+                    "upperCorner", new double[]{bounds.extent.getMaxX(), bounds.extent.getMaxY()})));
+            metadata.setGeographicExtent(new WKTWriter().write(GEOMETRIES.toGeometry(bounds.extent)));
+        }
         Map<String, Object> extra = new LinkedHashMap<>();
         extra.put("featureCount", bounds.features);
         extra.put("geometryTypes", bounds.types);

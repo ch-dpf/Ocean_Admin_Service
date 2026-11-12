@@ -256,14 +256,22 @@ public final class WmtsXmlWriter {
             String identifier, List<PublicationLayer.VectorLayerView> views)
             throws XMLStreamException {
         PublicationLayer.VectorLayerView first = views.getFirst();
+        // 图层范围覆盖全部已发布矩阵；地理坐标矩阵的极区不能被墨卡托矩阵裁掉。
+        double[] bounds = first.wgs84Bounds().clone();
+        for (PublicationLayer.VectorLayerView view : views) {
+            bounds[0] = Math.min(bounds[0], view.wgs84Bounds()[0]);
+            bounds[1] = Math.min(bounds[1], view.wgs84Bounds()[1]);
+            bounds[2] = Math.max(bounds[2], view.wgs84Bounds()[2]);
+            bounds[3] = Math.max(bounds[3], view.wgs84Bounds()[3]);
+        }
         writer.writeStartElement("", "Layer", NAMESPACE);
         writeOwsText(writer, "Title", first.serviceName());
         writeOwsText(writer, "Abstract", "已发布 OGC 服务: " + identifier);
         writer.writeStartElement("ows", "WGS84BoundingBox", OWS_NAMESPACE);
         writeOwsText(writer, "LowerCorner",
-                first.wgs84Bounds()[0] + " " + first.wgs84Bounds()[1]);
+                bounds[0] + " " + bounds[1]);
         writeOwsText(writer, "UpperCorner",
-                first.wgs84Bounds()[2] + " " + first.wgs84Bounds()[3]);
+                bounds[2] + " " + bounds[3]);
         writer.writeEndElement();
         writeOwsText(writer, "Identifier", identifier);
         for (PublicationLayer.StyleOption style : first.styles()) {

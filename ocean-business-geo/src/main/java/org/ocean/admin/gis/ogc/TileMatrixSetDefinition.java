@@ -24,6 +24,9 @@ public enum TileMatrixSetDefinition {
     public static final int TILE_SIZE = 256;
     public static final int MAX_ZOOM = 22;
 
+    /** Web Mercator 方形世界矩阵的纬度边界，避免十进制舍入将范围扩展到矩阵之外。 */
+    private static final double MAX_WEB_MERCATOR_LATITUDE = 85.05112877980659;
+
     private final String id;
     private final String supportedCrs;
     private final String wellKnownScaleSet;
@@ -177,6 +180,16 @@ public enum TileMatrixSetDefinition {
         return this == WEB_MERCATOR_QUAD ? -20037508.342789244 : -90d;
     }
 
+    /** 将发布范围限制在本矩阵集的地理覆盖内，保留经纬度顺序且不修改输入数组。 */
+    public double[] normalizeWgs84Bounds(double[] wgs84) {
+        double maxLatitude = this == WEB_MERCATOR_QUAD ? MAX_WEB_MERCATOR_LATITUDE : 90d;
+        return new double[]{
+                Math.max(-180d, Math.min(180d, wgs84[0])),
+                Math.max(-maxLatitude, Math.min(maxLatitude, wgs84[1])),
+                Math.max(-180d, Math.min(180d, wgs84[2])),
+                Math.max(-maxLatitude, Math.min(maxLatitude, wgs84[3]))};
+    }
+
     /**
      * 把 WGS84 地理范围换算成本矩阵集坐标系下的范围，用于 TileMap 的 BoundingBox。
      *
@@ -184,9 +197,10 @@ public enum TileMatrixSetDefinition {
      * @return 顺序为 minX、minY、maxX、maxY
      */
     public double[] targetBounds(double[] wgs84) {
+        double[] bounds = normalizeWgs84Bounds(wgs84);
         return new double[]{
-                projectX(wgs84[0]), projectY(wgs84[1]),
-                projectX(wgs84[2]), projectY(wgs84[3])};
+                projectX(bounds[0]), projectY(bounds[1]),
+                projectX(bounds[2]), projectY(bounds[3])};
     }
 
     private double projectX(double longitude) {
@@ -198,9 +212,13 @@ public enum TileMatrixSetDefinition {
         if (this != WEB_MERCATOR_QUAD) {
             return latitude;
         }
-        double clamped = Math.max(-85.05112877980659, Math.min(85.05112877980659, latitude));
+        double clamped = Math.max(-MAX_WEB_MERCATOR_LATITUDE,
+                Math.min(MAX_WEB_MERCATOR_LATITUDE, latitude));
         double radians = Math.toRadians(clamped);
-        return Math.log(Math.tan(Math.PI / 4d + radians / 2d)) * 20037508.342789244 / Math.PI;
+        double projected = Math.log(Math.tan(Math.PI / 4d + radians / 2d))
+                * 20037508.342789244 / Math.PI;
+        // 投影计算本身也可能产生浮点越界，TMS 范围必须落在原生矩阵内。
+        return Math.max(originY(), Math.min(topLeftY, projected));
     }
 
     private static int clamp(int value, int min, int max) {

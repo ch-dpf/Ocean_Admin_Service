@@ -21,6 +21,7 @@ import org.ocean.admin.gis.entity.GisPublication;
 import org.ocean.admin.gis.processing.GisProcessingStorageService;
 import org.ocean.admin.gis.processing.GisInputSourceType;
 import org.ocean.admin.gis.processing.GisProcessingType;
+import org.ocean.admin.gis.progress.RealtimeProgressService;
 import org.ocean.admin.gis.vo.GisProcessingTaskDetailVO;
 import org.ocean.admin.gis.vo.GisProcessingTaskSummaryVO;
 import org.ocean.admin.kernel.common.PageResult;
@@ -51,6 +52,7 @@ public class ProcessingTaskRecordService {
     private final ObjectMapper objectMapper;
     private final GisPublicationMapper publicationMapper;
     private final GisProcessingStorageService storageService;
+    private final RealtimeProgressService progressService;
 
     /** 静态矢量成果只允许读取已完成且仍有效的任务目录。 */
     public java.nio.file.Path vectorArtifact(Long taskId, String relative) {
@@ -350,20 +352,14 @@ public class ProcessingTaskRecordService {
         });
     }
 
-    private int archiveProgress(GisTileSetArchive archive) {
+    private Integer archiveProgress(GisTileSetArchive archive) {
         if (archive.getArchiveStatus() == TaskStatus.COMPLETED) {
             return 100;
         }
-        if (archive.getTotalBytes() != null && archive.getTotalBytes() > 0) {
-            return (int) Math.min(100,
-                    (double) archive.getProcessedBytes() * 100 / archive.getTotalBytes());
-        }
-        if (archive.getTotalFileCount() != null && archive.getTotalFileCount() > 0) {
-            return (int) Math.min(100,
-                    (double) archive.getProcessedFileCount() * 100
-                            / archive.getTotalFileCount());
-        }
-        return 0;
+        var snapshot = progressService.getCached(archive.getArchiveNo());
+        if (snapshot == null || snapshot.revision().epoch() != archive.getProgressEpoch()
+                || snapshot.status() != archive.getArchiveStatus()) return null;
+        return snapshot.metricPercent("PACKED_BYTES", "PACKED_FILES");
     }
 
     public GisProcessingParameters readParameters(GisProcessingTask task) {
@@ -436,7 +432,7 @@ public class ProcessingTaskRecordService {
                     integerOrNull(json, "minZoom"),
                     integerOrNull(json, "maxZoom"),
                     textOrDefault(json, "resampling", null),
-                    booleanOrNull(json, "transparent"));
+                    booleanOrNull(json, "transparent"), null);
             case VECTOR -> throw new IllegalArgumentException("该任务没有静态矢量数据与样式快照，请重新创建任务");
         };
     }
@@ -456,7 +452,7 @@ public class ProcessingTaskRecordService {
                 parameters.minZoom(),
                 parameters.maxZoom(),
                 parameters.resampling(),
-                parameters.transparent());
+                parameters.transparent(), parameters.raster());
     }
 
     private String textOrDefault(JsonNode json, String field, String defaultValue) {

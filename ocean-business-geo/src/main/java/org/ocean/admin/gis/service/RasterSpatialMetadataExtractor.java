@@ -62,12 +62,12 @@ public class RasterSpatialMetadataExtractor {
             if (noData != null) extra.put("noData", Double.isFinite(noData) ? noData : noData.toString());
             progress.accept(ProgressStage.determinate("METADATA_READING", "空间参考信息读取完成", 1, 1, ProgressUnit.OPERATION));
             Geometry pixels = readFootprint(path, reader, width, height, noData, heartbeat, extra, progress);
-            Geometry footprint = RasterFootprintBuilder.toGeographic(pixels, gridToSource, toGeographic,
+            Geometry footprint = pixels.isEmpty() ? pixels : RasterFootprintBuilder.toGeographic(pixels, gridToSource, toGeographic,
                     left, top, width, height, properties.getMetadataMaxCoordinates(), heartbeat, progress);
             progress.accept(ProgressStage.determinate("SPATIAL_CALCULATING", "计算分辨率与推荐层级", 0, 1, ProgressUnit.OPERATION));
             metadata.setDataKind("RASTER");
             metadata.setExtentKind("RASTER_FOOTPRINT");
-            metadata.setGeographicExtent(new WKTWriter().write(footprint));
+            metadata.setGeographicExtent(footprint.isEmpty() ? null : new WKTWriter().write(footprint));
             try { metadata.setSourceCrsCode(CRS.lookupIdentifier(source, true)); }
             catch (Exception ignored) { /* 源 CRS 的完整 WKT 仍会保存。 */ }
             metadata.setSourceCrsWkt(source.toWKT());
@@ -176,7 +176,7 @@ public class RasterSpatialMetadataExtractor {
                 extra.put("validPixelCount", validPixels);
                 heartbeat.run();
                 progress.accept(ProgressStage.determinate("FOOTPRINT_BUILDING", "构建并校验有效像素轮廓", 0, 1, ProgressUnit.OPERATION));
-                Geometry footprint = builder.buildGeometry();
+                Geometry footprint = validPixels == 0 ? GEOMETRIES.createMultiPolygon() : builder.buildGeometry();
                 progress.accept(ProgressStage.determinate("FOOTPRINT_BUILDING", "有效像素轮廓构建完成", 1, 1, ProgressUnit.OPERATION));
                 return footprint;
             } finally {

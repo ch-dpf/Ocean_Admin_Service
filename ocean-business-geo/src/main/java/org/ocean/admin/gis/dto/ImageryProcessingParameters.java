@@ -26,7 +26,8 @@ public record ImageryProcessingParameters(
                 allowableValues = {"NEAREST", "BILINEAR"}, defaultValue = "BILINEAR")
         String resampling,
         @Schema(description = "PNG 是否保留透明背景，默认 true", defaultValue = "true")
-        Boolean transparent)
+        Boolean transparent,
+        @Schema(description = "栅格集合、波段与显示数值范围") RasterSelection raster)
         implements GisProcessingParameters {
 
     public ImageryProcessingParameters {

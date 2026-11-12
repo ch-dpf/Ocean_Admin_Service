@@ -18,7 +18,8 @@ public interface GisProcessingInputResolver {
     List<Path> resolveRuntime(List<GisProcessingInput> inputs);
 
     /** 运行期间持有规范化资源；普通上传和工作区入口继续直接使用原有路径。 */
-    default RuntimeInputs openRuntime(List<GisProcessingInput> inputs, Runnable heartbeat, Consumer<ProgressStage> progress) {
+    default RuntimeInputs openRuntime(List<GisProcessingInput> inputs,
+            org.ocean.admin.gis.dto.GisProcessingParameters parameters, Runnable heartbeat, Consumer<ProgressStage> progress) {
         return new RuntimeInputs(resolveRuntime(inputs), null, null);
     }
 

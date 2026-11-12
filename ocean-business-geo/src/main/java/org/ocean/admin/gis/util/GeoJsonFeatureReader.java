@@ -33,6 +33,9 @@ public class GeoJsonFeatureReader {
 
     public record ParsedFeature(long index, String geometry, String properties, String sourceId) { }
 
+    /** 来源信封保留集合级属性；逐要素回调避免整体加载大文件。 */
+    public record SourceContent(long featureCount, JsonNode envelope) { }
+
     /**
      * 文件导入长期支持旧式 WGS84 命名声明；坐标始终按经度、纬度读取，不猜测轴顺序或转换坐标。
      * 兼容边界仅限文件顶层，在线编辑继续使用标准 GeoJSON；停用这类来源并转换存量文件后可移除。
@@ -94,6 +97,16 @@ public class GeoJsonFeatureReader {
     }
 
     public long read(Path path, Consumer<ParsedFeature> consumer, Runnable heartbeat) throws IOException {
+        return readSource(path, (feature, parsed) -> consumer.accept(parsed), heartbeat).featureCount();
+    }
+
+    /** 快照与工作导入共用结构读取，顶层几何包装为要素，原始文件内容保持不变。 */
+    public SourceContent readSource(Path path, Consumer<JsonNode> consumer, Runnable heartbeat) throws IOException {
+        return readSource(path, (feature, parsed) -> consumer.accept(feature), heartbeat);
+    }
+
+    private SourceContent readSource(Path path, java.util.function.BiConsumer<JsonNode, ParsedFeature> consumer,
+                                     Runnable heartbeat) throws IOException {
         long index = 0;
         try (JsonParser parser = mapper.createParser(path.toFile())) {
             if (parser.nextToken() != JsonToken.START_OBJECT) throw invalid(null, "根节点必须为对象");
@@ -118,7 +131,7 @@ public class GeoJsonFeatureReader {
                         heartbeat.run();
                         try {
                             JsonNode feature = readNode(parser, new Budget(heartbeat, IMPORT_LIMITS), 0);
-                            consumer.accept(parseFeature(feature, index, IMPORT_LIMITS));
+                            consumer.accept(feature, parseFeature(feature, index, IMPORT_LIMITS));
                         } catch (IllegalArgumentException ex) {
                             if (ex instanceof FeatureReadException) throw ex;
                             throw invalid(index, ex.getMessage());
@@ -138,17 +151,17 @@ public class GeoJsonFeatureReader {
             } else {
                 if ("FeatureCollection".equals(root.path("type").asText())) throw invalid(null, "缺少 features");
                 if ("Feature".equals(root.path("type").asText())) {
-                    consumer.accept(parseFeature(root, 0, IMPORT_LIMITS));
+                    consumer.accept(root, parseFeature(root, 0, IMPORT_LIMITS));
                 } else {
                     ObjectNode feature = mapper.createObjectNode().put("type", "Feature");
                     feature.set("geometry", root);
                     feature.set("properties", mapper.createObjectNode());
-                    consumer.accept(parseFeature(feature, 0, IMPORT_LIMITS));
+                    consumer.accept(feature, parseFeature(feature, 0, IMPORT_LIMITS));
                 }
                 index = 1;
             }
+            return new SourceContent(index, root);
         }
-        return index;
     }
 
     public ParsedFeature parseFeature(JsonNode feature, long index) {
@@ -301,7 +314,7 @@ public class GeoJsonFeatureReader {
     private void position(JsonNode point, Coordinates state) {
         requireArray(point, 2, "坐标");
         if (point.size() > 3) throw new IllegalArgumentException("仅支持 XY 或 XYZ 坐标");
-        if (state.dimensions != 0 && point.size() != state.dimensions) throw new IllegalArgumentException("单要素不能混合 XY 和 XYZ 坐标");
+        if (!state.limits.importing() && state.dimensions != 0 && point.size() != state.dimensions) throw new IllegalArgumentException("单要素不能混合 XY 和 XYZ 坐标");
         state.dimensions = point.size();
         if (++state.vertices > state.limits.vertices()) throw new IllegalArgumentException("单要素不能超过" + state.limits.vertices() + "个顶点");
         for (int i = 0; i < point.size(); i++) {

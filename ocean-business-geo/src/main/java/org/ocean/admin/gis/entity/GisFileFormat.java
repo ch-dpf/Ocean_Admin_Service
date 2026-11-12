@@ -59,14 +59,14 @@ public enum GisFileFormat {
     public Requirement sourceCrsRequirement() {
         return switch (this) {
             case GEOJSON -> Requirement.FORBIDDEN;
-            case CSV, DXF, DWG -> Requirement.REQUIRED;
+            case DXF, DWG -> Requirement.REQUIRED;
             default -> Requirement.OPTIONAL;
         };
     }
 
     /** 前端与后端参数校验共同消费本定义，不再各自判断格式名称。 */
     public List<ReadOption> readOptions() {
-        Requirement coordinates = this == CSV ? Requirement.REQUIRED : Requirement.FORBIDDEN;
+        Requirement coordinates = this == CSV ? Requirement.OPTIONAL : Requirement.FORBIDDEN;
         return List.of(new ReadOption("sourceCrs", "源坐标系", sourceCrsRequirement()),
                 new ReadOption("xField", "X 坐标字段", coordinates),
                 new ReadOption("yField", "Y 坐标字段", coordinates));
@@ -75,7 +75,7 @@ public enum GisFileFormat {
     public List<String> notices() {
         return switch (this) {
             case GEOJSON -> List.of("GeoJSON 按 RFC 7946 经度、纬度读取，不使用投影覆盖配置；源文件须具有明确的 WGS84 坐标。");
-            case CSV -> List.of("请明确源坐标系和 X、Y 坐标字段，字段必须存在且不能相同。");
+            case CSV -> List.of("坐标列模式须同时指定X、Y字段和源坐标系；WKT几何须明确源坐标系；普通属性表保留为非空间集合。");
             case DXF -> List.of("CAD 文件须明确源坐标系。");
             case DWG -> List.of("CAD 文件须明确源坐标系；DWG 读取范围受驱动及文件版本影响。");
             case MIF -> List.of("无属性列的 MIF 可不带 MID，具体配套要求由文件内容核验。");

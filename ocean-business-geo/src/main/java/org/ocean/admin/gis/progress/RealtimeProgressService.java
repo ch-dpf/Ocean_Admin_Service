@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -95,13 +97,20 @@ public class RealtimeProgressService {
     }
 
     public ProgressSnapshot get(String id) {
-        if (System.nanoTime() < redisRetryAfter && durable(id)) return databaseSnapshot(id);
+        ProgressSnapshot snapshot = getCached(id);
+        if (snapshot == null && System.nanoTime() < redisRetryAfter && durable(id)) return databaseSnapshot(id);
+        return snapshot;
+    }
+
+    /** 列表和详情只读取实时缓存；缓存缺失或不可用时不重建、不访问数据库。 */
+    public ProgressSnapshot getCached(String id) {
+        if (System.nanoTime() < redisRetryAfter && durable(id)) return null;
         String value;
         try {
             value = redis.opsForValue().get(PREFIX + id);
         } catch (DataAccessException ex) {
             unavailable(id, ex);
-            return databaseSnapshot(id);
+            return null;
         }
         return value == null ? null : json.readValue(value, ProgressSnapshot.class);
     }
@@ -143,18 +152,44 @@ public class RealtimeProgressService {
 
     /** 请求与过期清理共享执行锁，分块文件仍以实际落盘偏移为准。 */
     public <T> T withExecutionLock(String id, Supplier<T> action) {
+        Runnable release = acquireExecutionLock(id);
+        try {
+            return action.get();
+        } finally {
+            release.run();
+        }
+    }
+
+    /** 删除事务提交或回滚后才释放执行权，防止分块请求在提交前重新写入。 */
+    public void lockExecutionUntilTransactionCompletion(String id) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("接入删除锁必须在事务内获取");
+        }
+        Runnable release = acquireExecutionLock(id);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                try {
+                    release.run();
+                } catch (RuntimeException ex) {
+                    log.warn("接入删除锁释放失败，等待租约到期: {}", id, ex);
+                }
+            }
+        });
+    }
+
+    private Runnable acquireExecutionLock(String id) {
         String key = PREFIX + "execution:" + id;
         String token = UUID.randomUUID().toString();
         if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, token, Duration.ofSeconds(60)))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "接入正在处理，请稍后重试");
         }
         executions.put(id, token);
-        try {
-            return action.get();
-        } finally {
+        return () -> {
             executions.remove(id, token);
             redis.execute(UNLOCK, List.of(key), token);
-        }
+        };
     }
 
     public void checkExecutionLease(String id) {
@@ -229,6 +264,9 @@ public class RealtimeProgressService {
                 else if (update instanceof ProgressUpdate.ActiveFilesChanged value) active = value.files();
                 else if (update instanceof ProgressUpdate.MetricChanged value) metrics.put(value.metric().code(), value.metric());
             }
+            if (old.status() == TaskStatus.RUNNING && stage.equals(old.stage())
+                    && Objects.equals(percent, old.overall().percent()) && summary.equals(old.summary())
+                    && active.equals(old.activeFiles()) && List.copyOf(metrics.values()).equals(old.metrics())) return old;
             return new ProgressSnapshot(old.progressId(), old.correlationId(), old.type(), old.category(), old.title(),
                     TaskStatus.RUNNING, Overall.of(percent), stage, List.copyOf(metrics.values()), active, summary,
                     old.resource(), old.error(), old.startedAt(), null, nextRevision(old));
@@ -333,6 +371,7 @@ public class RealtimeProgressService {
             List<FileWork> active = new ArrayList<>(old.activeFiles());
             FileWork previous = active.stream().filter(work -> work.fileId().equals(file.getId().toString())).findFirst().orElse(null);
             if (previous != null && previous.runVersion() > event.version()) return old;
+            if (previous != null && previous.runVersion() == event.version() && previous.stage().equals(event.stage())) return old;
             active.removeIf(work -> work.fileId().equals(file.getId().toString()));
             active.add(new FileWork(file.getId().toString(), file.getOriginalName(), event.stage(), TaskStatus.RUNNING, event.version()));
             return new ProgressSnapshot(old.progressId(), old.correlationId(), old.type(), old.category(), old.title(), old.status(),

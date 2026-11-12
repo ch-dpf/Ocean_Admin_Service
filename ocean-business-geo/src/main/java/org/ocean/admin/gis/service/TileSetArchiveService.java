@@ -117,8 +117,10 @@ public class TileSetArchiveService {
                 new Page<>(currentPage, pageSize), trimToNull(archiveNo), trimToNull(taskNo),
                 trimToNull(taskName), normalizeProcessingType(processingType),
                 normalizeArchiveStatus(archiveStatus), createTimeStart, createTimeEnd);
-        page.getRecords().forEach(r -> r.setProgress(ProgressSnapshot.reference(
-                r.getArchiveNo(), "GIS_TILE_SET_ARCHIVE", r.getArchiveStatus())));
+        page.getRecords().forEach(r -> {
+            r.setProgress(ProgressSnapshot.reference(r.getArchiveNo(), "GIS_TILE_SET_ARCHIVE", r.getArchiveStatus()));
+            r.applyProgress(r.getArchiveStatus() == TaskStatus.COMPLETED ? null : progressService.getCached(r.getArchiveNo()));
+        });
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(),
                 page.getRecords());
     }
@@ -130,6 +132,7 @@ public class TileSetArchiveService {
             throw new IllegalArgumentException("静态瓦片集归档不存在: " + normalizedArchiveNo);
         }
         archive.setProgress(ProgressSnapshot.reference(archiveNo, "GIS_TILE_SET_ARCHIVE", archive.getArchiveStatus()));
+        archive.applyProgress(archive.getArchiveStatus() == TaskStatus.COMPLETED ? null : progressService.getCached(normalizedArchiveNo));
         return archive;
     }
 
@@ -206,7 +209,7 @@ public class TileSetArchiveService {
                         .eq(GisTileSetArchive::getId, archiveId)
                         .eq(GisTileSetArchive::getArchiveStatus, TaskStatus.QUEUED)
                         .set(GisTileSetArchive::getArchiveStatus, TaskStatus.RUNNING)
-                        .set(GisTileSetArchive::getCurrentStage, "SCANNING")
+                        .set(GisTileSetArchive::getCurrentStage, "RUNNING")
                         .set(GisTileSetArchive::getStartTime, now)
                         .set(GisTileSetArchive::getUpdateTime, now)
                         .setSql("version = version + 1"));
@@ -215,48 +218,17 @@ public class TileSetArchiveService {
             return null;
         }
         GisTileSetArchive archive = archiveMapper.selectById(archiveId);
-        log.info("归档任务已领取: archiveId={}, archiveNo={}, status=RUNNING, stage=SCANNING",
+        log.info("归档任务已领取: archiveId={}, archiveNo={}, status=RUNNING",
                 archiveId, archive == null ? null : archive.getArchiveNo());
         return archive;
-    }
-
-    public void initializeProgress(Long archiveId, long totalFileCount, long totalBytes) {
-        if (totalFileCount < 1 || totalBytes < 0) {
-            throw new IllegalArgumentException("归档文件统计结果不合法");
-        }
-        int updated = archiveMapper.update(null,
-                new LambdaUpdateWrapper<GisTileSetArchive>()
-                        .eq(GisTileSetArchive::getId, archiveId)
-                        .eq(GisTileSetArchive::getArchiveStatus, TaskStatus.RUNNING)
-                        .set(GisTileSetArchive::getCurrentStage, "PACKING")
-                        .set(GisTileSetArchive::getTotalFileCount, totalFileCount)
-                        .set(GisTileSetArchive::getTotalBytes, totalBytes)
-                        .set(GisTileSetArchive::getUpdateTime, LocalDateTime.now())
-                        .setSql("version = version + 1"));
-        if (updated != 1) {
-            throw new IllegalStateException("静态瓦片集归档统计信息更新失败");
-        }
-        log.info("静态瓦片集归档进入打包阶段: archiveId={}, totalFiles={}, totalBytes={}",
-                archiveId, totalFileCount, totalBytes);
-    }
-
-    public void updateProgress(Long archiveId, long processedFileCount, long processedBytes) {
-        int updated = archiveMapper.update(null,
-                new LambdaUpdateWrapper<GisTileSetArchive>()
-                        .eq(GisTileSetArchive::getId, archiveId)
-                        .eq(GisTileSetArchive::getArchiveStatus, TaskStatus.RUNNING)
-                        .set(GisTileSetArchive::getProcessedFileCount, processedFileCount)
-                        .set(GisTileSetArchive::getProcessedBytes, processedBytes)
-                        .set(GisTileSetArchive::getUpdateTime, LocalDateTime.now())
-                        .setSql("version = version + 1"));
-        log.debug("静态瓦片集归档进度已持久化: archiveId={}, processedFiles={}, "
-                        + "processedBytes={}, updated={}",
-                archiveId, processedFileCount, processedBytes, updated);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public void markCompleted(Long archiveId, String storageKey, long archiveSizeBytes,
             String sha256, long totalFileCount, long totalBytes) {
+        if (totalFileCount < 1 || totalBytes < 0) {
+            throw new IllegalArgumentException("归档文件统计结果不合法");
+        }
         LocalDateTime now = LocalDateTime.now();
         int updated = archiveMapper.update(null,
                 new LambdaUpdateWrapper<GisTileSetArchive>()
@@ -264,6 +236,8 @@ public class TileSetArchiveService {
                         .eq(GisTileSetArchive::getArchiveStatus, TaskStatus.RUNNING)
                         .set(GisTileSetArchive::getArchiveStatus, TaskStatus.COMPLETED)
                         .set(GisTileSetArchive::getCurrentStage, "COMPLETED")
+                        .set(GisTileSetArchive::getTotalFileCount, totalFileCount)
+                        .set(GisTileSetArchive::getTotalBytes, totalBytes)
                         .set(GisTileSetArchive::getProcessedFileCount, totalFileCount)
                         .set(GisTileSetArchive::getProcessedBytes, totalBytes)
                         .set(GisTileSetArchive::getArchiveSizeBytes, archiveSizeBytes)

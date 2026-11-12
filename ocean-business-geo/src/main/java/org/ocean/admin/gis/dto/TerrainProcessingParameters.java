@@ -34,7 +34,8 @@ public record TerrainProcessingParameters(
         @Schema(description = "是否计算法线，默认 true") Boolean calculateNormals,
         @Schema(description = "是否继续上一次处理，默认 false") Boolean continuePrevious,
         @Schema(description = "是否保留临时文件，默认 false") Boolean leaveTemp,
-        @Schema(description = "是否生成 layer.json，默认 true") Boolean generateLayerJson)
+        @Schema(description = "是否生成 layer.json，默认 true") Boolean generateLayerJson,
+        @Schema(description = "高程集合、波段及转换到米的比例与偏移") RasterSelection raster)
         implements GisProcessingParameters {
 
     public TerrainProcessingParameters {
@@ -58,7 +59,7 @@ public record TerrainProcessingParameters(
         return new TerrainProcessingParameters(
                 "EPSG:4326", "TMS", "QUANTIZED_MESH",
                 0, null, "Ellipsoid", null, "BILINEAR", null, null,
-                true, false, false, true);
+                true, false, false, true, null);
     }
 
     @Override

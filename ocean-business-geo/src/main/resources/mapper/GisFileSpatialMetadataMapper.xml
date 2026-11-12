@@ -37,6 +37,7 @@
             FROM ocean_gis.gis_file_spatial_metadata sm
             JOIN ocean_gis.gis_file_meta fm ON fm.id = sm.file_meta_id
             WHERE fm.deleted = 0 AND fm.file_status = 'READY' AND fm.metadata_status = 'COMPLETED'
+              AND sm.geographic_extent IS NOT NULL
               AND fm.data_set_id IN
             <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
         ), prepared AS MATERIALIZED (

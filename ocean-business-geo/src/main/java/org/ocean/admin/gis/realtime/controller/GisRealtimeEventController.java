@@ -31,7 +31,7 @@ public class GisRealtimeEventController {
                     + "省略topics订阅全部GIS事件，跨域主题返回400。通用进度事件为gis.progress.updated，"
                     + "上传与工作区接入均使用统一gis.progress事件。无历史重放；重连后使用任务响应中的progress.queryUrl补查。"
                     + "请使用EventSource或支持SSE的客户端持续接收事件。")
-    @ApiResponse(responseCode = "200", description = "GIS事件流，上传批次通过recordNo关联，其余进度通过progressId关联",
+    @ApiResponse(responseCode = "200", description = "GIS事件流，所有进度通过data.progressId关联",
             content = @Content(mediaType = MediaType.TEXT_EVENT_STREAM_VALUE, schema = @Schema(type = "string")))
     @ApiResponse(responseCode = "400", description = "主题格式无效或不属于gis事件域",
             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,

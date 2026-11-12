@@ -305,10 +305,10 @@ CREATE TABLE ocean_gis.gis_file_spatial_metadata (
     layer_name              VARCHAR(255),
     data_kind               VARCHAR(16) NOT NULL CHECK (data_kind IN ('RASTER', 'VECTOR')),
     source_crs_code         VARCHAR(100),
-    source_crs_wkt          TEXT NOT NULL,
+    source_crs_wkt          TEXT,
     source_unit             VARCHAR(100),
     source_extent           JSONB NOT NULL,
-    geographic_extent       public.geometry(Geometry,4326) NOT NULL,
+    geographic_extent       public.geometry(Geometry,4326),
     extent_kind             VARCHAR(32) NOT NULL CHECK (extent_kind IN ('RASTER_FOOTPRINT', 'VECTOR_ENVELOPE')),
     raster_width            INTEGER CHECK (raster_width > 0),
     raster_height           INTEGER CHECK (raster_height > 0),
@@ -324,7 +324,7 @@ CREATE TABLE ocean_gis.gis_file_spatial_metadata (
     extra_metadata          JSONB NOT NULL DEFAULT '{}'::jsonb,
     CONSTRAINT uk_gis_file_spatial_metadata_layer UNIQUE (file_meta_id, layer_key),
     CONSTRAINT ck_gis_file_spatial_metadata_geometry
-        CHECK (NOT public.ST_IsEmpty(geographic_extent) AND public.ST_IsValid(geographic_extent)),
+        CHECK (geographic_extent IS NULL OR (NOT public.ST_IsEmpty(geographic_extent) AND public.ST_IsValid(geographic_extent))),
     CONSTRAINT ck_gis_file_spatial_metadata_zoom
         CHECK (recommended_max_zoom IS NULL OR (tile_matrix_set_id IS NOT NULL AND tile_width IS NOT NULL AND tile_height IS NOT NULL))
 );
@@ -332,7 +332,8 @@ CREATE TABLE ocean_gis.gis_file_spatial_metadata (
 CREATE INDEX idx_gis_file_spatial_metadata_extent ON ocean_gis.gis_file_spatial_metadata USING GIST (geographic_extent);
 CREATE INDEX idx_gis_file_spatial_metadata_zoom ON ocean_gis.gis_file_spatial_metadata (tile_matrix_set_id, recommended_max_zoom);
 COMMENT ON TABLE ocean_gis.gis_file_spatial_metadata IS '文件各图层的源空间参考、统一检索范围及推荐层级';
-COMMENT ON COLUMN ocean_gis.gis_file_spatial_metadata.geographic_extent IS 'EPSG:4326 经度/纬度范围；矢量包围范围不代表精确要素覆盖区';
+COMMENT ON COLUMN ocean_gis.gis_file_spatial_metadata.geographic_extent IS 'EPSG:4326 经度/纬度范围；空集合或无有效像元时为空，矢量包围范围不代表精确要素覆盖区';
+COMMENT ON COLUMN ocean_gis.gis_file_spatial_metadata.source_crs_wkt IS '源空间参考；无几何的属性集合可为空';
 COMMENT ON COLUMN ocean_gis.gis_file_spatial_metadata.recommended_max_zoom IS '按源分辨率估算的推荐层级，不代表成果实际层级';
 
 -- =========================================================

@@ -657,7 +657,14 @@ public class FileUploadUtil {
     private void reportUploadProgress(Consumer<ProgressStage> listener, String step, long completed, long total) {
         if (listener == null) return;
         try {
-            listener.accept(ProgressStage.determinate(step, step, completed, total, ProgressUnit.BYTE));
+            String message = switch (step) {
+                case "UPLOADING" -> "接收文件字节";
+                case "CHUNK_CONFIRMED" -> "分块已确认落盘";
+                case "VERIFYING" -> "校验文件完整性";
+                case "UPLOAD_ROLLBACK" -> "分块接收失败，恢复已确认偏移";
+                default -> step;
+            };
+            listener.accept(ProgressStage.determinate(step, message, completed, total, ProgressUnit.BYTE));
         } catch (RuntimeException ex) {
             log.debug("上传工作量回报失败: step={}, reason={}", step, ex.getMessage());
         }

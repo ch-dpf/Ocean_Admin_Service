@@ -27,6 +27,18 @@ public record ProgressSnapshot(String progressId, String correlationId, String t
 
     public Handle handle() { return new Handle(progressId, revision.epoch()); }
 
+    /** 按指定指标的优先级计算局部工作量百分比；总量未知时不推算整体进度。 */
+    public Integer metricPercent(String... codes) {
+        for (String code : codes) {
+            for (Metric metric : metrics) {
+                if (code.equals(metric.code()) && metric.total() != null && metric.total() > 0) {
+                    return (int) Math.min(100, (double) metric.value() * 100 / metric.total());
+                }
+            }
+        }
+        return null;
+    }
+
     public static Reference reference(String id, String type, TaskStatus status) {
         return new Reference(id, type, status, "/api/gis/progress/" + id, "/api/gis/events/stream?topics=gis.progress");
     }

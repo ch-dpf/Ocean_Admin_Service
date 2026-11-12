@@ -43,6 +43,7 @@ public class GisProcessingTaskSummaryVO {
     @Schema(description = "静态瓦片集归档状态：QUEUED、RUNNING、COMPLETED、FAILED")
     private TaskStatus archiveStatus;
 
+    @Schema(description = "归档打包百分比；实时快照或工作量总量不可用时为null")
     private Integer archiveProgress;
     private Boolean archiveDownloadAvailable;
     private LocalDateTime startTime;
