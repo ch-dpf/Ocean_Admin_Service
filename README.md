@@ -60,6 +60,92 @@ mvn -pl ocean-bootstrap -am spring-boot:run
 - `docs/ARCHITECTURE 架构说明.md`
 - `docs/DATABASE 数据库说明.md`
 
+## 应用配置
+
+`ocean-bootstrap/src/main/resources/application.yml` 只显式列出部署路径、对外地址、常用容量、外部进程参数和框架配置。本库的内部调优项由配置类字段或 `@Value` 的默认值提供，仍支持通过原标准配置键覆盖；不再在 YAML 中重复声明默认值与自定义环境变量别名。
+
+保留的本库配置包括：统一存储根目录与受控工作空间、单文件/单批/分片大小和磁盘余量；影像瓦片数量上限；GDAL 构建版本、堆大小、原生库路径和超时；发布公开地址；Mago 开关、Java 命令、JAR 路径、堆大小和超时；IP 离线库路径。Mago 继续使用仓库内 JAR 和 72 小时超时，默认工作空间相对于存储根目录解析为 `workspaces/default`；GDAL 版本继续由 Maven 资源过滤写入。
+
+以下内部参数不在主配置中展开，默认行为不变：
+
+| 标准配置前缀 | 默认值来源 | 主要默认值 |
+| --- | --- | --- |
+| `gis.vector.tiles` | `VectorTileProperties` | 压缩/解码上限 2/16 MiB、并发 4、排队 32、等待/查询 10 秒、本地缓存 64 项/64 MiB/300 秒、Redis 载荷 256 KiB |
+| `gis.upload` | `FileUploadConfig` | 流缓冲 1 MiB、空闲清理阈值 6 小时、清理周期 1 小时 |
+| `gis.processing` | `GisProcessingProperties` | 影像优化开启、预处理窗口 16777216 像素、概览最小尺寸 512、压缩级别 1、扫描上限 10000；GDAL 日志 64 KiB、元数据 16 MiB、输出 100 GiB |
+| `app.redis` | `RedisConnectionConfig` | 请求队列 128、进度超时 1 秒、瓦片缓存超时 500 毫秒 |
+| `ocean.platform.realtime.sse` / `ocean.gis.realtime.sse` | 两侧 SSE 发布器构造参数 | 各自连接 256、待发消息 64/512 KiB、发送线程 8、队列 256、心跳 15 秒、发送超时 10 秒、连接超时 30 分钟 |
+| `ocean.audit.operation-log` | `OperationLogConfig`、`OperationLogDispatcher`、`OperationLogSerializer` | 异步开启、线程 2～4、队列 500、请求/响应长度 8192/16384 |
+
+需要调优时，在外部 `application.yml` / `application.properties` 中填写完整配置键，或使用命令行 `--app.redis.progress-timeout=2s`。裸机与 Docker 部署均可通过部署环境文件中的 `JAVA_TOOL_OPTIONS` 传入 JVM 系统属性，例如：
+
+```properties
+JAVA_TOOL_OPTIONS=-Dapp.redis.progress-timeout=2s -Docean.gis.realtime.sse.max-connections=512 -Dgis.processing.gdal-max-output-bytes=214748364800
+```
+
+迁移时，主配置中保留的环境变量别名继续有效；已删除项请使用标准配置键，不再使用 `GIS_VECTOR_TILE_*`、`PLATFORM_SSE_*`、`GIS_SSE_*`、`OPERATION_LOG_*`、`REDIS_REQUEST_QUEUE_SIZE`、`REDIS_PROGRESS_TIMEOUT`、`REDIS_TILE_TIMEOUT` 等别名。上传缓冲/清理与处理内部参数的别名也一并删除，例如 `GIS_GDAL_MAX_OUTPUT_BYTES` 改为 `gis.processing.gdal-max-output-bytes`。这只收敛配置入口，不取消保护上限或外部覆盖能力。
+
+## GIS 资产存储
+
+统一入口为 `gis.storage.root-path`（环境变量 `GIS_STORAGE_ROOT`，默认 `gis`）。托管 Key 均相对于该根目录；相对工作空间路径也使用同一根目录，绝对工作空间路径用于外部原位接入。默认空间配置为 `gis.storage.workspaces.default=${GIS_STORAGE_WORKSPACE_DEFAULT:workspaces/default}`。
+
+| 相对目录 | 归属与保留规则 |
+| --- | --- |
+| `datasets/<dataSetId>/originals/<storageName>` | 平台托管原文件，继续按既有文件删除和原件释放规则管理 |
+| `datasets/<dataSetId>/vectors/<resourceId>.gpkg` | 矢量原始快照和工作资源；类型、状态、版本由数据库管理 |
+| `tilesets/<tileSetId>/tiles` | 地形、影像、矢量瓦片及成果描述文件 |
+| `tilesets/<tileSetId>/sources` | 发布长期依赖的 `source.gpkg/source.json`；直接上传处理的输入位于 `sources/uploads` |
+| `tilesets/<tileSetId>/archives` | 该成果的 ZIP 归档及生成中的 `.zip.part` |
+| `workspaces/default` | 外部维护的服务器原文件；登记和删除平台记录不搬迁或删除源文件 |
+| `cache/imagery` | 可重建影像分块和概览缓存 |
+| `runtime/uploads`、`runtime/deleting` | 上传分片与删除事务暂存 |
+| `runtime/processing/<taskNo>/temp`、`logs` | 单任务执行现场及引擎日志，独立于正式成果 |
+| `runtime/native-read`、`runtime/tile-workers` | GDAL 读取、预览及动态瓦片进程的受控临时目录 |
+
+瓦片集 ID 在输入准备前分配，成果归属瓦片集、执行现场归属任务。影像 `manifest.json` 的 `inputs` 保存 `storageKey` 或 `workspaceCode + relativePath`，WMS 通过统一存储入口定位，不保存原生临时目录绝对路径。数据库的 `storage_key`、`output_key`、`manifest_key` 及处理输入快照与同一命名规则一致。接口中的 `outputKey` 因而变为 `tilesets/<tileSetId>`，客户端应将其视为服务端返回的不透明标识。
+
+旧的 `gis.upload.base-path`、`gis.processing.base-path`、`gis.processing.imagery-cache-path`、`gis.processing.workspaces` 及相应环境变量已移除。已有部署须同时迁移实体文件、数据库 Key、任务输入快照、成果 JSON 和 ZIP 内的引用；归档修改后重新计算大小、SHA-256 和源字节统计。应用日志仍使用 `logging.file.name`，原生库、引擎 JAR 与 IP 离线库路径保持各自配置。
+
+2026-11-13 已完成本地开发库及实体存储迁移：更新 922 条记录、34 个瓦片集和 15 份归档的路径及引用，工作空间原文件保留原位。恢复了 38 份历史输入副本，另有 5 份迁移前已缺失的原文件未能恢复；具体范围、验证结果与备份位置见 [数据库说明的存储迁移记录](docs/DATABASE%20数据库说明.md#2026-11-13-gis-资产存储统一迁移)。应用不再读取旧目录或旧配置。
+
+## 主文件内容预览
+
+文件组与原始文件行的“预览”打开独立只读窗口，仅显示文件组主文件的名称和内容。配套文件参与读取，不提供其他文件、工作数据或发布成果的入口。预览不修改原文件、不生成切片、不发布服务。
+
+| 主文件 | 默认打开效果 |
+| --- | --- |
+| CSV | 原始字段表格，50条游标分页并显示总数；有几何时在几何列显示缩略图，可点击查看该条记录 |
+| PNG、JPG/JPEG、GIF | 原生图片，支持缩放、拖动、适应窗口；保留原始颜色与GIF帧；有定位时可切换地图 |
+| GeoTIFF、IMG、GRIB2 | 有限分辨率的栅格图像，多内容文件只提供必要的集合/波段选择；有定位时可切换地图 |
+| GeoJSON、SHP、DXF、MIF、TAB、GPX、DWG | 分页属性表及行内几何缩略图，点击只放大该条记录；该条可有效定位时提供地图切换 |
+
+单集合文件隐藏集合选择器。页面不展示修订、坐标系详情、原始JSON、像元分析、样式编辑、时次播放、对照、叠加或三维成果。CAD只展示当前GDAL驱动读取的二维几何，不承诺复现专业CAD排版、材质或完整符号。
+
+矢量读取主文件已有的SOURCE快照，不依赖工作图层；尚未生成快照时明确提示先在文件管理中生成。当前集合总数取快照保存的完整记录统计，包括无几何、无属性和不能绘制的记录，不是本页可绘制数量。每页固定50条，按来源行号游标顺序读取，一次响应同时携带本页属性、原坐标图形及可用的经纬度图形；属性中的大整数保持文本精度。分页表格中的几何列展示类型及轻量Canvas缩略图，独立等比例缩放，不表示实际大小或相对位置。点击单元格只放大该条记录；地图入口按该条实际可用的地图几何显示，交互视图始终只包含这一条记录。没有整页组合图形、适应当前页及图表高亮联动。
+
+记录、缩略图和页码仅在分页请求成功后一起更新，失败保留上一成功页并支持重试。单条查看、平移、缩放及图形/地图切换均复用已返回数据，不增发要素查询。行内不创建地图实例，单条窗口关闭或切换文件/集合后释放视图；几何解析失败仅影响该单元格，不中断其他记录的查看。
+
+后端仅提取本页属性与有界几何，避免重复传输完整Feature。单条属性超过16KiB时保留记录并说明未展开；单个源几何超过8MiB时不加载几何。每个显示几何最多2000个顶点、32KiB，超限时在临时副本上尝试保持拓扑的简化，仍不满足则仅保留表格；简化、无几何、超限或无法转换均逐行说明，不改写来源数据。原坐标图形与地图转换独立，地图不可用不影响属性和原坐标图形。空集合显示总数0；无属性记录仍有序号。集合能力范围来自GPKG缓存，不为打开窗口执行全文件范围扫描。跨日期变更线栅格使用保守全经度范围，避免截断西半球内容。
+
+普通图片在20MiB、3200万像素以内返回受控主文件原始字节，超限则使用GDAL有界渲染；专业栅格也按需读取，输出单边最多2048像素。图像视图不依赖地图底图。矢量由OpenLayers绘制行内缩略图和单条交互视图，栅格地图使用私有WMS；OSM底图不可用时提示原因，文件内容仍可查看。不依赖GeoServer或Cesium。
+
+私有接口前缀 `/api/gis/previews`，均要求登录和本人会话：
+
+- `POST /groups/{groupId}`：创建主文件读取会话，返回202。
+- `GET /{id}`：返回准备状态、主文件名称及实际内容能力。
+- `GET /{id}/features?layerKey=...&after=0&limit=50`：返回当前集合`total`、`rows`和有后续页时的`nextAfter`；数量与来源行号使用十进制字符串。每行含`sourceRowId`、仅包含原属性文本的`featureJson`、`geometry`、`mapGeometry`、`geometryStatus`、`mapStatus`及必要的`propertyNotice`。几何状态为`READY/SIMPLIFIED/EMPTY/LIMIT/UNAVAILABLE`，不可绘制时几何为null。`after`非负，`limit`为1至50；不再接收窗口或图形模式参数。
+- `GET /{id}/image?layerKey=...&band=...`：原生PNG/JPEG/GIF或渲染PNG；`band`仅供必要内容切换，省略时自动选择默认颜色。
+- `GET /{id}/wms`：WMS 1.3.0 GetCapabilities/GetMap，支持EPSG:3857、EPSG:4326、CRS:84，EPSG:4326遵循轴序；仅默认样式，扩展参数BAND选择内容，无GetFeatureInfo。
+- `DELETE /{id}`：释放本人会话，可重复关闭。
+
+会话15分钟到期，绑定输入修订；版本或来源变化后须重新打开。单用户最多4个、单实例32个；准备并发2/排队8、读取并发2，原生读取30秒超时；前端同会话串行、总并发2，传输45秒超时，错误不自动循环重试。资源使用 `private, no-store`。关闭后清理临时目录，已启动读取完成后回收资源。多实例部署需粘性路由，服务重启后重新打开；前后端需配套部署。
+
+2026-11-13验证：11项临时JUnit回归通过，包括真实GDAL栅格、无坐标/投影GPKG、空集合、容量限制、跨线地图、PNG/JPG/GIF隔离进程及原始字节、会话所有权和已移除接口拒绝；临时测试完成后删除。浏览器模拟接口验证主文件视图、按需地图、内容切换、分页失败重试、异常响应、会话到期与清理，无未捕获异常。后端模块链编译、前端类型检查/构建与lint通过。尚未重启现有业务服务，真实业务数据联调需加载新构建后进行。
+
+同日分页收敛验证：本次11项临时JUnit通过，覆盖真实GDAL连续/稀疏游标、大整数、空集合和空几何、无属性、复杂几何简化且源文件不变、超大几何/属性保留记录、地图坐标异常、准确总数及会话/快照校验；临时类按仓库要求删除。浏览器模拟接口回归覆盖总数与页码、图表对应选中、翻页失败保留/重试、平移缩放和模式切换不增发要素查询、关闭中的读取隔离，并回归原生图片与栅格地图。真实业务服务尚未重启加载本次调整。
+
+同日几何列收敛验证：前端移除上述整页图形及联动，改为行内缩略图与单条放大。本次lint、类型检查/构建及浏览器模拟接口回归通过，覆盖7类几何、单条视图只含一个要素、逐条地图能力、极小原坐标几何、嵌套弹窗键盘操作、无属性/空几何/超限及损坏记录、分页失败/重试、无额外要素请求、底图失败和视图释放，并回归图片与栅格地图。验证脚本在内存执行，未新增测试文件；后端接口及读取限制保持既有实现。本次未重启业务服务，真实业务数据联调尚需加载新版本。
+
 ## GIS 空间元数据与范围查询
 
 `GET /api/gis/dataSet/page` 仅接受 `current`、`size`、`categoryId`、`dataSetName`，返回数据集基本信息及文件数、文件组数、总大小，不查询或返回 `filePoints`，也不加载文件解析状态汇总。卡片按分类显示 `GET /api/gis/dataSet/thumbnails/{imagery|terrain|vector}.png` 提供的类型示意图，原图位于 GIS 模块的 `src/main/resources/static/dataset-thumbnails/`，浏览器缓存一天。示意图不代表数据集实际覆盖范围；详情按需调用 `GET /api/gis/dataSet/{id}/footprints?simplifyTolerance=0.001`，返回合并后的概略范围。前后端需同步更新。
@@ -108,6 +194,10 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 分页和详情返回提取状态、错误码及 `spatialReferences`。列表默认省略完整范围几何，`includeGeometry=true` 可返回 EPSG:4326 WKT；详情默认返回完整范围。栅格范围依据有效像元、NoData 与掩膜生成，并转换和切分跨经线几何；GeoJSON 使用坐标包围范围，不保证框内存在实际要素。空集合、纯属性集合和全 NoData 栅格可完成登记，其 `geographicExtent` 为 null，不参与空间框选；无空间参考的属性集合 `sourceCrsWkt` 为 null。
 
+栅格展示范围与米制分辨率共用坐标转换：优先采用已有基准转换；缺少基准参数时，按源投影还原经纬度、统一轴序和角度单位并修正本初子午线，使用地理坐标展示近似，不额外执行椭球形状转换。原始 CRS 保留，`extraMetadata.coordinateTransform` 记录 `purpose=DISPLAY`、`datumShiftOmitted`、操作名称和精度状态；近似转换标记 `accuracy=UNKNOWN` 并保存提示，不能作为精确定位依据。地理栅格允许极点格点的半像元外沿越界，并将实际覆盖裁到 ±90°；超出半像元的非法纬度仍失败。跨日期线分片合并共边、保留 NoData 孔洞。以上按 CRS 和网格语义处理，不依赖文件名、球体半径或输入格式。
+
+GDAL 标准化前逐波段校验尺寸并触发解码，发现原生驱动报告的网格冲突时返回 `INCONSISTENT_RASTER_GRID`，防止将定位错误或读取不完整的多网格容器登记为统一栅格；其他原生警告保存在 `extraMetadata.sourceMetadata.nativeWarnings`。2026-11-13 使用测试 GRIB2 数据集的 7 个原文件验证：6 个完成标准化及空间提取，混合 GRIB1/2 网格文件在第 7 波段明确拒绝；另有 16 项内存回归通过，覆盖普通/球体 GeoTIFF、已知基准转换、非 Greenwich 子午线、角度单位、极点、旋转网格、跨线孔洞、空 NoData、非法纬度与缺失 CRS。模块链 `mvn -pl ocean-business-geo -am test` 通过；验证未新增测试源文件，未重启现有服务或修改库内解析状态，加载新代码后须显式重新解析失败组。
+
 `recommendedMaxZoom` 按文件所属数据集的默认处理类型估算，并限制为 0～22。影像使用 `WebMercatorQuad`、256×256 像素口径，以 3×3 位置采样的 EPSG:3857 像素间距最大值估算；向下取整前对距整数层级不超过 1e-7 的浮点误差归整，避免原生第 14 层被误判为第 13 层。地形使用 `WorldCRS84Quad`，按当前固定版本 mago-3d-terrainer 的源 X 像素间距及末级细分规则计算默认可用深度。查询 `requiredZoom` 时须同时选择对应的 `tileMatrixSetId`，两种矩阵不混比。矢量或无法估算的文件该值为空；未知层级不命中 `requiredZoom`。该值不代表显式修改处理参数后或多文件组合生成的成果实际层级。
 
 提取沿用主入口文件的数据库待办、版本校验和 15 分钟租约，并同时核对组的 `inputRevision`，过期执行不能提交。服务重启后恢复可领取的解析待办，`PARKED` 不属于执行租约。扫描间隔由 `gis.metadata.poll-interval` 配置，默认 5000 毫秒；使用独立的两个执行线程。
@@ -128,7 +218,7 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 影像示例：`{"raster":{"bands":[3,2,1],"displayRange":[0,10000]}}`；无单位高程示例：`{"raster":{"bands":[1],"elevationScale":1}}`。没有明确颜色组合的多波段来源必须选波段，不默认取前三个；复数波段可接入，生成影像或地形前须先明确转换为实数物理量。处理输入按目标 CRS 重投影并转为引擎支持的像元布局，高程同时应用源 scale/offset 和单位换算。有效性在数值转换前固定，影像由透明度表达无效像元，高程派生输入使用NaN，避免合法转换值与原NoData值冲突。提交时校验已知的集合、波段和用途限制，全NoData集合拒绝生成成果；旧解析结果缺少完整波段描述时须显式重新解析。原始文件与原始数值不被处理参数覆盖。
 
-通用接入的边界仍包含真实驱动能力、完整配件、可解释的CRS和定位信息，以及既有文件大小、单要素、轮廓复杂度、执行时间和临时空间预算。当前空间元数据链路要求源CRS可表达为GeoTools支持的WKT1，并具备可用的坐标变换。满足扩展名或格式语法不等于自动满足这些空间与运行条件；接收成功、解析完成、能够生成指定用途成果是三个不同阶段。
+通用接入的边界仍包含真实驱动能力、完整配件、可解释的CRS和定位信息，以及既有文件大小、结构嵌套深度、轮廓复杂度、执行时间和临时空间预算。矢量文件导入不按单要素的顶点数、JSON节点数或几何与属性总大小拒绝数据，但完整单要素仍需装入内存，受实际内存及底层存储能力约束。当前空间元数据链路要求源CRS可表达为GeoTools支持的WKT1，并具备可用的坐标变换。满足扩展名或格式语法不等于自动满足这些空间与运行条件；接收成功、解析完成、能够生成指定用途成果是三个不同阶段。
 
 ### 按数据集生成静态瓦片
 
@@ -169,13 +259,21 @@ GET /api/gis/filemeta/page?west=110&north=30&east=115&south=25&spatialRelation=C
 
 数据库须安装 PostGIS；部署镜像使用 `postgis/postgis:16-3.5-alpine`。业务表与索引统一维护在 `db/migration/V2__init_ocean_gis.sql`。已有开发库需先补齐最终结构，再依次执行 `mvn flyway:repair`、`mvn flyway:validate`；repair 本身不会修改业务表结构。
 
-矢量文件逐要素流式导入，与在线编辑采用独立限额：导入单要素最多100万个顶点、400万个 JSON 节点，几何和属性合计不超过32MiB；在线编辑仍限制4MiB请求体。GDAL 矢量转换统一执行 MakeValid 并输出 RFC 7946，规范化后的几何继续通过 PostGIS 拓扑校验，不忽略转换失败的要素。全球面的长经差边界按平面线段解释，不仅凭经差超过180度拒绝导入。空几何和无位置记录保留在不可变原始快照中，工作图层不生成虚构几何，并通过 `vectorImport.emptyGeometryFeatures` 返回数量；未声明或未登记的 CRS 仍须补齐，不默认猜测坐标系。
+矢量文件逐要素流式导入，不设置单要素顶点数、JSON节点数以及几何与属性总大小的业务上限；导入及工作包重读允许大属性和大几何字符串。JSON结构、几何类型、坐标、面环闭合和嵌套深度校验继续执行；单个完整要素仍需装入内存。在线编辑独立限制20万个顶点、40万个JSON节点及4MiB请求体与几何属性总大小。GDAL 矢量转换统一执行 MakeValid 并输出 RFC 7946，规范化后的几何继续通过 PostGIS 拓扑校验，不忽略转换失败的要素。全球面的长经差边界按平面线段解释，不仅凭经差超过180度拒绝导入。空几何和无位置记录保留在不可变原始快照中，工作图层不生成虚构几何，并通过 `vectorImport.emptyGeometryFeatures` 返回数量；未声明或未登记的 CRS 仍须补齐，不默认猜测坐标系。
 
 栅格与 GDAL 输入在隔离的临时目录中重建，只暴露已登记组成员，避免自动借用源目录中未登记的辅助文件；原文件只读。全部栅格集合由 Java GDAL 工作进程生成256×256分块的临时 GeoTIFF。仿射定位保留源网格，GCP/RPC 定位生成规范化网格并记录重采样方法；Int64、复数等特殊数值类型保留在标准栅格中，另以Byte有效性代理提取轮廓。来源描述、规范化描述、重采样及业务转换规则分别记录，临时产物随解析上下文关闭清理。主服务监控整个工作进程的租约、超时、日志、元数据及临时输出限额；失败或取消后终止该进程及其后代，释放 Windows 文件句柄后清理临时目录。工作进程在读取前检查原生版本和实际驱动，缺库、版本不匹配、缺驱动或不支持文件版本时明确阻塞。
 
 ## 从受控服务器工作区接入数据
 
-`POST /api/gis/filemeta/workspace-files?dataSetId={id}` 原位接入服务器文件，必填查询参数 `dataSetId` 指定所属数据集。不转存或移动源文件，也不创建文件传输记录或切片处理任务；格式读取所需临时副本随读取上下文清理。工作区沿用 `gis.processing.workspaces` 配置。接口只校验入口，立即以HTTP 202返回 `dataSetId` 和统一 `progress` 引用（`progressId`、`type=GIS_WORKSPACE_IMPORT`、`status=QUEUED`、`queryUrl`、`eventsUrl`），目录遍历、登记、组装及空间提取进度均在后台推进。
+`GET /api/gis/filemeta/workspaces/{workspaceCode}` 查询工作区配置，接入弹窗使用 `GET /api/gis/filemeta/workspaces/DEFAULT` 获取根目录。响应示例（Docker部署）：
+
+```json
+{"code":200,"message":"操作成功","data":{"workspaceCode":"DEFAULT","rootPath":"/app/data/workspaces/default"}}
+```
+
+`workspaceCode` 不区分大小写，返回值统一大写；`rootPath` 与接入解析器使用同一份配置，返回规范化后的绝对路径，相对配置按后端进程工作目录解析。该路径是后端进程可见路径，容器部署时为容器内路径。接口不扫描、创建目录或检查目录可用性，因此配置目录尚不存在时也会返回路径；未配置或非法的工作区编码返回HTTP 400。前端可在“服务器相对路径”输入区域显示“工作区根目录：{rootPath}”，用户提交的 `relativePath` 继续填写相对于该根目录的路径。
+
+`POST /api/gis/filemeta/workspace-files?dataSetId={id}` 原位接入服务器文件，必填查询参数 `dataSetId` 指定所属数据集。不转存或移动源文件，也不创建文件传输记录或切片处理任务；格式读取所需临时副本随读取上下文清理。工作区沿用 `gis.storage.workspaces` 配置。接口只校验入口，立即以HTTP 202返回 `dataSetId` 和统一 `progress` 引用（`progressId`、`type=GIS_WORKSPACE_IMPORT`、`status=QUEUED`、`queryUrl`、`eventsUrl`），目录遍历、登记、组装及空间提取进度均在后台推进。
 
 ```json
 {"workspaceCode":"DEFAULT","relativePath":"survey/2026","includeSubdirectories":true,"vectorPlacement":"AUTO"}
@@ -297,7 +395,7 @@ const platformStream = subscribeEvents(
 
 平台与GIS分别使用专用有界线程池；单连接串行，每侧默认最多256条连接、每连接64条待发消息和512KiB待发UTF-8字节（含正在发送项）。数据在MVC异步响应初始化前留在应用有界队列中。发送超过10秒、队列超限或执行器饱和时回收连接并让客户端重连；不会把网络写入回退给业务线程。连接回收也由独立执行器完成，防止完成操作等待发送锁而阻塞业务。达到所属域的连接上限时返回503，不占用另一侧的连接额度。
 
-平台参数位于 `ocean.platform.realtime.sse`，GIS参数位于 `ocean.gis.realtime.sse`，各自包含max-connections、max-pending-messages、max-pending-bytes、send-threads、send-queue-capacity、heartbeat-interval-ms、send-timeout-ms、connection-timeout-ms。环境变量分别使用 `PLATFORM_SSE_*` 与 `GIS_SSE_*` 前缀，例如 `PLATFORM_SSE_MAX_CONNECTIONS`、`GIS_SSE_MAX_CONNECTIONS`。原 `ocean.realtime.sse` 与 `SSE_*` 配置已移除。实际超时回收由每秒维护任务检查，网络写入最终退出还取决于Servlet容器。
+平台参数位于 `ocean.platform.realtime.sse`，GIS参数位于 `ocean.gis.realtime.sse`，各自包含max-connections、max-pending-messages、max-pending-bytes、send-threads、send-queue-capacity、heartbeat-interval-ms、send-timeout-ms、connection-timeout-ms。默认值由各自发布器提供，按需使用完整配置键覆盖，例如 `--ocean.gis.realtime.sse.max-connections=512`，不再提供 `PLATFORM_SSE_*`、`GIS_SSE_*` 自定义环境变量别名。原 `ocean.realtime.sse` 与 `SSE_*` 配置已移除。实际超时回收由每秒维护任务检查，网络写入最终退出还取决于Servlet容器。
 
 部署代理必须保留 `/api/platform/monitor/metrics` 和 `/api/gis/events/stream` 路由并即时转发，关闭响应缓存、缓冲和SSE压缩。响应包含 `Cache-Control: no-store, no-transform` 与 `X-Accel-Buffering: no`；网关空闲超时应大于心跳间隔，浏览器入口推荐HTTP/2。Nginx可参考：
 
@@ -457,7 +555,7 @@ symbol 使用以下字段，保存时会补齐可选字段默认值，前端可�
 
 当前存储选择作用于整个数据集的已就绪工作图层。接入仍先完成 PostGIS 工作导入，可在导入完成后转为 GPKG；大规模导入需要预留转换期间的数据库和文件空间。工作区存在逐要素配图覆盖时，先保存独立样式方案并移除工作区覆盖再转换，避免要素表外键级联造成样式丢失。转换使用数据集锁与 ETag，失败回滚数据库切换并清理新文件；可再次提交原操作。
 
-GPKG 适合分散只读存储，不保证任意数据量和并发下都优于 PostGIS。动态瓦片采用 RTree 范围查询、级别抽析、有限进程并发和有界缓存；密集数据仍可能触发体积/时间限额。文件位于 `gis.processing.basePath/vector-resources`，多实例必须能访问相同托管目录；备份应同时包括数据库目录元数据和 GPKG 文件。
+GPKG 适合分散只读存储，不保证任意数据量和并发下都优于 PostGIS。动态瓦片采用 RTree 范围查询、级别抽析、有限进程并发和有界缓存；密集数据仍可能触发体积/时间限额。文件位于 `<gis.storage.root-path>/datasets/<dataSetId>/vectors`，多实例必须能访问相同托管目录；备份应同时包括数据库目录元数据和 GPKG 文件。
 
 ### 一份动态瓦片，多套独立样式
 

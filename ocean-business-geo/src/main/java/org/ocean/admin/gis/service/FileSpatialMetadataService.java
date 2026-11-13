@@ -350,7 +350,7 @@ public class FileSpatialMetadataService {
         VectorBounds bounds = new VectorBounds();
         long totalBytes = Files.size(path);
         progress.accept(ProgressStage.determinate("GEOJSON_PARSING", "解析 GeoJSON 空间范围", 0, totalBytes, ProgressUnit.BYTE));
-        try (JsonParser parser = objectMapper.createParser(path.toFile())) {
+        try (JsonParser parser = GeoJsonFeatureReader.openImport(path)) {
             if (parser.nextToken() != JsonToken.START_OBJECT) throw new MetadataException("INVALID_GEOJSON", "GeoJSON 根节点必须为对象");
             readGeoJsonObject(parser, bounds, () -> {
                 heartbeat.run();

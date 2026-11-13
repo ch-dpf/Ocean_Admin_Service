@@ -13,7 +13,7 @@ import java.util.function.Consumer;
 public interface GisProcessingInputResolver {
     GisInputSourceType type();
 
-    PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo);
+    PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo, long tileSetId);
 
     List<Path> resolveRuntime(List<GisProcessingInput> inputs);
 

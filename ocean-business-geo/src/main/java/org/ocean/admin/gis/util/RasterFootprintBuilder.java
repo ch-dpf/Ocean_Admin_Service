@@ -126,7 +126,9 @@ public final class RasterFootprintBuilder {
                 collectPolygons(shifted, polygons);
             }
         }
-        Geometry result = GEOGRAPHIC.createMultiPolygon(polygons.toArray(Polygon[]::new));
+        // 全球栅格经度归一化后的分片可能共边，合并实际覆盖区以消除内部接缝，保留孔洞。
+        Geometry result = GEOGRAPHIC.createMultiPolygon(polygons.toArray(Polygon[]::new)).union();
+        if (result instanceof Polygon polygon) result = GEOGRAPHIC.createMultiPolygon(new Polygon[]{polygon});
         if (result.isEmpty() || !result.isValid()) throw failure("INVALID_EXTENT", "归一化后的栅格轮廓无效");
         if (result.getNumPoints() > maximumCoordinates) throw failure("FOOTPRINT_TOO_COMPLEX", "地理轮廓超出坐标限额");
         return result;

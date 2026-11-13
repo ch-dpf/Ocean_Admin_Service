@@ -108,6 +108,11 @@ public class GisFileMetaVO {
     @Schema(description = "更新时间", accessMode = Schema.AccessMode.READ_ONLY)
     private LocalDateTime updateTime;
 
+    @Schema(description = "工作区接入配置")
+    public record WorkspaceInfo(
+            @Schema(description = "规范化的大写工作区编码", example = "DEFAULT") String workspaceCode,
+            @Schema(description = "后端配置的规范化绝对根路径；容器部署时为容器内路径") String rootPath) { }
+
     public record WorkspaceRequest(
             @NotBlank @Size(max = 64) String workspaceCode,
             @NotBlank @Size(max = 1000) String relativePath,

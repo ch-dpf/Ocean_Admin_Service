@@ -78,12 +78,9 @@ public class GeoTiffPreprocessor {
     private final int overviewMinimumSize;
     private final GeoTiffOverviewBuilder overviewBuilder;
 
-    public GeoTiffPreprocessor(GisProcessingProperties properties,
+    public GeoTiffPreprocessor(GisProcessingProperties properties, org.ocean.admin.gis.service.GisStorageService storage,
             GeoTiffOverviewBuilder overviewBuilder) {
-        Path processingRoot = Path.of(properties.getBasePath()).toAbsolutePath().normalize();
-        Path configuredCache = Path.of(properties.getImageryCachePath());
-        this.cacheRoot = (configuredCache.isAbsolute()
-                ? configuredCache : processingRoot.resolve(configuredCache)).normalize();
+        this.cacheRoot = storage.resolveKey("cache/imagery");
         this.enabled = properties.isImageryOptimizationEnabled();
         this.maxWindowPixels = properties.getImageryPreprocessingMaxWindowPixels();
         this.overviewMinimumSize = properties.getImageryOverviewMinSize();

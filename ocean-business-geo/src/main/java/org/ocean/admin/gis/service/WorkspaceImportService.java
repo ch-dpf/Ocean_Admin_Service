@@ -72,6 +72,12 @@ public class WorkspaceImportService {
     @Resource(name = "taskExecutor")
     private Executor workspaceExecutor;
 
+    /** 查询配置的工作区根路径，供接入界面说明相对路径的起点。 */
+    public GisFileMetaVO.WorkspaceInfo workspaceInfo(String workspaceCode) {
+        Path root = workspaceResolver.configuredRoot(workspaceCode);
+        return new GisFileMetaVO.WorkspaceInfo(workspaceCode.toUpperCase(Locale.ROOT), root.toString());
+    }
+
     /**
      * 扫描、登记和解析进度在后台完成
      * @param dataSetId 数据集ID

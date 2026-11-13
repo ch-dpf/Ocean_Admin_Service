@@ -86,49 +86,27 @@ knife4j:
   basic:
     enable: false
 
-
+# 仅列部署、容量与外部进程参数；内部调优项使用代码默认值。
+# 需要调优时使用原配置键覆盖，具体分组与示例见 README.md 的“应用配置”。
 gis:
-  vector:
-    tiles:
-      # 与已启用的MVT GZIP压缩一致；解码体积另设硬上限保护服务端和浏览器。
-      max-tile-bytes: ${GIS_VECTOR_TILE_MAX_BYTES:2097152}
-      max-decoded-tile-bytes: ${GIS_VECTOR_TILE_MAX_DECODED_BYTES:16777216}
-      max-concurrent-queries: ${GIS_VECTOR_TILE_MAX_CONCURRENT:4}
-      max-queued-queries: ${GIS_VECTOR_TILE_MAX_QUEUED:32}
-      queue-wait-ms: ${GIS_VECTOR_TILE_QUEUE_WAIT_MS:10000}
-      query-timeout-ms: ${GIS_VECTOR_TILE_QUERY_TIMEOUT_MS:10000}
-      tile-cache-ttl-seconds: ${GIS_VECTOR_TILE_CACHE_TTL_SECONDS:300}
-      max-cached-tiles: ${GIS_VECTOR_TILE_MAX_CACHED:64}
-      max-local-cache-bytes: ${GIS_VECTOR_TILE_LOCAL_CACHE_BYTES:67108864}
-      max-redis-value-bytes: ${GIS_VECTOR_TILE_REDIS_VALUE_BYTES:262144}
+  storage:
+    root-path: ${GIS_STORAGE_ROOT:gis}
+    workspaces:
+      # 相对路径统一相对于存储根目录，外部工作空间可填写绝对路径。
+      default: ${GIS_STORAGE_WORKSPACE_DEFAULT:workspaces/default}
   upload:
-    base-path: ${GIS_UPLOAD_BASE_PATH:gis/uploads}
     max-file-size: ${GIS_UPLOAD_MAX_FILE_SIZE:25GB}
     max-batch-size: ${GIS_UPLOAD_MAX_BATCH_SIZE:100GB}
     max-chunk-size: ${GIS_UPLOAD_MAX_CHUNK_SIZE:128MB}
-    stream-buffer-size: ${GIS_UPLOAD_STREAM_BUFFER_SIZE:1MB}
     min-free-space: ${GIS_UPLOAD_MIN_FREE_SPACE:20GB}
-    idle-timeout: ${GIS_UPLOAD_IDLE_TIMEOUT:6h}
-    cleanup-interval: ${GIS_UPLOAD_CLEANUP_INTERVAL:1h}
   processing:
-    base-path: ${GIS_PROCESSING_BASE_PATH:gis/processing}
-    imagery-cache-path: ${GIS_IMAGERY_CACHE_PATH:imagery/cache}
-    imagery-optimization-enabled: ${GIS_IMAGERY_OPTIMIZATION_ENABLED:true}
-    imagery-preprocessing-max-window-pixels: ${GIS_IMAGERY_PREPROCESSING_MAX_WINDOW_PIXELS:16777216}
     # 0 表示不限制影像单任务瓦片数量，正数表示指定上限。
     imagery-max-tile-count: ${GIS_IMAGERY_MAX_TILE_COUNT:0}
-    imagery-overview-min-size: ${GIS_IMAGERY_OVERVIEW_MIN_SIZE:512}
-    archive-compression-level: ${GIS_ARCHIVE_COMPRESSION_LEVEL:1}
-    workspace-max-scan-entries: ${GIS_WORKSPACE_MAX_SCAN_ENTRIES:10000}
+    # 构建时与 Maven 的 GDAL 依赖版本保持一致。
     gdal-version: '@gdal.version@'
     gdal-worker-max-heap: ${GIS_GDAL_WORKER_MAX_HEAP:1g}
     gdal-native-library-path: ${GIS_GDAL_NATIVE_LIBRARY_PATH:}
     gdal-process-timeout: ${GIS_GDAL_PROCESS_TIMEOUT:30m}
-    gdal-max-log-bytes: ${GIS_GDAL_MAX_LOG_BYTES:65536}
-    gdal-max-metadata-bytes: ${GIS_GDAL_MAX_METADATA_BYTES:16777216}
-    gdal-max-output-bytes: ${GIS_GDAL_MAX_OUTPUT_BYTES:107374182400}
-    workspaces:
-      default: ${GIS_PROCESSING_WORKSPACE_DEFAULT:gis/workspaces/default}
   publication:
     # 对外返回的服务地址；经反向代理部署时配置为浏览器可访问的域名。
     public-base-url: ${GIS_PUBLIC_BASE_URL:http://192.168.14.65:8090}
@@ -140,44 +118,9 @@ gis:
       max-heap: ${GIS_TERRAIN_MAGO_MAX_HEAP:8g}
       process-timeout: ${GIS_TERRAIN_MAGO_PROCESS_TIMEOUT:72h}
 
-app:
-  redis:
-    request-queue-size: ${REDIS_REQUEST_QUEUE_SIZE:128}
-    progress-timeout: ${REDIS_PROGRESS_TIMEOUT:1s}
-    tile-timeout: ${REDIS_TILE_TIMEOUT:500ms}
-
 ocean:
-  platform:
-    realtime:
-      sse:
-        max-connections: ${PLATFORM_SSE_MAX_CONNECTIONS:256}
-        max-pending-messages: ${PLATFORM_SSE_MAX_PENDING_MESSAGES:64}
-        max-pending-bytes: ${PLATFORM_SSE_MAX_PENDING_BYTES:524288}
-        send-threads: ${PLATFORM_SSE_SEND_THREADS:8}
-        send-queue-capacity: ${PLATFORM_SSE_SEND_QUEUE_CAPACITY:256}
-        heartbeat-interval-ms: ${PLATFORM_SSE_HEARTBEAT_INTERVAL_MS:15000}
-        send-timeout-ms: ${PLATFORM_SSE_SEND_TIMEOUT_MS:10000}
-        connection-timeout-ms: ${PLATFORM_SSE_CONNECTION_TIMEOUT_MS:1800000}
-  gis:
-    realtime:
-      sse:
-        max-connections: ${GIS_SSE_MAX_CONNECTIONS:256}
-        max-pending-messages: ${GIS_SSE_MAX_PENDING_MESSAGES:64}
-        max-pending-bytes: ${GIS_SSE_MAX_PENDING_BYTES:524288}
-        send-threads: ${GIS_SSE_SEND_THREADS:8}
-        send-queue-capacity: ${GIS_SSE_SEND_QUEUE_CAPACITY:256}
-        heartbeat-interval-ms: ${GIS_SSE_HEARTBEAT_INTERVAL_MS:15000}
-        send-timeout-ms: ${GIS_SSE_SEND_TIMEOUT_MS:10000}
-        connection-timeout-ms: ${GIS_SSE_CONNECTION_TIMEOUT_MS:1800000}
   audit:
     ip-location:
       # ip2region 离线库由部署环境独立维护；未配置时公网地址降级为“未知”。
       ipv4-xdb-path: ${IP2REGION_V4_XDB_PATH:}
       ipv6-xdb-path: ${IP2REGION_V6_XDB_PATH:}
-    operation-log:
-      async-enabled: ${OPERATION_LOG_ASYNC_ENABLED:true}
-      core-pool-size: ${OPERATION_LOG_CORE_POOL_SIZE:2}
-      max-pool-size: ${OPERATION_LOG_MAX_POOL_SIZE:4}
-      queue-capacity: ${OPERATION_LOG_QUEUE_CAPACITY:500}
-      request-max-length: ${OPERATION_LOG_REQUEST_MAX_LENGTH:8192}
-      response-max-length: ${OPERATION_LOG_RESPONSE_MAX_LENGTH:16384}

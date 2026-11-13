@@ -46,7 +46,8 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
         if (path == null || !path.startsWith("/api/")) {
             return true;
         }
-        if (PUBLIC_PATHS.contains(path) || path.startsWith("/api/gis")) {
+        boolean privatePreview = path.startsWith("/api/gis/previews/");
+        if (PUBLIC_PATHS.contains(path) || path.startsWith("/api/gis") && !privatePreview) {
             return true;
         }
 
@@ -83,7 +84,8 @@ public class RolePermissionInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        if (!analystAdminApi && !assistantApi && UserRoleService.ROLE_TYPE_REVIEWER.equals(roleType) && !isReadMethod(method)) {
+        // 预览POST/DELETE只创建和释放本人临时读取会话，不改变业务数据。
+        if (!analystAdminApi && !assistantApi && !privatePreview && UserRoleService.ROLE_TYPE_REVIEWER.equals(roleType) && !isReadMethod(method)) {
             writeError(response, 403, "审查员仅可查看数据，不可执行写操作");
             return false;
         }

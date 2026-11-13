@@ -30,7 +30,7 @@ public class VectorResourceInputResolver implements GisProcessingInputResolver {
 
     @Override public GisInputSourceType type() { return GisInputSourceType.VECTOR_RESOURCE; }
 
-    @Override public PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo) {
+    @Override public PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo, long tileSetId) {
         var parameters = (VectorProcessingParameters) command.parameters();
         var state = styles.require(parameters.dataSetId(), false);
         if (!state.getDataRevision().equals(parameters.dataRevision()))
@@ -42,13 +42,13 @@ public class VectorResourceInputResolver implements GisProcessingInputResolver {
         input.setSourceDataSetId(parameters.dataSetId());
         input.setOriginalName("source.gpkg");
         input.setExtension("gpkg");
-        input.setStorageKey(storage.taskWorkspace(GisProcessingType.VECTOR, taskNo).outputKey());
+        input.setStorageKey(storage.taskWorkspace(tileSetId, taskNo).outputKey());
         return new PreparedInputs(List.of(input), null);
     }
 
     @Override public List<Path> resolveRuntime(List<GisProcessingInput> inputs) {
         if (inputs.size() != 1) throw new IllegalArgumentException("矢量任务只接受一个工作数据快照");
-        return List.of(storage.workspaceFromOutputKey(inputs.getFirst().getStorageKey()).tempPath().resolve("source.gpkg"));
+        return List.of(storage.resolveSources(inputs.getFirst().getStorageKey()).resolve("source.gpkg"));
     }
 
     @Override public RuntimeInputs openRuntime(List<GisProcessingInput> inputs,

@@ -17,3 +17,8 @@ logs/
 /deploy/docker/logs/
 /deploy/docker/backups/
 .runtime/
+
+/gis/datasets/
+/gis/tilesets/
+/gis/cache/
+/gis/runtime/

@@ -85,7 +85,7 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
     }
 
     @Override
-    public PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo) {
+    public PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo, long tileSetId) {
         List<GroupSnapshot> snapshots;
         if (command.dataSetId() != null) {
             if (command.fileMetaIds() != null) throw new IllegalArgumentException("数据集整体提交不能同时指定文件ID");

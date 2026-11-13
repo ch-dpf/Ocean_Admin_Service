@@ -42,13 +42,14 @@ public class VectorResourceService {
     private final GisVectorTileMapper gisVectorTileMapper;
     private final GdalDatasetReader reader;
     private final GeoPackageStore store;
+    private final GisStorageService storage;
     private final ObjectMapper json;
     private final TransactionTemplate transactions;
     private final VectorDataSetStyleService styles;
     private final VectorRenderPlanner planner;
     private final org.ocean.admin.gis.util.VectorTileEncoder encoder;
 
-    public Path workingInput(long id) throws IOException { return store.path(id + ".ndjson"); }
+    public Path workingInput(long dataSetId, long id) throws IOException { return store.path(storage.vectorKey(dataSetId, id, "ndjson")); }
 
     public void importWorking(long id, GisFileMeta source, List<GisVectorLayer> layers,
                               Runnable guard, Runnable heartbeat) throws IOException {
@@ -56,20 +57,20 @@ public class VectorResourceService {
         definition.set("layers", json.valueToTree(layers));
         boolean registered = false;
         try {
-            JsonNode result = store.build(id, definition, heartbeat);
+            JsonNode result = store.build(source.getDataSetId(), id, definition, heartbeat);
             var resource = resource(id, source.getDataSetId(), source.getId(), "WORKING", definition);
             transactions.executeWithoutResult(tx -> {
                 guard.run();
-                rollbackCleanup(id);
+                rollbackCleanup(source.getDataSetId(), id);
                 gisVectorResourceMapper.insertResource(resource);
                 layers.forEach(layer -> gisVectorFeatureMapper.assignResource(layer.getId(), id));
                 updateStatistics(result);
             });
             registered = true;
         } finally {
-            Files.deleteIfExists(store.path(id + ".ndjson"));
-            Files.deleteIfExists(store.path(id + ".partial"));
-            if (!registered) Files.deleteIfExists(store.path(id + ".gpkg"));
+            Files.deleteIfExists(store.path(storage.vectorKey(source.getDataSetId(), id, "ndjson")));
+            Files.deleteIfExists(store.path(storage.vectorKey(source.getDataSetId(), id, "partial")));
+            if (!registered) Files.deleteIfExists(store.path(storage.vectorKey(source.getDataSetId(), id, "gpkg")));
         }
     }
 
@@ -196,13 +197,13 @@ public class VectorResourceService {
         try (var context = reader.prepareSnapshot(group, members, heartbeat, progress)) {
             context.verifySources();
             long id = IdWorker.getId();
-            store.install(context.snapshotPath(), id);
+            store.install(context.snapshotPath(), source.getDataSetId(), id);
             GisVectorResource resource = resource(id, source.getDataSetId(), source.getId(), "SOURCE", context.packageResult());
             try {
                 transactions.executeWithoutResult(tx -> {
                     guard.run();
                     if (gisVectorResourceMapper.sourceResource(source.getId()) != null) throw new IllegalStateException("原始快照已创建");
-                    rollbackCleanup(id);
+                    rollbackCleanup(source.getDataSetId(), id);
                     gisVectorResourceMapper.insertResource(resource);
                     for (JsonNode node : context.packageResult().path("layers")) {
                         var layer = new GisVectorSourceLayer();
@@ -213,7 +214,7 @@ public class VectorResourceService {
                         gisVectorResourceMapper.insertSourceLayer(layer);
                     }
                 });
-            } catch (RuntimeException ex) { Files.deleteIfExists(store.path(id + ".gpkg")); throw ex; }
+            } catch (RuntimeException ex) { Files.deleteIfExists(store.path(storage.vectorKey(source.getDataSetId(), id, "gpkg"))); throw ex; }
         }
     }
 
@@ -255,6 +256,27 @@ public class VectorResourceService {
         var resource = gisVectorResourceMapper.resource(id);
         if (resource == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "矢量资源版本不存在");
         return resource;
+    }
+
+    /** 一次读取主文件快照中各集合的图形范围和可验证地图能力。 */
+    public JsonNode describePreview(Long fileId) throws IOException {
+        var resource = gisVectorResourceMapper.sourceResource(fileId);
+        if (resource == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "原始快照尚未生成");
+        return store.preview(resource.getStorageKey(), "", 0, 0, "describe");
+    }
+
+    /** 同一页同时返回属性、原坐标图形和地图图形，数量取当前冻结快照的统计。 */
+    public JsonNode previewSource(Long sourceLayerId, long after, int limit) throws IOException {
+        var layer = gisVectorResourceMapper.sourceLayer(sourceLayerId);
+        if (layer == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "原始集合不存在");
+        var resource = require(layer.getResourceId());
+        if (!"SOURCE".equals(resource.getResourceKind())) throw new IllegalArgumentException("不是原始集合快照");
+        if (after < 0 || limit < 1 || limit > 50) throw new IllegalArgumentException("预览每页须为1至50条");
+        if (layer.getFeatureCount() == null || layer.getFeatureCount() < 0)
+            throw new IllegalArgumentException("来源集合统计不可用，请重新生成快照");
+        ObjectNode page = (ObjectNode) store.preview(resource.getStorageKey(), layer.getTableName(), after, limit, "page");
+        page.put("total", layer.getFeatureCount().toString());
+        return page;
     }
 
     public void verifySourceSnapshot(Long fileId) throws IOException {
@@ -350,7 +372,7 @@ public class VectorResourceService {
             var node = (ObjectNode) json.valueToTree(layer); node.put("table", "l_" + layer.getId()); layerNodes.add(node);
         }
         long id = IdWorker.getId();
-        rollbackCleanup(id);
+        rollbackCleanup(dataSetId, id);
         // 单个工作包已具备完整显示表和 RTree；分类与显示契约一致时不再逐要素导出、重建。
         GisVectorResource source = layers.getFirst().getResourceId() == null ? null : require(layers.getFirst().getResourceId());
         boolean copyPackage = source != null && "GPKG".equals(source.getStorageType())
@@ -372,16 +394,16 @@ public class VectorResourceService {
             }
         }
         if (copyPackage) {
-            store.install(store.path(source.getStorageKey()), id, heartbeat, progress);
+            store.install(store.path(source.getStorageKey()), dataSetId, id, heartbeat, progress);
         } else {
             progress.accept(ProgressStage.indeterminate("VECTOR_SNAPSHOT", "合并工作资源并建立显示索引"));
-            try (var writer = Files.newBufferedWriter(store.path(id + ".ndjson"))) {
+            try (var writer = Files.newBufferedWriter(store.path(storage.vectorKey(dataSetId, id, "ndjson")))) {
                 forEachBatch(layers, batch -> {
                     heartbeat.run();
                     for (var feature : batch) { writer.write(json.writeValueAsString(feature)); writer.newLine(); }
                 });
             }
-            store.build(id, definition, heartbeat);
+            store.build(dataSetId, id, definition, heartbeat);
         }
         var resource = resource(id, dataSetId, null, kind, definition);
         resource.setDataVersion(state.getDataRevision()); gisVectorResourceMapper.insertResource(resource);
@@ -414,18 +436,18 @@ public class VectorResourceService {
     private GisVectorResource resource(long id, Long dataSetId, Long fileId, String kind, JsonNode definition) throws IOException {
         var resource = new GisVectorResource(); resource.setId(id); resource.setDataSetId(dataSetId);
         resource.setSourceFileId(fileId); resource.setResourceKind(kind); resource.setStorageType("GPKG");
-        resource.setStorageKey(id + ".gpkg"); resource.setDataVersion(1L); resource.setStatus("READY");
+        resource.setStorageKey(storage.vectorKey(dataSetId, id, "gpkg")); resource.setDataVersion(1L); resource.setStatus("READY");
         resource.setChecksum(store.checksum(resource.getStorageKey())); resource.setSizeBytes(Files.size(store.path(resource.getStorageKey())));
         resource.setDefinitionJson(json.writeValueAsString(definition)); return resource;
     }
 
-    private void rollbackCleanup(long id) {
+    private void rollbackCleanup(long dataSetId, long id) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) throw new IllegalStateException("资源登记必须在事务中执行");
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCompletion(int status) {
                 if (status == STATUS_COMMITTED) return;
-                for (String suffix : List.of(".gpkg", ".partial", ".ndjson")) {
-                    try { Files.deleteIfExists(store.path(id + suffix)); }
+                for (String suffix : List.of("gpkg", "partial", "ndjson")) {
+                    try { Files.deleteIfExists(store.path(storage.vectorKey(dataSetId, id, suffix))); }
                     catch (IOException ex) { org.slf4j.LoggerFactory.getLogger(VectorResourceService.class).warn("回滚后矢量临时资源清理失败: {}", id, ex); }
                 }
             }

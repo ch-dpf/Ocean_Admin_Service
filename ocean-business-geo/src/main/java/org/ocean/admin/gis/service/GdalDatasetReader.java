@@ -56,18 +56,20 @@ import java.util.regex.Pattern;
 @Component
 public class GdalDatasetReader {
     private final GisProcessingProperties properties;
+    private final GisStorageService storage;
     private final ControlledWorkspaceResolver sources;
     private final ObjectMapper json;
     private final GdalTileWorkerPool tileWorkers;
     private final GdalTileWorkerPool mapWorkers;
 
-    public GdalDatasetReader(GisProcessingProperties properties, ControlledWorkspaceResolver sources, ObjectMapper json,
+    public GdalDatasetReader(GisStorageService storage, GisProcessingProperties properties, ControlledWorkspaceResolver sources, ObjectMapper json,
                              GdalTileWorkerPool tileWorkers, org.ocean.admin.gis.config.VectorTileProperties limits) {
+        this.storage = storage;
         this.properties = properties;
         this.sources = sources;
         this.json = json;
         this.tileWorkers = tileWorkers;
-        this.mapWorkers = new GdalTileWorkerPool(properties, limits, json, 2);
+        this.mapWorkers = new GdalTileWorkerPool(storage, properties, limits, json, 2);
     }
 
     @jakarta.annotation.PreDestroy
@@ -198,6 +200,24 @@ public class GdalDatasetReader {
 
     private ReadContext prepare(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
                                 Consumer<ProgressStage> progress, boolean snapshotOnly, GisProcessingParameters parameters) {
+        return prepare(group, members, heartbeat, progress, snapshotOnly, parameters, false);
+    }
+
+    /** 只准备受控成员及描述信息，预览不生成全幅标准化栅格。 */
+    public ReadContext preparePreview(GisFileGroup group, List<GisFileMeta> members) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+        var preparing = new java.util.concurrent.atomic.AtomicBoolean(true);
+        try {
+            return prepare(group, members, () -> {
+                if (Thread.currentThread().isInterrupted() || preparing.get() && System.nanoTime() > deadline)
+                    throw failure("PREVIEW_TIMEOUT", "预览来源准备超时，请检查文件大小与存储位置");
+            }, stage -> { }, false, null, true);
+        } finally { preparing.set(false); }
+    }
+
+    private ReadContext prepare(GisFileGroup group, List<GisFileMeta> members, Runnable heartbeat,
+                                Consumer<ProgressStage> progress, boolean snapshotOnly,
+                                GisProcessingParameters parameters, boolean previewOnly) {
         if (group == null || members == null || members.isEmpty()) throw failure("MISSING_GROUP", "文件组没有可读取成员");
         GisFileFormat format;
         try { format = GisFileFormat.valueOf(group.getFormat()); }
@@ -226,7 +246,7 @@ public class GdalDatasetReader {
             if (!zeroColumnMif && !extensions.containsAll(format.requiredExtensions())) throw failure("MISSING_REQUIRED_MEMBERS", "文件组缺少必要配套文件: " + format.requiredExtensions());
             context.verifySources();
             Path entryPath;
-            if (!snapshotOnly && format == GisFileFormat.GEOJSON && members.size() == 1) {
+            if (!snapshotOnly && !previewOnly && format == GisFileFormat.GEOJSON && members.size() == 1) {
                 entryPath = context.snapshots.getFirst().path();
             } else {
                 Path staged = context.directory().resolve("source");
@@ -278,7 +298,19 @@ public class GdalDatasetReader {
                 }
             }
             context.verifySources();
-            if (snapshotOnly) {
+            if (previewOnly) {
+                context.previewRequest = json.createObjectNode().put("operation", "PREVIEW")
+                        .put("input", entryPath.toString()).put("format", format.name());
+                context.previewRequest.set("options", options);
+                context.packageResult = context.preview(json.createObjectNode().put("action", "DESCRIBE"));
+                // 浏览器可直接显示的普通图片保留原始颜色、方向和GIF帧；大图使用有界渲染。
+                if (Set.of(GisFileFormat.PNG, GisFileFormat.JPG, GisFileFormat.GIF).contains(format)) {
+                    JsonNode layer = context.packageResult.path("layers").path(0);
+                    long pixels = layer.path("width").asLong() * layer.path("height").asLong();
+                    if (layer.isObject() && pixels > 0 && pixels <= 32_000_000 && Files.size(entryPath) <= 20 * 1024 * 1024)
+                        ((ObjectNode) layer).put("nativeImage", true);
+                }
+            } else if (snapshotOnly) {
                 ObjectNode request = json.createObjectNode().put("packageOperation", "SNAPSHOT")
                         .put("input", entryPath.toString()).put("format", format.name());
                 request.set("options", options);
@@ -332,7 +364,7 @@ public class GdalDatasetReader {
         try {
             request.put("version", properties.getGdalVersion());
             request.put("maxMetadataBytes", Math.max(properties.getGdalMaxMetadataBytes(), 16 * 1024 * 1024));
-            if (Set.of("QUERY", "TILE", "WINDOW").contains(
+            if (Set.of("QUERY", "TILE", "WINDOW", "SOURCE_PREVIEW").contains(
                     request.path("packageOperation").asText())) {
                 context.timeout = Duration.ofSeconds(30);
             }
@@ -630,6 +662,7 @@ public class GdalDatasetReader {
         private JsonNode packageResult;
         private Duration timeout;
         private Path packageOutput;
+        private ObjectNode previewRequest;
 
         private ReadContext(Runnable heartbeat) { this.heartbeat = heartbeat; }
         public List<VectorSource> vectors() { return List.copyOf(vectors); }
@@ -637,9 +670,49 @@ public class GdalDatasetReader {
         public JsonNode packageResult() { return packageResult; }
         public Path snapshotPath() throws IOException { return directory().resolve("snapshot.gpkg"); }
 
+        /** 同一预览会话串行访问请求文件，调用者负责会话锁及全局并发限制。 */
+        public JsonNode preview(ObjectNode parameters) throws IOException {
+            if (previewRequest == null) throw new IllegalStateException("不是预览读取上下文");
+            verifySources();
+            ObjectNode request = previewRequest.deepCopy();
+            request.set("preview", parameters);
+            request.put("version", properties.getGdalVersion());
+            request.put("maxMetadataBytes", properties.getGdalMaxMetadataBytes());
+            timeout = Duration.ofSeconds(30);
+            Path requestFile = directory().resolve("request.json");
+            json.writeValue(requestFile.toFile(), request);
+            try { run(this, workerCommand(requestFile), stage -> { }); }
+            catch (ReaderException ex) { throw ex; }
+            catch (Exception ex) { throw failure("PREVIEW_FAILED", "预览工作进程读取失败: " + ex.getMessage()); }
+            Path resultFile = directory().resolve("result.json");
+            if (!Files.isRegularFile(resultFile) || Files.size(resultFile) > 8 * 1024 * 1024)
+                throw failure("PREVIEW_LIMIT", "预览描述超过读取限额");
+            JsonNode result = json.readTree(resultFile.toFile());
+            if (result.has("error")) throw failure("PREVIEW_FAILED", result.path("error").path("message").asText());
+            verifySources();
+            return result;
+        }
+
+        public byte[] previewImage() throws IOException {
+            Path output = directory().resolve("preview.png");
+            if (!Files.isRegularFile(output) || Files.size(output) > 20 * 1024 * 1024)
+                throw failure("PREVIEW_LIMIT", "预览图像缺失或超过限额");
+            return Files.readAllBytes(output);
+        }
+
+        public byte[] previewOriginalImage() throws IOException {
+            if (previewRequest == null || !Set.of("PNG", "JPG", "GIF").contains(previewRequest.path("format").asText()))
+                throw new IllegalStateException("该文件不支持浏览器原生图片查看");
+            verifySources();
+            Path input = Path.of(previewRequest.path("input").asText()).toAbsolutePath().normalize();
+            if (!input.startsWith(directory().resolve("source")) || Files.size(input) > 20 * 1024 * 1024)
+                throw failure("PREVIEW_LIMIT", "图片超过直接查看限额");
+            return Files.readAllBytes(input);
+        }
+
         private Path directory() throws IOException {
             if (directory == null) {
-                Path root = Path.of(properties.getBasePath()).toAbsolutePath().normalize().resolve("native-read");
+                Path root = storage.resolveKey("runtime/native-read");
                 Files.createDirectories(root);
                 directory = Files.createTempDirectory(root, "group-");
             }
@@ -854,6 +927,10 @@ public class GdalDatasetReader {
                     worker.writeResult(GeoPackageStore.executeNative(request, directory, mapper));
                     return;
                 }
+                if ("PREVIEW".equals(request.path("operation").asText())) {
+                    worker.writeResult(GdalPreviewRenderer.execute(request, directory, mapper));
+                    return;
+                }
                 GisFileFormat format = GisFileFormat.valueOf(request.path("format").asString());
                 Path input = Path.of(request.path("input").asString()).toAbsolutePath().normalize();
                 if (!input.startsWith(directory.resolve("source")) || !Files.isRegularFile(input, LinkOption.NOFOLLOW_LINKS))
@@ -938,6 +1015,7 @@ public class GdalDatasetReader {
         }
 
         private Dataset open(Path input, boolean vector, List<String> drivers, Vector<String> options) {
+            gdal.ErrorReset();
             Dataset source = gdal.OpenEx(input.toString(), gdalconstConstants.OF_READONLY | gdalconstConstants.OF_VERBOSE_ERROR
                     | (vector ? gdalconstConstants.OF_VECTOR : gdalconstConstants.OF_RASTER), new Vector<>(drivers), options);
             if (source == null) throw failure("NATIVE_READ_FAILED", "GDAL 无法只读打开文件组入口");
@@ -1117,8 +1195,14 @@ public class GdalDatasetReader {
         }
 
         private JsonNode rasterInfo(Dataset source) {
+            String openingWarning = gdal.GetLastErrorType() == gdalconstConstants.CE_Warning ? gdal.GetLastErrorMsg() : null;
             InfoOptions options = new InfoOptions(new Vector<>(List.of("-json", "-mdd", "all")));
-            try { return json.readTree(gdal.GDALInfo(source, options)); }
+            try {
+                ObjectNode info = (ObjectNode) json.readTree(gdal.GDALInfo(source, options));
+                if (openingWarning != null && !openingWarning.isBlank())
+                    info.putArray("nativeWarnings").add(openingWarning.substring(0, Math.min(2000, openingWarning.length())));
+                return info;
+            }
             finally { options.delete(); }
         }
 
@@ -1147,6 +1231,28 @@ public class GdalDatasetReader {
                     throw failure("INVALID_GEOLOCATION", "栅格仿射定位不可逆");
             }
             if (source.GetRasterCount() == 0) throw failure("EMPTY_RASTER", "集合没有可读取波段");
+            var warnings = json.createArrayNode();
+            if (info.path("nativeWarnings").isArray()) warnings.addAll((tools.jackson.databind.node.ArrayNode) info.path("nativeWarnings"));
+            for (int index = 1; index <= source.GetRasterCount(); index++) {
+                progress.accept(ProgressStage.determinate("NATIVE_INSPECTION", "校验栅格波段网格", index - 1,
+                        source.GetRasterCount(), ProgressUnit.OPERATION));
+                var band = source.GetRasterBand(index);
+                try {
+                    if (band.GetXSize() != source.GetRasterXSize() || band.GetYSize() != source.GetRasterYSize())
+                        throw failure("INCONSISTENT_RASTER_GRID", "波段 " + index + " 与数据集网格尺寸不一致");
+                    // 容器驱动可能统一报告尺寸，真实网格冲突直到首次解码才通过原生诊断暴露。
+                    gdal.ErrorReset();
+                    int status = band.ReadRaster(0, 0, 1, 1, new double[1]);
+                    String detail = gdal.GetLastErrorMsg();
+                    if (status != gdalconstConstants.CE_None || gdal.GetLastErrorType() >= gdalconstConstants.CE_Failure)
+                        throw failure("NATIVE_READ_FAILED", "波段 " + index + " 无法读取: " + detail);
+                    if (gdal.GetLastErrorType() == gdalconstConstants.CE_Warning && detail != null && !detail.isBlank()) {
+                        if (detail.contains("Georeferencing of band") && detail.contains("data access may be incomplete"))
+                            throw failure("INCONSISTENT_RASTER_GRID", "波段 " + index + " 的实际网格与容器不一致，定位或读取可能不完整: " + detail);
+                        if (warnings.size() < 64) warnings.add(detail.substring(0, Math.min(2000, detail.length())));
+                    }
+                } finally { band.delete(); gdal.ErrorReset(); }
+            }
             RasterPlan plan = parameters == null ? null : planRaster(info, parameters);
             String filename = "raster-" + result.path("rasters").size() + ".tif";
             Path output = directory.resolve(filename);
@@ -1265,6 +1371,7 @@ public class GdalDatasetReader {
                     }
                     ObjectNode metadata = json.createObjectNode();
                     metadata.set("sourceDataset", info); metadata.set("readOptions", options);
+                    if (!warnings.isEmpty()) metadata.set("nativeWarnings", warnings);
                     metadata.set("normalizedDataset", rasterInfo(converted));
                     if (plan == null && metadata.path("normalizedDataset").path("bands").valueStream().anyMatch(band ->
                             !Set.of("Byte", "UInt16", "Int16", "UInt32", "Int32", "Float32", "Float64")

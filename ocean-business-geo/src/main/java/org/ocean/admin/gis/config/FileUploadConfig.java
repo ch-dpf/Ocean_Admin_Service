@@ -1,6 +1,5 @@
 package org.ocean.admin.gis.config;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -16,10 +15,6 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "gis.upload")
 @Validated
 public class FileUploadConfig {
-    /** 上传文件的基础存储目录。 */
-    @NotBlank
-    private String basePath = "gis/uploads";
-
     /** 单个上传文件允许的最大大小。 */
     @NotNull
     private DataSize maxFileSize = DataSize.ofGigabytes(25);

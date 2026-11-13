@@ -57,13 +57,16 @@ Copy-Item deploy/application.env.example deploy/application.env
 | `REDIS_PASSWORD` | 无安全默认值                                         | Redis 密码，必须修改 |
 | `REDIS_DB` | `0`                                            | Redis 数据库编号 |
 | `FLYWAY_ENABLED` | `true`                                         | 启动时执行并校验 `db/migration` 迁移 |
-| `GIS_*_PATH` | 仓库内相对路径                                        | 上传、处理、工作区和影像缓存目录 |
+| `GIS_STORAGE_ROOT` | `gis` | 裸机统一 GIS 存储根目录；Docker 固定使用 `/app/data` |
+| `GIS_STORAGE_WORKSPACE_DEFAULT` | `workspaces/default` | 相对于 GIS 根目录的默认工作空间，也可配置外部绝对路径 |
 | `GIS_PUBLIC_BASE_URL` | `http://127.0.0.1:8090`                        | 对浏览器可访问的服务地址；反向代理部署时改为实际域名 |
 | `GIS_TERRAIN_MAGO_ENABLED` | `true`                                         | 是否启用 Mago 地形引擎 |
 | `GIS_TERRAIN_MAGO_JAR_PATH` | 空                                              | 裸机脚本自动使用仓库内 JAR，容器模式自动使用镜像内路径 |
 | `GIS_TERRAIN_MAGO_MAX_HEAP` | `8g`                                           | Mago 子进程最大堆，来自当前应用默认配置 |
 
-所有相对存储路径均以仓库根目录（裸机）或 `/app`（Docker）为基准。生产环境应根据数据规模将 GIS 数据目录和数据库卷纳入备份。
+裸机的相对 `GIS_STORAGE_ROOT` 以仓库根目录为基准；其下统一包含 `datasets`、`tilesets`、`workspaces`、`cache` 和 `runtime`。工作空间的相对路径以 GIS 根目录为基准。Docker 将宿主机 `${OCEAN_HOME}/data/app` 挂载至 `/app/data`；外部工作空间使用绝对路径时，还须挂载相应目录。
+
+已有部署升级前应停机，同步迁移物理文件、数据库存储键、处理输入快照、成果 JSON 和归档中的引用。原上传/处理/影像缓存/工作空间配置已移除，仅修改环境变量不能完成历史数据迁移。备份须同时覆盖 PostgreSQL、GIS 托管资产及外部工作空间；`cache` 和 `runtime` 不替代正式资产备份。目录结构见根目录 README 的“GIS 资产存储”，本地开发库迁移及回退资料见数据库说明。
 
 ## Linux 裸机部署
 

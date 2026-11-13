@@ -3,10 +3,10 @@ package org.ocean.admin.gis.service;
 import lombok.RequiredArgsConstructor;
 import org.gdal.ogr.*;
 import org.gdal.osr.SpatialReference;
-import org.ocean.admin.gis.processing.config.GisProcessingProperties;
 import org.ocean.admin.gis.entity.GisVectorFeature;
 import org.ocean.admin.gis.entity.GisVectorLayer;
 import org.ocean.admin.gis.util.VectorTileEncoder;
+import org.ocean.admin.gis.util.GeoJsonFeatureReader;
 import org.ocean.admin.gis.util.VectorTemplateRules;
 import org.ocean.admin.gis.util.VectorStyleRules;
 import org.springframework.stereotype.Service;
@@ -27,42 +27,32 @@ import java.util.Vector;
 @RequiredArgsConstructor
 public class GeoPackageStore {
     private static final int[] DISPLAY_LEVELS = {3, 6, 10, 14, 18};
-    private final GisProcessingProperties properties;
+    private final GisStorageService storage;
+    private final org.ocean.admin.gis.processing.config.GisProcessingProperties properties;
     private final GdalDatasetReader reader;
     private final ObjectMapper json;
 
-    public Path root() throws IOException {
-        Path root = Path.of(properties.getBasePath()).toAbsolutePath().normalize().resolve("vector-resources");
-        Files.createDirectories(root);
-        return root;
-    }
-
-    /** 托管 GPKG 的物理存储；任务工作区 GPKG 使用绝对路径并校验位于处理根目录内。 */
+    /** 接受数据集资源键，或已解析的瓦片集输入快照绝对路径。 */
     public Path path(String key) throws IOException {
-        if (key == null || key.isBlank()) {
+        if (key == null || key.isBlank()) throw new IllegalArgumentException("矢量存储键无效");
+        if (Path.of(key).isAbsolute()) key = storage.relativeKey(Path.of(key));
+        if (!key.matches("datasets/[1-9][0-9]*/vectors/[1-9][0-9]*\\.(gpkg|ndjson|partial)")
+                && !key.matches("tilesets/[1-9][0-9]*/sources/source\\.gpkg")) {
             throw new IllegalArgumentException("矢量存储键无效");
         }
-        Path path = Path.of(key).toAbsolutePath().normalize();
-        if (!path.startsWith(Path.of(properties.getBasePath()).toAbsolutePath().normalize())) {
-            if (!key.matches("[0-9]+\\.(gpkg|ndjson|partial)")) {
-                throw new IllegalArgumentException("矢量存储键无效");
-            }
-            path = root().resolve(key);
-        }
-        if (Files.isSymbolicLink(path)) {
-            throw new IllegalArgumentException("矢量存储不能是符号链接");
-        }
+        Path path = storage.resolveKey(key);
+        Files.createDirectories(path.getParent());
         return path;
     }
 
-    public void install(Path input, long id) throws IOException {
-        install(input, id, () -> { }, stage -> { });
+    public void install(Path input, long dataSetId, long id) throws IOException {
+        install(input, dataSetId, id, () -> { }, stage -> { });
     }
 
     /** 已提交的工作包在数据集锁内按字节复制，复用空间索引并上报真实复制进度。 */
-    public void install(Path input, long id, Runnable heartbeat,
+    public void install(Path input, long dataSetId, long id, Runnable heartbeat,
                         java.util.function.Consumer<org.ocean.admin.gis.progress.ProgressStage> progress) throws IOException {
-        Path pending = path(id + ".partial");
+        Path pending = path(storage.vectorKey(dataSetId, id, "partial"));
         long total = Files.size(input), copied = 0, lastReport = 0;
         try (var source = Files.newInputStream(input);
              var target = Files.newOutputStream(pending, StandardOpenOption.CREATE_NEW)) {
@@ -81,8 +71,8 @@ public class GeoPackageStore {
                 }
             }
         }
-        try { Files.move(pending, path(id + ".gpkg"), StandardCopyOption.ATOMIC_MOVE); }
-        catch (AtomicMoveNotSupportedException ex) { Files.move(pending, path(id + ".gpkg")); }
+        try { Files.move(pending, path(storage.vectorKey(dataSetId, id, "gpkg")), StandardCopyOption.ATOMIC_MOVE); }
+        catch (AtomicMoveNotSupportedException ex) { Files.move(pending, path(storage.vectorKey(dataSetId, id, "gpkg"))); }
     }
 
     public String checksum(String key) throws IOException {
@@ -97,13 +87,13 @@ public class GeoPackageStore {
         } catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }
     }
 
-    public JsonNode build(long id, JsonNode definition, Runnable heartbeat) throws IOException {
+    public JsonNode build(long dataSetId, long id, JsonNode definition, Runnable heartbeat) throws IOException {
         ObjectNode request = json.createObjectNode().put("packageOperation", "BUILD")
-                .put("input", path(id + ".ndjson").toString()).put("output", path(id + ".partial").toString());
+                .put("input", path(storage.vectorKey(dataSetId, id, "ndjson")).toString()).put("output", path(storage.vectorKey(dataSetId, id, "partial")).toString());
         request.set("definition", definition);
         JsonNode result = reader.executePackage(request, heartbeat);
-        Files.move(path(id + ".partial"), path(id + ".gpkg"));
-        Files.delete(path(id + ".ndjson"));
+        Files.move(path(storage.vectorKey(dataSetId, id, "partial")), path(storage.vectorKey(dataSetId, id, "gpkg")));
+        Files.delete(path(storage.vectorKey(dataSetId, id, "ndjson")));
         return result;
     }
 
@@ -123,10 +113,18 @@ public class GeoPackageStore {
         return reader.executePackage(request, () -> { });
     }
 
+    /** 原始集合预览单独转换显示几何，避免改变原始属性查询的坐标语义。 */
+    public JsonNode preview(String key, String table, long after, int limit, String view) throws IOException {
+        ObjectNode request = json.createObjectNode().put("packageOperation", "SOURCE_PREVIEW")
+                .put("input", path(key).toString()).put("table", table).put("view", view)
+                .put("after", after).put("limit", limit);
+        return reader.executePackage(request, () -> { });
+    }
+
     /** 批量转换只启动一次进程，避免每100个要素重新打开大文件。 */
-    public void export(String key, List<Long> layerIds, long outputId) throws IOException {
+    public void export(String key, List<Long> layerIds, String outputKey) throws IOException {
         ObjectNode request = json.createObjectNode().put("packageOperation", "EXPORT")
-                .put("input", path(key).toString()).put("output", path(outputId + ".ndjson").toString());
+                .put("input", path(key).toString()).put("output", path(outputKey).toString());
         request.set("layerIds", json.valueToTree(layerIds));
         reader.executePackage(request, () -> { });
     }
@@ -221,6 +219,7 @@ public class GeoPackageStore {
             case "SNAPSHOT" -> snapshot(request, directory, json);
             case "BUILD" -> buildNative(request, json);
             case "QUERY" -> queryNative(request, json);
+            case "SOURCE_PREVIEW" -> GdalPreviewRenderer.vector(request, json);
             case "TILE" -> tileNative(request, json);
             case "TILES" -> staticTilesNative(request, json);
             case "RASTER_TILES" -> new org.ocean.admin.gis.vector.VectorRasterTileGenerator(json).generate(request);
@@ -537,7 +536,7 @@ public class GeoPackageStore {
                     Layer output = createLayer(target, "l_0", srs);
                     long[] count = {0};
                     ObjectNode fields = json.createObjectNode();
-                    var content = new org.ocean.admin.gis.util.GeoJsonFeatureReader(json).readSource(input, feature -> {
+                    var content = new GeoJsonFeatureReader(json).readSource(input, feature -> {
                         append(output, ++count[0], feature, feature.get("geometry"), json);
                         for (String field : feature.path("properties").propertyNames()) fields.put(field, "JSON");
                     }, () -> { });
@@ -648,10 +647,10 @@ public class GeoPackageStore {
             try (var stream = Files.newBufferedReader(Path.of(request.path("input").asText()))) {
                 String line;
                 while ((line = stream.readLine()) != null) {
-                    JsonNode row = json.readTree(line);
+                    JsonNode row = GeoJsonFeatureReader.readImportedJson(json, line);
                     Layer layer = layers.get("l_" + row.path("layerId").asText());
                     if (layer == null) throw new IllegalArgumentException("要素图层未登记");
-                    append(layer, row.path("id").asLong(), row, json.readTree(row.path("geometryJson").asText()), json);
+                    append(layer, row.path("id").asLong(), row, GeoJsonFeatureReader.readImportedJson(json, row.path("geometryJson").asText()), json);
                     appendDisplay(target, encoder, json.treeToValue(row, GisVectorFeature.class), descriptions.get(row.path("layerId").asLong()), definition, json);
                     expectedCounts.merge(row.path("layerId").asLong(), 1L, Long::sum);
                     count++;

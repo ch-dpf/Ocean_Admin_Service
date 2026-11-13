@@ -202,15 +202,15 @@ public class ProcessingService {
             throw new IllegalArgumentException("静态矢量切片须从制图工作区选择数据和已保存方案");
         GisFileProcessingEngine engine = engineRegistry.require(command.processingType());
         String taskNo = TaskNoGenerator.generateProcessingTaskNo(command.processingType());
-        GisProcessingWorkspace workspace = storageService.taskWorkspace(
-                command.processingType(), taskNo);
+        long tileSetId = com.baomidou.mybatisplus.core.toolkit.IdWorker.getId();
+        GisProcessingWorkspace workspace = storageService.taskWorkspace(tileSetId, taskNo);
         GisProcessingInputResolver resolver = inputResolverRegistry.require(command.sourceType());
-        GisProcessingInputResolver.PreparedInputs prepared = resolver.prepare(command, taskNo);
+        GisProcessingInputResolver.PreparedInputs prepared = resolver.prepare(command, taskNo, tileSetId);
         try {
             validateResolvedInputs(command, engine, prepared.inputs(),
                     resolver.resolveRuntime(prepared.inputs()));
             ProcessingTaskService.CreatedProcessingTask created = transactionService.create(
-                    taskNo, command, workspace, prepared.inputs());
+                    taskNo, tileSetId, command, workspace, prepared.inputs());
             taskLifecycle.dispatch(created.taskId(), taskNo, command.taskName().trim(),
                     prepared.inputs().size(), "GIS_" + command.processingType().name(),
                     () -> {

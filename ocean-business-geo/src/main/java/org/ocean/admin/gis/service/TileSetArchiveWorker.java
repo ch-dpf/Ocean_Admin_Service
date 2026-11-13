@@ -77,8 +77,8 @@ public class TileSetArchiveWorker {
             return;
         }
         Path target = storageService.resolveArchive(
-                storageService.archiveStorageKey(archive.getArchiveNo()));
-        Path temporary = storageService.resolveArchiveTemporary(archive.getArchiveNo());
+                storageService.archiveStorageKey(archive.getTileSetId(), archive.getArchiveNo()));
+        Path temporary = storageService.resolveArchiveTemporary(archive.getTileSetId(), archive.getArchiveNo());
         boolean archiveCommitted = false;
         Handle progressHandle = null;
         try {
@@ -121,7 +121,7 @@ public class TileSetArchiveWorker {
             moveAtomically(temporary, target);
             long archiveSize = Files.size(target);
             String sha256 = HexFormat.of().formatHex(digest.digest());
-            String storageKey = storageService.archiveStorageKey(archive.getArchiveNo());
+            String storageKey = storageService.archiveStorageKey(archive.getTileSetId(), archive.getArchiveNo());
 
             archiveService.markCompleted(archive.getId(), storageKey, archiveSize, sha256,
                     files.size(), totalBytes);

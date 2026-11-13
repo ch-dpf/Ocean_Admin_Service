@@ -1,5 +1,7 @@
 package org.ocean.admin.gis.util;
 
+import org.ocean.admin.gis.service.GisStorageService;
+
 import lombok.extern.slf4j.Slf4j;
 import org.ocean.admin.gis.config.FileUploadConfig;
 import org.ocean.admin.gis.dto.TempFile;
@@ -43,10 +45,10 @@ import java.util.function.Consumer;
 public class FileUploadUtil {
 
     private static final long MAX_FILE_SIZE = 500L * 1024 * 1024;
-    private final UploadPathResolver pathResolver;
+    private final GisStorageService pathResolver;
     private final int streamBufferSize;
 
-    public FileUploadUtil(UploadPathResolver pathResolver, FileUploadConfig uploadConfig) {
+    public FileUploadUtil(GisStorageService pathResolver, FileUploadConfig uploadConfig) {
         this.pathResolver = pathResolver;
         long configuredBufferSize = uploadConfig.getStreamBufferSize().toBytes();
         if (configuredBufferSize < 8 * 1024 || configuredBufferSize > 16L * 1024 * 1024) {
@@ -91,7 +93,7 @@ public class FileUploadUtil {
         String originalName = safeOriginalName(file.getOriginalFilename());
         String extension = extensionOf(originalName);
         String storageName = UUID.randomUUID().toString().replace("-", "") + "." + extension;
-        String stagingKey = ".staging/" + taskNo + "/" + storageName;
+        String stagingKey = "runtime/uploads/" + taskNo + "/" + storageName;
         Path target = resolveKey(stagingKey);
 
         try {
@@ -151,8 +153,8 @@ public class FileUploadUtil {
     }
 
     /** 将请求期暂存文件转为可供异步处理的持久输入。 */
-    public GisStoredFile commitForProcessing(String taskNo, TempFile stagedFile) {
-        String storageKey = "processing/" + pathResolver.safeSegment(taskNo) + "/"
+    public GisStoredFile commitForProcessing(long tileSetId, TempFile stagedFile) {
+        String storageKey = pathResolver.tileSetKey(tileSetId) + "/sources/uploads/"
                 + pathResolver.safeSegment(stagedFile.getStorageName());
         Path source = resolveKey(stagedFile.getStagingKey());
         Path target = resolveKey(storageKey);
@@ -403,7 +405,7 @@ public class FileUploadUtil {
         if (requiredBytes < 0) {
             throw new IllegalArgumentException("磁盘预留空间不能为负数");
         }
-        Path stagingRoot = resolveKey(".staging");
+        Path stagingRoot = resolveKey("runtime/uploads");
         try {
             Files.createDirectories(stagingRoot);
             long usable = Files.getFileStore(stagingRoot).getUsableSpace();
@@ -433,7 +435,7 @@ public class FileUploadUtil {
             throw new IllegalStateException("物理文件删除必须在数据库事务中执行");
         }
         String deletionId = UUID.randomUUID().toString().replace("-", "");
-        Path deletionDirectory = resolveKey(".deleting/" + deletionId);
+        Path deletionDirectory = resolveKey("runtime/deleting/" + deletionId);
         List<StagedDeletion> staged = new ArrayList<>();
         try {
             int index = 0;
@@ -546,7 +548,7 @@ public class FileUploadUtil {
         if (dataSetId == null || dataSetId <= 0) {
             throw new IllegalArgumentException("数据集ID必须大于0");
         }
-        return "datasets/" + pathResolver.safeSegment(String.valueOf(dataSetId));
+        return "datasets/" + pathResolver.safeSegment(String.valueOf(dataSetId)) + "/originals";
     }
 
     public String uploadStorageKey(Long dataSetId, String progressId, int index, String originalName) {
@@ -555,7 +557,7 @@ public class FileUploadUtil {
 
     public int cleanupExpiredUploads(java.time.Duration idle,
             org.ocean.admin.gis.progress.RealtimeProgressService progress) {
-        Path root = resolveKey(".staging");
+        Path root = resolveKey("runtime/uploads");
         if (!Files.isDirectory(root)) return 0;
         long threshold = System.currentTimeMillis() - idle.toMillis();
         int cleaned = 0;
@@ -587,7 +589,7 @@ public class FileUploadUtil {
     }
 
     private Path uploadBatchDirectory(String taskNo) {
-        return resolveKey(".staging/" + pathResolver.safeSegment(taskNo));
+        return resolveKey("runtime/uploads/" + pathResolver.safeSegment(taskNo));
     }
 
     private String uploadStorageName(String taskNo, int fileIndex, String originalName) {

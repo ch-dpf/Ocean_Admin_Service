@@ -136,7 +136,7 @@ public class VectorLayerService {
         List<GisVectorVO.GeometryIssue> geometryIssues = new ArrayList<>();
         long sourceFeatures = 0;
         long resourceId = IdWorker.getId();
-        Path inputPath = resources.workingInput(resourceId);
+        Path inputPath = resources.workingInput(source.getDataSetId(), resourceId);
         try (var output = java.nio.file.Files.newBufferedWriter(inputPath)) {
             for (ImportLayer input : inputs) {
                 String layerName = importLayerName(source, input);
@@ -144,8 +144,8 @@ public class VectorLayerService {
                         .filter(layer -> input.sourceCollectionKey().equals(layer.getLayerKey())).map(layer -> layer.getId())
                         .findFirst().orElseThrow(() -> new IllegalStateException("原始集合身份缺失"));
                 sourceFeatures += reader.read(input.geoJsonPath(), parsed -> {
-                    JsonNode properties = json.readTree(parsed.properties());
-                    JsonNode geometry = json.readTree(parsed.geometry());
+                    JsonNode properties = GeoJsonFeatureReader.readImportedJson(json, parsed.properties());
+                    JsonNode geometry = GeoJsonFeatureReader.readImportedJson(json, parsed.geometry());
                     if (geometry.isNull()) {
                         emptyGeometryFeatures[0]++;
                         statistics[3]++;

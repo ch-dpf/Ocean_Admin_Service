@@ -24,7 +24,7 @@ public class WorkspaceInputResolver implements GisProcessingInputResolver {
     }
 
     @Override
-    public PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo) {
+    public PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo, long tileSetId) {
         Path path = workspaceResolver.resolve(command.workspaceCode(), command.relativePath());
         GisProcessingInput input = new GisProcessingInput();
         input.setSequenceNo(1);

@@ -26,7 +26,7 @@ public class UploadedFileInputResolver implements GisProcessingInputResolver {
     }
 
     @Override
-    public PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo) {
+    public PreparedInputs prepare(GisSubmitProcessingCommand command, String taskNo, long tileSetId) {
         List<MultipartFile> files = command.uploadFiles();
         List<TempFile> staged = new ArrayList<>();
         List<GisStoredFile> stored = new ArrayList<>();
@@ -37,7 +37,7 @@ public class UploadedFileInputResolver implements GisProcessingInputResolver {
             List<GisProcessingInput> inputs = new ArrayList<>(staged.size());
             for (int i = 0; i < staged.size(); i++) {
                 TempFile temp = staged.get(i);
-                GisStoredFile persisted = fileUploadUtil.commitForProcessing(taskNo, temp);
+                GisStoredFile persisted = fileUploadUtil.commitForProcessing(tileSetId, temp);
                 stored.add(persisted);
                 inputs.add(input(i + 1, temp, persisted));
             }

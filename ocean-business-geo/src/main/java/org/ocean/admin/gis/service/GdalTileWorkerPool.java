@@ -28,6 +28,7 @@ import java.util.function.Function;
 @Component
 public class GdalTileWorkerPool {
     private final GisProcessingProperties processing;
+    private final GisStorageService storage;
     private final VectorTileProperties tiles;
     private final ObjectMapper json;
     private final Semaphore permits;
@@ -37,11 +38,12 @@ public class GdalTileWorkerPool {
     private volatile boolean closed;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public GdalTileWorkerPool(GisProcessingProperties processing, VectorTileProperties tiles, ObjectMapper json) {
-        this(processing, tiles, json, tiles.getMaxConcurrentQueries());
+    public GdalTileWorkerPool(GisStorageService storage, GisProcessingProperties processing, VectorTileProperties tiles, ObjectMapper json) {
+        this(storage, processing, tiles, json, tiles.getMaxConcurrentQueries());
     }
 
-    GdalTileWorkerPool(GisProcessingProperties processing, VectorTileProperties tiles, ObjectMapper json, int concurrency) {
+    GdalTileWorkerPool(GisStorageService storage, GisProcessingProperties processing, VectorTileProperties tiles, ObjectMapper json, int concurrency) {
+        this.storage = storage;
         this.processing = processing;
         this.tiles = tiles;
         this.json = json;
@@ -96,7 +98,7 @@ public class GdalTileWorkerPool {
 
     private synchronized Worker start(Function<Path, List<String>> command) throws IOException {
         if (closed) throw new IOException("GPKG 读取服务正在关闭");
-        Path root = Path.of(processing.getBasePath()).toAbsolutePath().normalize().resolve("tile-workers");
+        Path root = storage.resolveKey("runtime/tile-workers");
         Files.createDirectories(root);
         Path directory = Files.createTempDirectory(root, "worker-");
         try {
@@ -137,7 +139,7 @@ public class GdalTileWorkerPool {
             worker.input.close();
             worker.output.close();
             worker.process.getErrorStream().close();
-            Path root = Path.of(processing.getBasePath()).toAbsolutePath().normalize().resolve("tile-workers");
+            Path root = storage.resolveKey("runtime/tile-workers");
             if (!worker.directory.toAbsolutePath().normalize().getParent().equals(root))
                 throw new IOException("工作进程清理目录越界");
             // Windows 在进程退出后可能稍晚才释放工作目录句柄。

@@ -448,7 +448,7 @@ public class GeoTiffTileGenerator {
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("type", options.tileProfile().manifestType());
         manifest.put("sources", plan.sources().stream().map(source -> Map.of(
-                "path", source.path().toString(), "sequenceNo", source.sequence() + 1,
+                "sequenceNo", source.sequence() + 1,
                 "sizeBytes", source.size(), "lastModified", source.modified().toString(),
                 "nativeMaxZoom", source.nativeZoom(),
                 "sourceNominalResolution", source.nominalResolution())).toList());

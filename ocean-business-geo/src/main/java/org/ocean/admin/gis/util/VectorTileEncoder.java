@@ -35,7 +35,7 @@ public class VectorTileEncoder {
 
     /** 完整精度几何仍在工作要素中；此处只准备可重建的二维显示数据。 */
     public Display prepareDisplay(GisVectorFeature feature, GisVectorLayer layer, JsonNode group, JsonNode policy) {
-        JsonNode properties = json.readTree(feature.getPropertiesJson() == null ? "null" : feature.getPropertiesJson());
+        JsonNode properties = GeoJsonFeatureReader.readImportedJson(json, feature.getPropertiesJson() == null ? "null" : feature.getPropertiesJson());
         double minZoom = group.path("minZoom").asDouble();
         if ("AUTO".equals(layer.getAssignmentMode())) {
             for (JsonNode override : group.path("overrides")) {
@@ -45,7 +45,7 @@ public class VectorTileEncoder {
                 }
             }
         }
-        Geometry shape = geometry(json.readTree(feature.getGeometryJson()));
+        Geometry shape = geometry(GeoJsonFeatureReader.readImportedJson(json, feature.getGeometryJson()));
         // 只整理可重建的显示几何；工作要素与原始快照仍保留导入坐标，不生成修复数据文件。
         // 在投影、锚点和各级显示缓存之前统一处理，避免填充与轮廓使用不同的面结构。
         if (shape.getDimension() == 2 && !shape.isValid()) shape = GeometryFixer.fix(shape);

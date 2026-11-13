@@ -30,8 +30,8 @@ public class GisFileProcessingEngineConfiguration {
 
     @Bean
     public GeoTiffPreprocessor geoTiffPreprocessor(
-            GisProcessingProperties properties, GeoTiffOverviewBuilder overviewBuilder) {
-        return new GeoTiffPreprocessor(properties, overviewBuilder);
+            GisProcessingProperties properties, org.ocean.admin.gis.service.GisStorageService storage, GeoTiffOverviewBuilder overviewBuilder) {
+        return new GeoTiffPreprocessor(properties, storage, overviewBuilder);
     }
 
     @Bean

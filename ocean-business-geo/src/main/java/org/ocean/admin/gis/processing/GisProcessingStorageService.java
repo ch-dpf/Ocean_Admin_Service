@@ -3,7 +3,7 @@ package org.ocean.admin.gis.processing;
 import org.ocean.admin.gis.entity.GisProcessingTask;
 import org.ocean.admin.gis.entity.GisTileSet;
 import org.ocean.admin.gis.entity.GisTileSetArchive;
-import org.ocean.admin.gis.processing.config.GisProcessingProperties;
+import org.ocean.admin.gis.service.GisStorageService;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -16,141 +16,81 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /** 为切片任务分配受控且可持久化引用的输出路径。 */
 @Service
 public class GisProcessingStorageService {
 
-    private final Path processingRoot;
+    private final GisStorageService storage;
 
-    public GisProcessingStorageService(GisProcessingProperties properties) {
-        this.processingRoot = Path.of(properties.getBasePath()).toAbsolutePath().normalize();
+    public GisProcessingStorageService(GisStorageService storage) {
+        this.storage = storage;
     }
 
-    public GisProcessingWorkspace workspace(
-            GisProcessingType type, Long fileMetaId, String taskNo) {
-        if (type == null || fileMetaId == null || taskNo == null
-                || !taskNo.matches("[A-Za-z0-9_.-]+")) {
-            throw new IllegalArgumentException("无法创建非法的 GIS 处理工作目录");
-        }
-        String outputKey = type.name().toLowerCase(Locale.ROOT)
-                + "/" + fileMetaId + "/" + taskNo;
-        Path taskRoot = resolve(outputKey);
-        return new GisProcessingWorkspace(
-                outputKey,
-                taskRoot.resolve("tiles"),
-                taskRoot.resolve("temp"),
-                taskRoot.resolve("logs").resolve("engine.log"));
+    /** 成果归属瓦片集，执行现场按任务独立保存。 */
+    public GisProcessingWorkspace taskWorkspace(long tileSetId, String taskNo) {
+        return workspaceFromOutputKey(storage.tileSetKey(tileSetId), taskNo);
     }
 
-    /** 为不依赖文件元数据的服务器目录切片任务创建工作目录。 */
-    public GisProcessingWorkspace folderWorkspace(GisProcessingType type, String taskNo) {
-        if (type == null || taskNo == null || !taskNo.matches("[A-Za-z0-9_.-]+")) {
-            throw new IllegalArgumentException("无法创建非法的 GIS 目录处理工作目录");
-        }
-        String outputKey = type.name().toLowerCase(Locale.ROOT)
-                + "/folders/" + taskNo;
-        Path taskRoot = resolve(outputKey);
-        return new GisProcessingWorkspace(
-                outputKey,
-                taskRoot.resolve("tiles"),
-                taskRoot.resolve("temp"),
-                taskRoot.resolve("logs").resolve("engine.log"));
+    public GisProcessingWorkspace workspaceFromOutputKey(String outputKey, String taskNo) {
+        requireTileSetKey(outputKey);
+        Path runtime = storage.resolveKey("runtime/processing/" + storage.safeSegment(taskNo));
+        return new GisProcessingWorkspace(outputKey, resolveTiles(outputKey),
+                runtime.resolve("temp"), runtime.resolve("logs/engine.log"));
     }
 
-    public GisProcessingWorkspace batchWorkspace(GisProcessingType type, String taskNo) {
-        if (type == null || taskNo == null || !taskNo.matches("[A-Za-z0-9_.-]+")) {
-            throw new IllegalArgumentException("无法创建非法的 GIS 多文件处理工作目录");
-        }
-        String outputKey = type.name().toLowerCase(Locale.ROOT) + "/batches/" + taskNo;
-        Path taskRoot = resolve(outputKey);
-        return new GisProcessingWorkspace(outputKey,
-                taskRoot.resolve("tiles"), taskRoot.resolve("temp"),
-                taskRoot.resolve("logs").resolve("engine.log"));
-    }
-
-    /** 每次处理任务分配一个与输入来源无关的瓦片集目录。 */
-    public GisProcessingWorkspace taskWorkspace(GisProcessingType type, String taskNo) {
-        if (type == null || taskNo == null || !taskNo.matches("[A-Za-z0-9_.-]+")) {
-            throw new IllegalArgumentException("无法创建非法的 GIS 处理工作目录");
-        }
-        String outputKey = type.name().toLowerCase(Locale.ROOT) + "/tasks/" + taskNo;
-        Path taskRoot = resolve(outputKey);
-        return new GisProcessingWorkspace(outputKey,
-                taskRoot.resolve("tiles"), taskRoot.resolve("temp"),
-                taskRoot.resolve("logs").resolve("engine.log"));
-    }
-
-    /** 将数据库中的产物 Key 安全解析到切片目录。 */
     public Path resolveTiles(String outputKey) {
-        if (outputKey == null || outputKey.isBlank()) {
-            throw new IllegalArgumentException("切片产物 Key 不能为空");
-        }
-        return resolve(outputKey).resolve("tiles").normalize();
+        requireTileSetKey(outputKey);
+        return storage.resolveKey(outputKey + "/tiles");
     }
 
-    /** 为归档记录生成不包含用户输入的持久化 Key。 */
-    public String archiveStorageKey(String archiveNo) {
+    /** 发布依赖的输入快照随瓦片集保留，不参与任务临时文件清理。 */
+    public Path resolveSources(String outputKey) {
+        requireTileSetKey(outputKey);
+        return storage.resolveKey(outputKey + "/sources");
+    }
+
+    public String archiveStorageKey(long tileSetId, String archiveNo) {
         requireArchiveNo(archiveNo);
-        return "archives/" + archiveNo + ".zip";
+        return storage.tileSetKey(tileSetId) + "/archives/" + archiveNo + ".zip";
     }
 
-    /** 安全解析数据库保存的静态瓦片集归档 Key。 */
     public Path resolveArchive(String storageKey) {
-        if (storageKey == null || !storageKey.matches("archives/[A-Za-z0-9_.-]+\\.zip")) {
+        if (storageKey == null || !storageKey.matches("tilesets/[1-9][0-9]*/archives/[A-Za-z0-9_.-]+\\.zip")) {
             throw new IllegalArgumentException("静态瓦片集归档 Key 不合法");
         }
-        return resolve(storageKey);
+        return storage.resolveKey(storageKey);
     }
 
-    /** 解析与正式归档同目录的临时文件，便于完成后原子移动。 */
-    public Path resolveArchiveTemporary(String archiveNo) {
-        requireArchiveNo(archiveNo);
-        return resolve("archives/" + archiveNo + ".zip.part");
+    public Path resolveArchiveTemporary(long tileSetId, String archiveNo) {
+        return storage.resolveKey(archiveStorageKey(tileSetId, archiveNo) + ".part");
     }
 
-    /** 根据持久化 outputKey 重建执行工作区。 */
-    public GisProcessingWorkspace workspaceFromOutputKey(String outputKey) {
-        if (outputKey == null || outputKey.isBlank()) {
-            throw new IllegalArgumentException("切片产物 Key 不能为空");
+    private void requireTileSetKey(String key) {
+        if (key == null || !key.matches("tilesets/[1-9][0-9]*")) {
+            throw new IllegalArgumentException("瓦片集 Key 不合法");
         }
-        Path taskRoot = resolve(outputKey);
-        return new GisProcessingWorkspace(outputKey,
-                taskRoot.resolve("tiles"), taskRoot.resolve("temp"),
-                taskRoot.resolve("logs").resolve("engine.log"));
-    }
-
-    private Path resolve(String key) {
-        Path resolved = processingRoot
-                .resolve(key.replace('/', java.io.File.separatorChar))
-                .normalize();
-        if (!resolved.startsWith(processingRoot)) {
-            throw new IllegalArgumentException("非法处理产物 Key: " + key);
-        }
-        return resolved;
     }
 
     /** 仅清理任务专属输出目录及归档文件，来源文件不在清理范围内。 */
     public void deleteTaskArtifacts(GisProcessingTask task, GisTileSet tileSet,
             List<GisTileSetArchive> archives) {
         String key = tileSet.getOutputKey();
-        String prefix = task.getProcessingType().name().toLowerCase(Locale.ROOT) + "/";
-        if (task.getTaskNo() == null || !task.getTaskNo().matches("[A-Za-z0-9_-]+")
-                || key == null || !key.startsWith(prefix) || !key.endsWith("/" + task.getTaskNo())
-                || key.contains("..") || key.contains("\\")) {
-            throw new IllegalStateException("任务产物目录不合法，拒绝清理");
+        if (!storage.tileSetKey(tileSet.getId()).equals(key)) {
+            throw new IllegalStateException("瓦片集产物目录与资产标识不匹配，拒绝清理");
         }
         List<Path> targets = new ArrayList<>();
-        targets.add(resolve(key));
+        targets.add(storage.resolveKey(key));
+        targets.add(storage.resolveKey("runtime/processing/" + storage.safeSegment(task.getTaskNo())));
         for (GisTileSetArchive archive : archives) {
-            String expectedKey = archiveStorageKey(archive.getArchiveNo());
+            String expectedKey = archiveStorageKey(tileSet.getId(), archive.getArchiveNo());
             if (archive.getStorageKey() != null && !expectedKey.equals(archive.getStorageKey())) {
                 throw new IllegalStateException("归档产物目录不匹配，拒绝清理");
             }
             targets.add(resolveArchive(expectedKey));
-            targets.add(resolveArchiveTemporary(archive.getArchiveNo()));
+            targets.add(resolveArchiveTemporary(tileSet.getId(), archive.getArchiveNo()));
         }
+        Path processingRoot = storage.resolveKey("tilesets").getParent();
         try {
             // 在删除任何文件之前验证所有目标和父目录，拒绝根目录及链接跳转。
             for (Path target : targets) {

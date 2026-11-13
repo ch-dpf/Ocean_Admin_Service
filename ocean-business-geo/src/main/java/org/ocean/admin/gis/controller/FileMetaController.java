@@ -64,6 +64,14 @@ public class FileMetaController {
         return ResponseResult.success(result);
     }
 
+    @GetMapping("/workspaces/{workspaceCode}")
+    @Operation(summary = "查询服务器工作区根路径", description = "返回配置的绝对根路径，仅查询配置，不扫描目录或校验目录可用性")
+    public ResponseResult<GisFileMetaVO.WorkspaceInfo> workspaceInfo(
+            @Parameter(description = "工作区编码，不区分大小写", example = "DEFAULT", required = true)
+            @PathVariable("workspaceCode") String workspaceCode) {
+        return ResponseResult.success(workspaceImportService.workspaceInfo(workspaceCode));
+    }
+
     @PostMapping("/workspace-files")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(summary = "服务器工作区接入数据")

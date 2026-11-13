@@ -1,9 +1,9 @@
 package org.ocean.admin.gis.processing.input;
 
-import org.ocean.admin.gis.processing.config.GisProcessingProperties;
+import org.ocean.admin.gis.config.GisStorageProperties;
 import org.springframework.stereotype.Component;
 import org.ocean.admin.gis.entity.GisFileMeta;
-import org.ocean.admin.gis.util.UploadPathResolver;
+import org.ocean.admin.gis.service.GisStorageService;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,14 +16,21 @@ import java.util.Map;
 @Component
 public class ControlledWorkspaceResolver {
     private final Map<String, Path> roots;
-    private final UploadPathResolver uploads;
+    private final GisStorageService uploads;
 
-    public ControlledWorkspaceResolver(GisProcessingProperties properties, UploadPathResolver uploads) {
+    public ControlledWorkspaceResolver(GisStorageProperties properties, GisStorageService uploads) {
         this.uploads = uploads;
         this.roots = properties.getWorkspaces().entrySet().stream().collect(
                 java.util.stream.Collectors.toUnmodifiableMap(
                         entry -> normalizeCode(entry.getKey()),
-                        entry -> configuredRoot(entry.getKey(), entry.getValue())));
+                        entry -> uploads.workspaceRoot(entry.getValue())));
+    }
+
+    /** 返回接入所用的配置根路径；目录尚未创建时也可查询，不访问文件系统。 */
+    public Path configuredRoot(String workspaceCode) {
+        Path root = roots.get(normalizeCode(workspaceCode));
+        if (root == null) throw new IllegalArgumentException("未配置受控工作空间: " + workspaceCode);
+        return root;
     }
 
     public Path resolve(String workspaceCode, String relativePath) {
@@ -102,7 +109,7 @@ public class ControlledWorkspaceResolver {
         if (!"UPLOAD".equals(file.getSourceType()) || !"LOCAL".equals(file.getStorageType())) {
             throw new IllegalArgumentException("当前仅支持本地托管文件和受控工作区文件");
         }
-        Path path = uploads.resolveKey(file.getStorageKey());
+        Path path = uploads.resolveOriginal(file.getStorageKey());
         fileAttributes(path);
         return path;
     }
@@ -118,8 +125,7 @@ public class ControlledWorkspaceResolver {
     }
 
     private Path realRoot(String code) {
-        Path configured = roots.get(code);
-        if (configured == null) throw new IllegalArgumentException("未配置受控工作空间: " + code);
+        Path configured = configuredRoot(code);
         try {
             BasicFileAttributes attributes = Files.readAttributes(configured, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
             if (!attributes.isDirectory() || attributes.isSymbolicLink() || attributes.isOther()) {
@@ -136,13 +142,6 @@ public class ControlledWorkspaceResolver {
 
         public SourceException(String code, String message) { super(message); this.code = code; }
         public String code() { return code; }
-    }
-
-    private static Path configuredRoot(String code, String value) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("工作空间根目录不能为空: " + code);
-        }
-        return Path.of(value).toAbsolutePath().normalize();
     }
 
     private static String normalizeCode(String code) {

@@ -111,4 +111,34 @@ QUEUED、RUNNING 处理任务保护整个来源组及所有配件，任务提交
 
 资源文件登记与工作切换受事务保护；失败的新文件清理，已替换且无引用的工作资源标记RETIRED，由定时任务回收。数据集删除时，未发布资源转入回收，发布引用的资源独立保留且data_set_id置空；样式草稿随数据集级联删除。发布记录固定数据源与样式内容，因此可以继续提供公开瓦片和历史样式。
 
-开发库升级没有为历史图层猜测source_layer_id，也没有把所有数据自动搬到GPKG。应用通过明确的工作存储转换接口选择后端。备份时必须将数据库与 `gis.processing.basePath/vector-resources` 一并纳入；只备份PostgreSQL不能恢复包内要素。
+开发库升级没有为历史图层猜测source_layer_id，也没有把所有数据自动搬到GPKG。应用通过明确的工作存储转换接口选择后端。备份时必须将数据库与 `<gis.storage.root-path>/datasets/<dataSetId>/vectors` 一并纳入；只备份PostgreSQL不能恢复包内要素。
+
+## 2026-11-13 GIS 资产存储统一迁移
+
+已在后端停机期间实际迁移本地 `localhost:5432/ocean_admin` 及 `E:\workspace\Ocean_Admin_Service\gis`，随后使用新构建恢复 8090 服务。统一根目录由 `gis.storage.root-path` 配置；托管原件、矢量资源、瓦片及归档分别归入 `datasets/<dataSetId>/originals`、`datasets/<dataSetId>/vectors`、`tilesets/<tileSetId>/tiles` 和 `tilesets/<tileSetId>/archives`。矢量发布快照移至 `tilesets/<tileSetId>/sources`，任务临时文件和日志移至 `runtime/processing/<taskNo>`。
+
+| 更新对象 | 行数 | 更新内容 |
+| --- | ---: | --- |
+| `gis_file_meta` | 451 | 上传原文件的 `storage_key` |
+| `gis_vector_resource` | 323 | 托管 GPKG 的 `storage_key` |
+| `gis_processing_input` | 99 | 输入定位及 `source_group_snapshot` 内部引用 |
+| `gis_tile_set` | 34 | `output_key`、`manifest_key` |
+| `gis_tile_set_archive` | 15 | 归档定位、实际大小、SHA-256 及源文件字节统计 |
+
+922 行更新在同一事务内提交。迁移前后文件记录 3383、矢量资源 1929、处理输入 179、任务及瓦片集各 34、归档 15、发布 5，行数不变。共移动 845 个文件或目录，重写 38 份成果 JSON；15 份归档全部校验，涉及 JSON 内容变更的归档重新计算大小与 SHA-256。已逐项核对全部 922 行与 38 份描述文件，核对 774 份登记原件/矢量资源的大小，以及适用的原件、不可变资源校验和，未发现迁移新增缺失。工作空间原文件保留原位。
+
+历史任务中有 43 个输入定位在迁移前已缺失实体。根据 SHA-256 从现存相同内容恢复了 38 份副本；以下 5 份仍缺少可核验原件，保留历史记录和新目录引用，不伪造文件或登记新数据集。对应静态瓦片成果仍在，但依赖这些原件的重新处理或动态读取不能恢复。
+
+| 历史任务 ID | 缺失原文件 |
+| --- | --- |
+| `2114910531087474690` | `n18e102_to_n17e103_Copernicus_GLO30_60m.tif` |
+| `2114920940829908994` | `n18e102_to_n17e103_Copernicus_GLO30_30m.tif` |
+| `2114897705597902850` | `n25e100_Copernicus_GLO30_60m.tif` |
+| `2114552656934678529` | `n30e115_Copernicus_GLO30_30m.tif` |
+| `2118212588879101953` | `sentinel2_rgb_10m.tif` |
+
+恢复资料位于 `.runtime/storage-unify-20261113/`（被 Git 忽略）：`database-before.dump` 为迁移前完整数据库备份，SHA-256 为 `5158b8d599cd4bb444e5caf0b4793674e716d2a0a6a26e86707ffc43efdce7b8`；`application-before.jar` 保存迁移前构建；`plan.json`、`operations.jsonl` 保存路径映射、操作记录及描述文件原内容；`archives-before/` 保留被改写的原始 ZIP；`unmapped/` 保留无登记引用的 8 个旧上传文件及旧目录，未删除。缺失文件的新旧键和校验和见 `unavailable-before-migration.json`，最终引用核对见 `final-reference-verification.json`。
+
+这不是一份完整的文件系统副本：原资产主要在同卷内移动。回退须再次停机，先另行保存迁移后新增数据，再依据操作记录逆向恢复实体路径、描述文件原内容及原 ZIP，配套恢复数据库备份和旧构建/配置；不得只恢复数据库或直接以旧构建读取新目录。应用没有保留旧键兼容分支，回退操作未执行。
+
+验证：20 项临时 JUnit 回归全部通过，覆盖路径边界、链接逃逸、资产归属、成果清理、工作空间及 WMS 持久输入定位，验证后删除测试类。后端完整模块链打包、根目录 `mvn flyway:repair` 和 `mvn flyway:validate` 通过。恢复服务后实测上传及工作空间原件的 Range 下载、15 份归档的 Range 下载、5 个发布的详情/能力文档/实际瓦片，以及迁移后 GPKG 的真实要素读取，均成功；只读联调未创建测试业务数据。

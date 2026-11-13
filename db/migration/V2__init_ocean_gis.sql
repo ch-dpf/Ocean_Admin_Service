@@ -262,7 +262,7 @@ COMMENT ON COLUMN ocean_gis.gis_file_meta.relative_path IS '工作区内规范�
 COMMENT ON COLUMN ocean_gis.gis_file_meta.source_modified_at IS '登记时源文件最后修改时间，Unix毫秒，与大小共同校验来源是否变化';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.file_status IS '源文件状态：PENDING、READY、FAILED；空间解析状态由metadata_status独立维护';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.created_by IS '文件登记人';
-COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_key IS '相对存储路径或对象存储 Key';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_key IS '统一 GIS 存储根目录下的原始文件 Key：datasets/{dataSetId}/originals/{storageName}';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_type IS '存储类型：LOCAL、MINIO 或 S3';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.cleanup_status IS '失败文件资源清理状态：NOT_REQUIRED、PENDING、COMPLETED、FAILED';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_longitude IS '元数据完成时保存的文件代表点经度，EPSG:4326；分页直接读取';
@@ -777,7 +777,7 @@ CREATE TABLE ocean_gis.gis_tile_set (
 );
 
 COMMENT ON TABLE ocean_gis.gis_tile_set IS '一次处理任务唯一生成的静态瓦片集';
-COMMENT ON COLUMN ocean_gis.gis_tile_set.output_key IS '处理存储根目录下的瓦片集 Key';
+COMMENT ON COLUMN ocean_gis.gis_tile_set.output_key IS '统一 GIS 存储根目录下的瓦片集 Key：tilesets/{tileSetId}';
 
 CREATE INDEX idx_gis_tile_set_type_status
     ON ocean_gis.gis_tile_set (tile_type, tile_set_status, create_time DESC);
@@ -868,7 +868,7 @@ COMMENT ON TABLE ocean_gis.gis_tile_set_archive IS 'GIS 静态瓦片集成果归
 COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.archive_no IS '对外暴露的稳定归档编号';
 COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.processing_task_id IS '产生静态瓦片集的处理任务';
 COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.tile_set_id IS '被归档的静态瓦片集';
-COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.storage_key IS '处理存储根目录下的归档文件 Key';
+COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.storage_key IS '统一 GIS 存储根目录下的归档文件 Key：tilesets/{tileSetId}/archives/{archiveNo}.zip';
 COMMENT ON COLUMN ocean_gis.gis_tile_set_archive.sha256 IS '归档 ZIP 文件的 SHA-256';
 
 CREATE UNIQUE INDEX uk_gis_tile_set_archive_task

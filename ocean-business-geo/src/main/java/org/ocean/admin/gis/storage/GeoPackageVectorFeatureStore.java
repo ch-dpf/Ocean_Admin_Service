@@ -20,6 +20,7 @@ import java.util.stream.StreamSupport;
 @RequiredArgsConstructor
 public class GeoPackageVectorFeatureStore implements VectorFeatureStore {
     private final GeoPackageStore packages;
+    private final org.ocean.admin.gis.service.GisStorageService storage;
     private final ObjectMapper json;
 
     @Override public String storageType() { return "GPKG"; }
@@ -35,9 +36,10 @@ public class GeoPackageVectorFeatureStore implements VectorFeatureStore {
     @Override
     public void export(GisVectorResource resource, List<GisVectorLayer> layers, BatchConsumer consumer) throws IOException {
         long temporaryId = IdWorker.getId();
-        var output = packages.path(temporaryId + ".ndjson");
+        String outputKey = storage.vectorKey(resource.getDataSetId(), temporaryId, "ndjson");
+        var output = packages.path(outputKey);
         try {
-            packages.export(resource.getStorageKey(), layers.stream().map(GisVectorLayer::getId).toList(), temporaryId);
+            packages.export(resource.getStorageKey(), layers.stream().map(GisVectorLayer::getId).toList(), outputKey);
             try (var input = Files.newBufferedReader(output)) {
                 var batch = new ArrayList<GisVectorFeature>(100);
                 String line;

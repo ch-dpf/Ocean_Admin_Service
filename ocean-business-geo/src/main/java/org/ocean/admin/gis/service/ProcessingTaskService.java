@@ -48,7 +48,7 @@ public class ProcessingTaskService {
     private final ObjectMapper objectMapper;
 
     @Transactional(rollbackFor = Exception.class)
-    public CreatedProcessingTask create(String taskNo, GisSubmitProcessingCommand command,
+    public CreatedProcessingTask create(String taskNo, long tileSetId, GisSubmitProcessingCommand command,
             GisProcessingWorkspace workspace, List<GisProcessingInput> inputs) {
         lockManagedInputs(command, inputs);
         LocalDateTime now = LocalDateTime.now();
@@ -72,6 +72,7 @@ public class ProcessingTaskService {
         }
 
         GisTileSet tileSet = new GisTileSet();
+        tileSet.setId(tileSetId);
         tileSet.setTaskId(task.getId());
         tileSet.setTileType(command.processingType());
         tileSet.setTileSetStatus("BUILDING");

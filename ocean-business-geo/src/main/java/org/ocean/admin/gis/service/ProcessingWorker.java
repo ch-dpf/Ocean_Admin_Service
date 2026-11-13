@@ -59,7 +59,7 @@ public class ProcessingWorker {
             GisInputSourceType sourceType = task.getSourceType();
             GisProcessingParameters parameters = taskService.readParameters(task);
             GisProcessingWorkspace workspace = storageService.workspaceFromOutputKey(
-                    tileSet.getOutputKey());
+                    tileSet.getOutputKey(), taskNo);
             GisFileProcessingEngine engine = engineRegistry.require(processingType);
 
             taskLifecycle.start(taskId, progressHandle, "开始执行切片引擎");
@@ -83,6 +83,7 @@ public class ProcessingWorker {
                 }
                 runtime.verifySources();
             }
+            writeSourceReferences(tileSet, workspace, inputs);
             refreshTileMetadata(tileSet, workspace);
             tileSet.setTileSetStatus("READY");
             tileSet.setUpdateTime(LocalDateTime.now());
@@ -103,6 +104,29 @@ public class ProcessingWorker {
             taskLifecycle.fail(taskId, progressHandle, "切片处理失败: ", ex);
             log.error("GIS切片任务失败: taskId={}", taskId, ex);
         }
+    }
+
+    /** 成果保存稳定的输入定位，不记录任务结束后会被清理的原生临时路径。 */
+    private void writeSourceReferences(GisTileSet tileSet, GisProcessingWorkspace workspace,
+            List<GisProcessingInput> inputs) throws java.io.IOException {
+        if (tileSet.getTileType() != GisProcessingType.IMAGERY) return;
+        Path path = workspace.outputPath().resolve("manifest.json");
+        var manifest = (tools.jackson.databind.node.ObjectNode) objectMapper.readTree(path.toFile());
+        var references = manifest.putArray("inputs");
+        for (GisProcessingInput input : inputs) {
+            var reference = references.addObject();
+            reference.put("sequenceNo", input.getSequenceNo());
+            reference.put("originalName", input.getOriginalName());
+            if (input.getWorkspaceCode() != null) {
+                reference.put("workspaceCode", input.getWorkspaceCode());
+                reference.put("relativePath", input.getRelativePath());
+            } else {
+                String key = input.getSourceStorageKey() == null ? input.getStorageKey() : input.getSourceStorageKey();
+                if (key == null || key.isBlank()) throw new IllegalStateException("影像成果缺少持久输入定位");
+                reference.put("storageKey", key);
+            }
+        }
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(path.toFile(), manifest);
     }
 
     private void refreshTileMetadata(GisTileSet tileSet, GisProcessingWorkspace workspace) {

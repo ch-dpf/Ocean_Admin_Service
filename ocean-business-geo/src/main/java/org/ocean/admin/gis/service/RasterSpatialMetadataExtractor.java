@@ -4,11 +4,23 @@ import it.geosolutions.imageioimpl.plugins.tiff.TIFFImageReaderSpi;
 import it.geosolutions.imageioimpl.plugins.tiff.TIFFStreamMetadata;
 import lombok.RequiredArgsConstructor;
 import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
+import org.geotools.api.referencing.crs.GeographicCRS;
+import org.geotools.api.referencing.crs.ProjectedCRS;
+import org.geotools.api.referencing.cs.AxisDirection;
 import org.geotools.api.referencing.datum.PixelInCell;
+import org.geotools.api.referencing.operation.ConcatenatedOperation;
+import org.geotools.api.referencing.operation.CoordinateOperation;
 import org.geotools.api.referencing.operation.MathTransform;
 import org.geotools.gce.geotiff.GeoTiffReader;
+import org.geotools.geometry.jts.JTS;
+import org.geotools.measure.Units;
+import org.geotools.metadata.iso.quality.PositionalAccuracyImpl;
 import org.geotools.referencing.CRS;
+import org.geotools.referencing.crs.DefaultGeographicCRS;
+import org.geotools.referencing.operation.transform.AffineTransform2D;
+import org.geotools.referencing.operation.transform.ConcatenatedTransform;
 import org.locationtech.jts.geom.*;
+import org.locationtech.jts.geom.util.AffineTransformation;
 import org.locationtech.jts.io.WKTWriter;
 import org.ocean.admin.gis.entity.GisFileSpatialMetadata;
 import org.ocean.admin.gis.progress.ProgressStage;
@@ -55,13 +67,44 @@ public class RasterSpatialMetadataExtractor {
             int width = grid.getSpan(0), height = grid.getSpan(1);
             double left = grid.getLow(0), top = grid.getLow(1);
             MathTransform gridToSource = reader.getOriginalGridToWorld(PixelInCell.CELL_CORNER);
-            CoordinateReferenceSystem geographic = CRS.decode("EPSG:4326", true);
-            MathTransform toGeographic = CRS.findMathTransform(source, geographic, false);
+            GeographicCRS geographic = (GeographicCRS) CRS.decode("EPSG:4326", true);
+            CoordinateOperation operation;
+            try {
+                // 优先使用已知基准转换，并检查是否只能生成省略基准参数的近似操作。
+                operation = CRS.getCoordinateOperationFactory(true).createOperation(source, geographic);
+            } catch (org.geotools.api.referencing.FactoryException ex) {
+                throw failure("UNSUPPORTED_CRS_TRANSFORM", "无法建立源坐标系到展示坐标系的转换: " + ex.getMessage());
+            }
+            MathTransform toGeographic = operation.getMathTransform();
+            boolean omitted = datumShiftOmitted(operation);
+            if (omitted) {
+                // GDAL/PROJ 的展示近似保留地理经纬度；不能使用宽松模式隐含的椭球形状转换。
+                var horizontal = CRS.getHorizontalCRS(source);
+                GeographicCRS base;
+                if (horizontal instanceof ProjectedCRS projected) base = projected.getBaseCRS();
+                else if (horizontal instanceof GeographicCRS geographicSource) base = geographicSource;
+                else throw failure("UNSUPPORTED_CRS_TRANSFORM", "无法获取用于展示近似的源地理坐标系");
+                GeographicCRS normalized = new DefaultGeographicCRS("Source geographic coordinates",
+                        base.getDatum(), geographic.getCoordinateSystem());
+                toGeographic = CRS.findMathTransform(source, normalized, false);
+                var meridian = base.getDatum().getPrimeMeridian();
+                double longitudeOffset = meridian.getAngularUnit().getConverterTo(Units.DEGREE_ANGLE)
+                        .convert(meridian.getGreenwichLongitude());
+                toGeographic = ConcatenatedTransform.create(toGeographic,
+                        new AffineTransform2D(1, 0, 0, 1, longitudeOffset, 0));
+            }
+            MathTransform toMeters = ConcatenatedTransform.create(toGeographic,
+                    CRS.findMathTransform(geographic, CRS.decode("EPSG:3857", true), false));
             Map<String, Object> extra = new LinkedHashMap<>();
+            extra.put("coordinateTransform", Map.of("purpose", "DISPLAY", "targetCrs", "EPSG:4326",
+                    "datumShiftOmitted", omitted, "operation", omitted ? "GEOGRAPHIC_BALLPARK" : operation.getName().getCode(),
+                    "accuracy", omitted ? "UNKNOWN" : "OPERATION_DEFINED"));
+            if (omitted) extra.put("coordinateTransformWarning", "源基准缺少转换参数，展示坐标未施加基准偏移，不适用于精确定位分析");
             Double noData = reader.getMetadata().hasNoData() ? reader.getMetadata().getNoData() : null;
             if (noData != null) extra.put("noData", Double.isFinite(noData) ? noData : noData.toString());
             progress.accept(ProgressStage.determinate("METADATA_READING", "空间参考信息读取完成", 1, 1, ProgressUnit.OPERATION));
             Geometry pixels = readFootprint(path, reader, width, height, noData, heartbeat, extra, progress);
+            pixels = clipGeographicPixelEdges(pixels, source, gridToSource, left, top, extra);
             Geometry footprint = pixels.isEmpty() ? pixels : RasterFootprintBuilder.toGeographic(pixels, gridToSource, toGeographic,
                     left, top, width, height, properties.getMetadataMaxCoordinates(), heartbeat, progress);
             progress.accept(ProgressStage.determinate("SPATIAL_CALCULATING", "计算分辨率与推荐层级", 0, 1, ProgressUnit.OPERATION));
@@ -80,7 +123,7 @@ public class RasterSpatialMetadataExtractor {
             metadata.setSourceExtent(objectMapper.writeValueAsString(Map.of(
                     "lowerCorner", new double[]{envelope.getMinimum(0), envelope.getMinimum(1)},
                     "upperCorner", new double[]{envelope.getMaximum(0), envelope.getMaximum(1)})));
-            Resolution resolution = calculateResolution(source, gridToSource, toGeographic, footprint, left, top, width, height);
+            Resolution resolution = calculateResolution(gridToSource, toGeographic, toMeters, footprint, left, top, width, height);
             NominalResolution nominal = calculateNominalRasterResolution(
                     source, gridToSource, toGeographic, left, top, width, height);
             double resolutionX = nominal == null ? resolution.x : nominal.x();
@@ -108,6 +151,58 @@ public class RasterSpatialMetadataExtractor {
         } finally {
             reader.dispose();
         }
+    }
+
+    /** 组合转换中的任一步省略基准偏移，都必须在展示元数据中说明。 */
+    private static boolean datumShiftOmitted(CoordinateOperation operation) {
+        if (operation.getCoordinateOperationAccuracy().contains(PositionalAccuracyImpl.DATUM_SHIFT_OMITTED)) return true;
+        if (operation instanceof ConcatenatedOperation concatenated) {
+            for (CoordinateOperation step : concatenated.getOperations()) {
+                if (datumShiftOmitted(step)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 极点格点的像元外沿可超出半个像元；仅裁剪这部分物理覆盖，不接受任意越界定位。 */
+    private Geometry clipGeographicPixelEdges(Geometry pixels, CoordinateReferenceSystem source,
+            MathTransform gridToSource, double left, double top, Map<String, Object> extra) throws Exception {
+        if (pixels.isEmpty() || !(source instanceof GeographicCRS)) return pixels;
+        var axes = source.getCoordinateSystem();
+        int latitudeAxis = -1;
+        for (int index = 0; index < axes.getDimension(); index++) {
+            var direction = axes.getAxis(index).getDirection();
+            if (AxisDirection.NORTH.equals(direction) || AxisDirection.SOUTH.equals(direction)) latitudeAxis = index;
+        }
+        if (latitudeAxis < 0 || latitudeAxis > 1) throw failure("UNSUPPORTED_CRS", "地理坐标系没有明确的二维纬度轴");
+        var degrees = axes.getAxis(latitudeAxis).getUnit().getConverterToAny(Units.DEGREE_ANGLE);
+        Geometry absolutePixels = AffineTransformation.translationInstance(left, top).transform(pixels);
+        Geometry sourcePixels = JTS.transform(absolutePixels, gridToSource);
+        Envelope bounds = sourcePixels.getEnvelopeInternal();
+        double minimum = latitudeAxis == 0 ? bounds.getMinX() : bounds.getMinY();
+        double maximum = latitudeAxis == 0 ? bounds.getMaxX() : bounds.getMaxY();
+        double low = degrees.convert(minimum), high = degrees.convert(maximum);
+        if (low >= -90 && high <= 90) return pixels;
+        double[] origin = transform(gridToSource, new double[]{left, top});
+        double[] xNeighbor = transform(gridToSource, new double[]{left + 1, top});
+        double[] yNeighbor = transform(gridToSource, new double[]{left, top + 1});
+        double halfPixel = (Math.abs(degrees.convert(xNeighbor[latitudeAxis]) - degrees.convert(origin[latitudeAxis]))
+                + Math.abs(degrees.convert(yNeighbor[latitudeAxis]) - degrees.convert(origin[latitudeAxis]))) / 2;
+        if (!Double.isFinite(low) || !Double.isFinite(high) || !Double.isFinite(halfPixel)
+                || low < -90 - halfPixel - 1e-6 || high > 90 + halfPixel + 1e-6
+                || high <= -90 || low >= 90) {
+            throw failure("INVALID_EXTENT", "栅格纬度定位超出地球有效范围，且不能由半像元边界解释");
+        }
+        double clippedLow = degrees.inverse().convert(Math.max(-90, low));
+        double clippedHigh = degrees.inverse().convert(Math.min(90, high));
+        Envelope domain = latitudeAxis == 0
+                ? new Envelope(clippedLow, clippedHigh, bounds.getMinY(), bounds.getMaxY())
+                : new Envelope(bounds.getMinX(), bounds.getMaxX(), clippedLow, clippedHigh);
+        Geometry clipped = sourcePixels.intersection(GEOMETRIES.toGeometry(domain));
+        Geometry gridPixels = JTS.transform(clipped, gridToSource.inverse());
+        extra.put("geographicBoundaryClipped", true);
+        extra.put("boundaryClipReason", "PIXEL_EDGE_OVER_POLE");
+        return AffineTransformation.translationInstance(-left, -top).transform(gridPixels);
     }
 
     private Geometry readFootprint(Path path, GeoTiffReader geoReader, int width, int height,
@@ -225,9 +320,9 @@ public class RasterSpatialMetadataExtractor {
         } catch (Exception error) { mask.close(); throw error; }
     }
 
-    private Resolution calculateResolution(CoordinateReferenceSystem source, MathTransform gridToSource,
-            MathTransform toGeographic, Geometry footprint, double left, double top, int width, int height) throws Exception {
-        MathTransform toMeters = CRS.findMathTransform(source, CRS.decode("EPSG:3857", true), false);
+    private Resolution calculateResolution(MathTransform gridToSource,
+            MathTransform toGeographic, MathTransform toMeters, Geometry footprint,
+            double left, double top, int width, int height) throws Exception {
         Resolution resolution = new Resolution();
         for (double fx : new double[]{0.1, 0.5, 0.9}) for (double fy : new double[]{0.1, 0.5, 0.9}) {
             sampleResolution(resolution, left + fx * width, top + fy * height, gridToSource, toGeographic, toMeters);

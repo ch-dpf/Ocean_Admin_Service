@@ -296,8 +296,7 @@ public class PublicationCatalog {
             JsonNode taskDefinition = null;
             JsonNode taskScheme = null;
             if ("VECTOR".equalsIgnoreCase(publication.getProcessingType())) {
-                Path temp = storageService.resolveTiles(tileSet.getOutputKey())
-                        .getParent().resolve("temp");
+                Path temp = storageService.resolveSources(tileSet.getOutputKey());
                 Path sourceGpkg = temp.resolve("source.gpkg");
                 Path sourceJson = temp.resolve("source.json");
                 if (Files.isRegularFile(sourceGpkg) && Files.isRegularFile(sourceJson)) {
@@ -425,8 +424,7 @@ public class PublicationCatalog {
         if (tileSet == null || !READY.equals(tileSet.getTileSetStatus())) {
             return null;
         }
-        Path root = storageService.resolveTiles(tileSet.getOutputKey())
-                .getParent().resolve("temp");
+        Path root = storageService.resolveSources(tileSet.getOutputKey());
         Path sourceGpkg = root.resolve("source.gpkg");
         Path sourceJson = root.resolve("source.json");
         if (!Files.isRegularFile(sourceGpkg) || !Files.isRegularFile(sourceJson)) {

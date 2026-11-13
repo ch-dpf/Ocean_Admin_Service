@@ -109,14 +109,16 @@ flowchart LR
 5. 上传/工作区接入的临时状态和执行租约继续严格依赖 Redis；不会在无法确认锁所有权时放行。SSE 广播失败记录诊断日志并暂停广播，客户端使用现有补查接口获取结果。
 6. Token 校验遇到 Redis 故障返回 HTTP 503 和“认证服务暂不可用”，不会返回有效，也不会当作 Token 过期。Redis 恢复后仍检查服务端会话，已注销 Token 不能重新生效。
 
-| 环境变量 | 默认值 | 用途 |
+| 配置键或保留的环境变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `REDIS_COMMAND_TIMEOUT` | `3s` | 认证命令超时，保留原值 |
 | `REDIS_CONNECT_TIMEOUT` | `2s` | TCP 连接超时 |
-| `REDIS_PROGRESS_TIMEOUT` | `1s` | 进度命令超时 |
-| `REDIS_TILE_TIMEOUT` | `500ms` | 瓦片缓存命令超时 |
-| `REDIS_REQUEST_QUEUE_SIZE` | `128` | 每条连接的待处理命令上限 |
-| `GIS_VECTOR_TILE_REDIS_VALUE_BYTES` | `262144` | Redis 瓦片值的编码字节上限，最多允许配置为 1 MiB |
+| `app.redis.progress-timeout` | `1s` | 进度命令超时 |
+| `app.redis.tile-timeout` | `500ms` | 瓦片缓存命令超时 |
+| `app.redis.request-queue-size` | `128` | 每条连接的待处理命令上限 |
+| `gis.vector.tiles.max-redis-value-bytes` | `262144` | Redis 瓦片值的编码字节上限，最多允许配置为 1 MiB |
+
+后四项使用代码默认值，主配置不再重复列出或提供自定义环境变量别名；需要覆盖时，在部署环境文件设置 `JAVA_TOOL_OPTIONS=-Dapp.redis.progress-timeout=2s` 等完整配置键。
 
 上线需重新构建并重启应用，Redis 无需清库或迁移。已经持久化为 FAILED 的任务不会自动改为成功，应在新版本运行后重新提交。Redis 故障期间实时进度可能暂时停止刷新，但数据库中的任务详情和最终结果保持权威。
 

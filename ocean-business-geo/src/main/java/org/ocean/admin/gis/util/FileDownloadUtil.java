@@ -1,5 +1,7 @@
 package org.ocean.admin.gis.util;
 
+import org.ocean.admin.gis.service.GisStorageService;
+
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.apache.catalina.Globals;
@@ -47,9 +49,9 @@ public class FileDownloadUtil {
             Map.entry("xml", "application/xml"),
             Map.entry("txt", "text/plain"));
 
-    private final UploadPathResolver pathResolver;
+    private final GisStorageService pathResolver;
 
-    public FileDownloadUtil(UploadPathResolver pathResolver) {
+    public FileDownloadUtil(GisStorageService pathResolver) {
         this.pathResolver = pathResolver;
     }
 
@@ -137,9 +139,9 @@ public class FileDownloadUtil {
         }
     }
 
-    /** 解析已入库的本地文件；越出上传根目录的 Key 由 UploadPathResolver 拒绝。 */
+    /** 解析已入库的本地文件；越出上传根目录的 Key 由 GisStorageService 拒绝。 */
     private Path resolveStoredPath(String storageKey) {
-        Path path = pathResolver.resolveKey(storageKey);
+        Path path = pathResolver.resolveOriginal(storageKey);
         if (!Files.isRegularFile(path)) {
             throw new IllegalArgumentException("已入库文件不存在: " + storageKey);
         }
