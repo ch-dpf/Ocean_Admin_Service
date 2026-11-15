@@ -1,8 +1,6 @@
 package org.ocean.admin.gis.terrain.config;
 
 import org.ocean.admin.gis.terrain.engine.TerrainEngine;
-import org.ocean.admin.gis.terrain.engine.mago.MagoCommandBuilder;
-import org.ocean.admin.gis.terrain.engine.mago.MagoProcessRunner;
 import org.ocean.admin.gis.terrain.engine.mago.MagoTerrainEngine;
 import org.ocean.admin.gis.terrain.engine.mago.MagoTerrainProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -27,8 +25,7 @@ public class TerrainEngineConfiguration {
             ObjectMapper objectMapper) {
         return new MagoTerrainEngine(
                 properties,
-                new MagoCommandBuilder(),
-                new MagoProcessRunner(),
-                objectMapper);
+                new org.ocean.terrain.TerrainTilingService(properties.getMaxConcurrentTasks(),
+                        properties.getTaskTimeout(), properties.getRasterCacheBytes(), objectMapper));
     }
 }

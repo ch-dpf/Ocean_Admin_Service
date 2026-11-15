@@ -206,8 +206,9 @@ CREATE TABLE ocean_gis.gis_file_meta (
                 AND representative_layer_key <> ''
                 AND representative_extent_kind IN ('RASTER_FOOTPRINT', 'VECTOR_ENVELOPE'))
         ),
+    -- 合法空集合可完成提取而没有空间范围；已有代表点只能属于已完成的元数据。
     CONSTRAINT ck_gis_file_meta_completed_point
-        CHECK ((metadata_status = 'COMPLETED') = (representative_longitude IS NOT NULL)),
+        CHECK (representative_longitude IS NULL OR metadata_status = 'COMPLETED'),
     CONSTRAINT ck_gis_file_meta_metadata_lease
         CHECK ((metadata_status IN ('RUNNING', 'WAITING'))
                = (metadata_lease_expires_at IS NOT NULL)),
@@ -265,7 +266,7 @@ COMMENT ON COLUMN ocean_gis.gis_file_meta.created_by IS '文件登记人';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_key IS '统一 GIS 存储根目录下的原始文件 Key：datasets/{dataSetId}/originals/{storageName}';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.storage_type IS '存储类型：LOCAL、MINIO 或 S3';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.cleanup_status IS '失败文件资源清理状态：NOT_REQUIRED、PENDING、COMPLETED、FAILED';
-COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_longitude IS '元数据完成时保存的文件代表点经度，EPSG:4326；分页直接读取';
+COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_longitude IS '元数据完成且有空间范围时保存的文件代表点经度，EPSG:4326；空集合为NULL，分页直接读取';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_latitude IS '元数据完成时保存的文件代表点纬度，EPSG:4326';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_layer_key IS '代表点来源图层键；面按实际面积、线按实际长度选择主要分块';
 COMMENT ON COLUMN ocean_gis.gis_file_meta.representative_extent_kind IS '代表点来源范围类型；VECTOR_ENVELOPE 不保证点位于真实矢量要素内';

@@ -27,7 +27,7 @@ public record ImageryProcessingParameters(
         String resampling,
         @Schema(description = "PNG 是否保留透明背景，默认 true", defaultValue = "true")
         Boolean transparent,
-        @Schema(description = "栅格集合、波段与显示数值范围") RasterSelection raster)
+        @Schema(description = "可选栅格配置；单集合及明确颜色波段自动选择，非Byte影像自动统计显示范围") RasterSelection raster)
         implements GisProcessingParameters {
 
     public ImageryProcessingParameters {

@@ -18,8 +18,26 @@
             WHERE sm.file_meta_id = #{id} AND NOT ST_IsEmpty(part.geom)
             ORDER BY ST_Dimension(part.geom) DESC,
                      CASE ST_Dimension(part.geom)
-                         WHEN 2 THEN ST_Area(part.geom::geography)
-                         WHEN 1 THEN ST_Length(part.geom::geography)
+                         WHEN 2 THEN
+                             CASE WHEN ST_XMax(Box3D(part.geom)) - ST_XMin(Box3D(part.geom)) &gt;= 180
+                                        OR ST_YMax(Box3D(part.geom)) - ST_YMin(Box3D(part.geom)) &gt;= 180
+                                  <!-- 大范围轮廓按经纬网分成八个区域后累计椭球面积，避免对跖边及全球面退化。
+                                       分区只用于计量，代表点仍从原始分块选取。 -->
+                                  THEN (
+                                      SELECT SUM(ST_Area(ST_CollectionExtract(ST_Intersection(
+                                          part.geom, ST_MakeEnvelope(lon, lat, lon + 90, lat + 90, 4326)
+                                      ), 3)::geography))
+                                      FROM generate_series(-180, 90, 90) AS longitude(lon)
+                                      CROSS JOIN generate_series(-90, 0, 90) AS latitude(lat)
+                                  )
+                                  ELSE ST_Area(part.geom::geography)
+                             END
+                         WHEN 1 THEN
+                             CASE WHEN ST_XMax(Box3D(part.geom)) - ST_XMin(Box3D(part.geom)) &gt;= 180
+                                        OR ST_YMax(Box3D(part.geom)) - ST_YMin(Box3D(part.geom)) &gt;= 180
+                                  THEN ST_Length(ST_Segmentize(part.geom, 90)::geography)
+                                  ELSE ST_Length(part.geom::geography)
+                             END
                          ELSE 0
                      END DESC,
                      sm.layer_key COLLATE "C", part.path

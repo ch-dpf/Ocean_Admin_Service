@@ -35,7 +35,7 @@ public record TerrainProcessingParameters(
         @Schema(description = "是否继续上一次处理，默认 false") Boolean continuePrevious,
         @Schema(description = "是否保留临时文件，默认 false") Boolean leaveTemp,
         @Schema(description = "是否生成 layer.json，默认 true") Boolean generateLayerJson,
-        @Schema(description = "高程集合、波段及转换到米的比例与偏移") RasterSelection raster)
+        @Schema(description = "可选高程配置；单波段自动选择，按源单位、比例及偏移换算为米，未标单位默认按米") RasterSelection raster)
         implements GisProcessingParameters {
 
     public TerrainProcessingParameters {

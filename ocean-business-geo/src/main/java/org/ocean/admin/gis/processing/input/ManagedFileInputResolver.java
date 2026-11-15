@@ -132,9 +132,11 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
                 throw new IllegalArgumentException("处理类型与文件所属数据集类别不匹配: " + meta.getId());
             }
             var layers = descriptions.getOrDefault(meta.getId(), List.of());
-            if (layers.isEmpty()) throw new IllegalArgumentException("文件组缺少标准栅格资源描述，请重新解析: " + group.getId());
+            if (layers.isEmpty()) throw new IllegalArgumentException("文件组缺少栅格描述，请重新解析后再次切片，无需重新上传: " + group.getId());
             var selection = command.parameters().raster();
             var selectedKeys = selection == null ? null : selection.layerKeys();
+            if (selectedKeys == null && layers.size() > 1)
+                throw new IllegalArgumentException(meta.getOriginalName() + " 包含多个栅格集合，请选择需要切片的集合");
             if (selectedKeys != null && !layers.stream().map(org.ocean.admin.gis.entity.GisFileSpatialMetadata::getLayerKey)
                     .collect(java.util.stream.Collectors.toSet()).containsAll(selectedKeys))
                 throw new IllegalArgumentException("文件组不包含所选栅格集合: " + group.getId());
@@ -230,6 +232,9 @@ public class ManagedFileInputResolver implements GisProcessingInputResolver {
             for (GroupSnapshot snapshot : snapshots) {
                 var context = reader.prepareProcessing(snapshot.group(), snapshot.members(), parameters, heartbeat, progress);
                 contexts.add(context);
+            }
+            reader.completeProcessing(contexts, progress);
+            for (var context : contexts) {
                 if (!context.vectors().isEmpty() || context.rasters().isEmpty())
                     throw new IllegalStateException("已管理文件组未产生可处理的标准栅格");
                 paths.addAll(context.rasters().stream().map(GdalDatasetReader.RasterSource::geoTiffPath).toList());

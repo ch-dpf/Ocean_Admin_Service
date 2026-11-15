@@ -8,7 +8,6 @@ RUNTIME_DIR="${PROJECT_ROOT}/logs"
 PID_FILE="${RUNTIME_DIR}/ocean-admin.pid"
 OUT_LOG="${RUNTIME_DIR}/ocean-admin-console.log"
 APP_JAR="${OCEAN_APP_JAR:-${PROJECT_ROOT}/ocean-bootstrap/target/ocean-bootstrap-1.0.0-SNAPSHOT.jar}"
-DEFAULT_MAGO_JAR="${PROJECT_ROOT}/ocean-business-geo/tools/mago/mago-3d-terrainer-1.14.2-release.jar"
 
 die() {
   echo "ERROR: $*" >&2
@@ -23,7 +22,6 @@ load_env() {
   set +a
   [[ -n "${JAVA_TOOL_OPTIONS:-}" ]] || unset JAVA_TOOL_OPTIONS
   export SERVER_PORT="${SERVER_PORT:-${APP_PORT:-8090}}"
-  export GIS_TERRAIN_MAGO_JAR_PATH="${GIS_TERRAIN_MAGO_JAR_PATH:-${DEFAULT_MAGO_JAR}}"
 }
 
 require_command() {
@@ -39,10 +37,6 @@ check_java() {
 
 check_runtime() {
   check_java
-  [[ -f "${GIS_TERRAIN_MAGO_JAR_PATH}" ]] || die "Mago JAR not found: ${GIS_TERRAIN_MAGO_JAR_PATH}. Run git lfs pull."
-  local mago_size
-  mago_size="$(wc -c < "${GIS_TERRAIN_MAGO_JAR_PATH}")"
-  (( mago_size > 1000000 )) || die "Mago JAR looks like a Git LFS pointer. Run git lfs pull."
 }
 
 build() {

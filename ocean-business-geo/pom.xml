@@ -21,6 +21,11 @@
     <dependencies>
         <dependency>
             <groupId>org.ocean.admin</groupId>
+            <artifactId>ocean-terrain-engine</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.ocean.admin</groupId>
             <artifactId>ocean-kernel</artifactId>
             <version>${project.version}</version>
         </dependency>

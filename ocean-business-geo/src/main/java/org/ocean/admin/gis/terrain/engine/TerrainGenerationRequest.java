@@ -4,7 +4,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 
-/** mago 地形生成所需的不可变输入。 */
+/** 地形生成所需的不可变输入。 */
 public record TerrainGenerationRequest(
         List<Path> inputPaths,
         Path outputPath,

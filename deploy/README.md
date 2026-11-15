@@ -22,7 +22,7 @@ deploy/
 
 ## 部署前准备
 
-1. 克隆仓库后执行 `git lfs pull`，确保 `ocean-business-geo/tools/mago/mago-3d-terrainer-1.14.2-release.jar` 不是 Git LFS 指针文件。
+1. 克隆仓库后执行 `git lfs pull`，确保 `ocean-terrain-engine/src/main/resources/geoid/` 中的高程基准数据已下载。
 2. 复制配置模板并修改所有 `change-me`：
 
 ```bash
@@ -44,7 +44,7 @@ Copy-Item deploy/application.env.example deploy/application.env
 | `OCEAN_HOME` | `.` | Docker 部署根目录；相对路径以 `compose.yml` 所在目录为基准 |
 | `OCEAN_ADMIN_VERSION` | `1.0.0` | Ocean Admin 应用镜像版本 |
 | `APP_PORT` | `8090`                                         | 对外端口；裸机脚本将其映射为 Spring 服务端口，Docker 将其映射为宿主机端口 |
-| `JAVA_TOOL_OPTIONS` | 空                                              | 应用 JVM 参数，例如堆大小；Mago 子进程使用独立配置 |
+| `JAVA_TOOL_OPTIONS` | 空                                              | 应用与地形引擎共用的 JVM 参数，例如堆大小 |
 | `POSTGRES_DB` | `ocean_admin`                                  | Docker PostgreSQL 数据库名 |
 | `POSTGRES_BIND_ADDRESS` | `0.0.0.0`                                      | Docker PostgreSQL 宿主机绑定地址；|
 | `POSTGRES_PORT` | `5432`                                         | Docker PostgreSQL 宿主机端口 |
@@ -60,9 +60,7 @@ Copy-Item deploy/application.env.example deploy/application.env
 | `GIS_STORAGE_ROOT` | `gis` | 裸机统一 GIS 存储根目录；Docker 固定使用 `/app/data` |
 | `GIS_STORAGE_WORKSPACE_DEFAULT` | `workspaces/default` | 相对于 GIS 根目录的默认工作空间，也可配置外部绝对路径 |
 | `GIS_PUBLIC_BASE_URL` | `http://127.0.0.1:8090`                        | 对浏览器可访问的服务地址；反向代理部署时改为实际域名 |
-| `GIS_TERRAIN_MAGO_ENABLED` | `true`                                         | 是否启用 Mago 地形引擎 |
-| `GIS_TERRAIN_MAGO_JAR_PATH` | 空                                              | 裸机脚本自动使用仓库内 JAR，容器模式自动使用镜像内路径 |
-| `GIS_TERRAIN_MAGO_MAX_HEAP` | `8g`                                           | Mago 子进程最大堆，来自当前应用默认配置 |
+| `GIS_TERRAIN_MAGO_ENABLED` | `true`                                         | 是否启用同 JVM 地形引擎 |
 
 裸机的相对 `GIS_STORAGE_ROOT` 以仓库根目录为基准；其下统一包含 `datasets`、`tilesets`、`workspaces`、`cache` 和 `runtime`。工作空间的相对路径以 GIS 根目录为基准。Docker 将宿主机 `${OCEAN_HOME}/data/app` 挂载至 `/app/data`；外部工作空间使用绝对路径时，还须挂载相应目录。
 
@@ -186,7 +184,6 @@ cd /opt/apps/ocean-admin
 OCEAN_HOME=.
 OCEAN_ADMIN_VERSION=1.0.0
 GIS_PUBLIC_BASE_URL=http://192.168.14.58:8090
-GIS_TERRAIN_MAGO_MAX_HEAP=8g
 ```
 
 将 `DB_PASSWORD` 和 `REDIS_PASSWORD` 替换为部署环境强密码，然后设置目录权限：
@@ -257,3 +254,5 @@ Docker 部署应为发布镜像使用唯一标签。更新前备份 PostgreSQL �
 
 仓库未提供 CI/CD 发布流水线或独立监控平台配置。部署后至少应采集应用日志、进程或容器状态、磁盘可用空间、PostgreSQL 与 Redis 健康状态，并针对 `logs/ocean.log` 中的启动失败、数据库连接失败和 GIS 处理异常设置告警。
 
+
+地形核心已作为 `ocean-terrain-engine` 模块随应用打包，在主 JVM 内直接调用。通过标准配置键 `gis.terrain.mago.task-timeout`、`gis.terrain.mago.max-concurrent-tasks`、`gis.terrain.mago.raster-cache-bytes` 配置任务超时、并发和栅格缓存预算，默认分别为 72h、1、256 MiB。堆空间统一由主应用 `JAVA_TOOL_OPTIONS=-Xmx...` 配置；缓存预算不是任务总内存硬限制。任务超时和取消采用协作检查，底层读取返回后才能退出。

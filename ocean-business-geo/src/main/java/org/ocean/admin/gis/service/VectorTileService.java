@@ -36,8 +36,8 @@ import java.util.zip.GZIPOutputStream;
 @Slf4j
 @Service
 public class VectorTileService {
-    private static final String TILE_PREFIX = "gis:vector:dataset:tile:v4:";
-    private static final String CACHE_INDEX = "gis:vector:dataset:tile:index";
+    private static final String TILE_PREFIX = "ocean-admin:gis:vector-tile:v4:";
+    private static final String CACHE_INDEX = TILE_PREFIX + "index";
     private static final DefaultRedisScript<String> CACHE_READ = new DefaultRedisScript<>("""
             if redis.call('STRLEN',KEYS[1]) > tonumber(ARGV[1]) then return false end
             return redis.call('GET',KEYS[1])

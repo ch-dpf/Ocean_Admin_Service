@@ -13,7 +13,6 @@ $pidFile = Join-Path $runtimeDir 'ocean-admin.pid'
 $stdoutLog = Join-Path $runtimeDir 'ocean-admin-console.out.log'
 $stderrLog = Join-Path $runtimeDir 'ocean-admin-console.err.log'
 $appJar = if ($env:OCEAN_APP_JAR) { $env:OCEAN_APP_JAR } else { Join-Path $projectRoot 'ocean-bootstrap\target\ocean-bootstrap-1.0.0-SNAPSHOT.jar' }
-$defaultMagoJar = Join-Path $projectRoot 'ocean-business-geo\tools\mago\mago-3d-terrainer-1.14.2-release.jar'
 
 function Import-ApplicationEnvironment {
     if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
@@ -31,9 +30,6 @@ function Import-ApplicationEnvironment {
     if (-not $env:SERVER_PORT) {
         $env:SERVER_PORT = if ($env:APP_PORT) { $env:APP_PORT } else { '8090' }
     }
-    if (-not $env:GIS_TERRAIN_MAGO_JAR_PATH) {
-        $env:GIS_TERRAIN_MAGO_JAR_PATH = $defaultMagoJar
-    }
 }
 
 function Assert-Command([string]$Name) {
@@ -47,12 +43,6 @@ function Assert-Runtime {
     $javaVersion = & java -version 2>&1 | Where-Object { $_ -match 'version "' } | Select-Object -First 1
     if (-not $javaVersion -or $javaVersion.ToString() -notmatch '"21(?:\.|\")') {
         throw "Java 21 is required, found: $javaVersion"
-    }
-    if (-not (Test-Path -LiteralPath $env:GIS_TERRAIN_MAGO_JAR_PATH -PathType Leaf)) {
-        throw "Mago JAR not found: $($env:GIS_TERRAIN_MAGO_JAR_PATH). Run git lfs pull."
-    }
-    if ((Get-Item -LiteralPath $env:GIS_TERRAIN_MAGO_JAR_PATH).Length -le 1000000) {
-        throw 'Mago JAR looks like a Git LFS pointer. Run git lfs pull.'
     }
 }
 
@@ -93,7 +83,7 @@ function Start-Application {
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
     $arguments = @('-jar', ('"{0}"' -f $appJar))
     $process = Start-Process -FilePath 'java' -ArgumentList $arguments -WorkingDirectory $projectRoot `
-        -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
+        -WindowStyle Hidden -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
     Set-Content -LiteralPath $pidFile -Value $process.Id -NoNewline
     Start-Sleep -Seconds 2
     if ($process.HasExited) { throw "Application exited during startup. Check $stderrLog." }

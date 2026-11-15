@@ -1,0 +1,22 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ * 基于 Gaia3D/mago-3d-terrainer v1.14.2-release，已为本库同 JVM 执行改造。
+ */
+package com.gaia3d.terrain.tile.raster;
+
+import lombok.NoArgsConstructor;
+
+import java.nio.ByteOrder;
+
+@NoArgsConstructor
+public final class TerrainRasterFormat {
+    public static final String EXTENSION = ".raster";
+    public static final String CRS = "EPSG:4326";
+    public static final byte[] MAGIC = new byte[]{'M', 'T', 'R', 'F'};
+    public static final int VERSION = 1;
+    public static final int HEADER_SIZE_BYTES = 64;
+    public static final int FLOAT_BYTES = Float.BYTES;
+    public static final float NO_DATA_VALUE = Float.NaN;
+    public static final ByteOrder BYTE_ORDER = ByteOrder.LITTLE_ENDIAN;
+
+}

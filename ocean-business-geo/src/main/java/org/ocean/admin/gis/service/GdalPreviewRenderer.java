@@ -15,7 +15,9 @@ import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.Vector;
 
@@ -208,31 +210,52 @@ public final class GdalPreviewRenderer {
         return metadata.path("metadata").path("RPC").isEmpty() ? "" : "EPSG:4326";
     }
 
-    /** RGB按颜色解释选取；没有颜色语义的多波段默认只显示第一个波段。 */
+    /** RGB优先采用颜色解释，其次采用无歧义的颜色名称；无颜色语义时显示单波段。 */
     private static List<Integer> bands(Dataset source, JsonNode parameters) {
         List<Integer> selected = new ArrayList<>();
         if (parameters.path("bands").isArray())
             parameters.path("bands").forEach(value -> selected.add(value.asInt()));
         else {
-            for (int color :
-                    new int[] {
-                        gdalconstConstants.GCI_RedBand,
-                        gdalconstConstants.GCI_GreenBand,
-                        gdalconstConstants.GCI_BlueBand
-                    }) {
-                for (int i = 1; i <= source.GetRasterCount(); i++) {
-                    Band band = source.GetRasterBand(i);
-                    try {
-                        if (band.GetColorInterpretation() == color
-                                && !gdal.GetDataTypeName(band.GetRasterDataType())
-                                        .startsWith("C")) {
-                            selected.add(i);
-                            break;
-                        }
-                    } finally {
-                        band.delete();
+            int[] colors = {
+                gdalconstConstants.GCI_RedBand,
+                gdalconstConstants.GCI_GreenBand,
+                gdalconstConstants.GCI_BlueBand
+            };
+            int[] interpreted = new int[3];
+            int[] named = new int[3];
+            for (int i = 1; i <= source.GetRasterCount(); i++) {
+                Band band = source.GetRasterBand(i);
+                try {
+                    String type = gdal.GetDataTypeName(band.GetRasterDataType());
+                    if (type.startsWith("C") || type.equals("Unknown")) continue;
+                    int interpretation = band.GetColorInterpretation();
+                    for (int channel = 0; channel < colors.length; channel++) {
+                        if (interpretation == colors[channel] && interpreted[channel] == 0)
+                            interpreted[channel] = i;
                     }
+                    // 名称仅补充缺失的颜色语义，不能覆盖显式RGB、调色板或Alpha标记。
+                    if (interpretation != gdalconstConstants.GCI_Undefined
+                            && interpretation != gdalconstConstants.GCI_GrayIndex) continue;
+                    String description = band.GetDescription();
+                    if (description == null) continue;
+                    int channel =
+                            switch (description.trim().toLowerCase(Locale.ROOT)) {
+                                case "red" -> 0;
+                                case "green" -> 1;
+                                case "blue" -> 2;
+                                default -> -1;
+                            };
+                    if (channel < 0) continue;
+                    if (named[channel] == 0) named[channel] = i;
+                    else named[channel] = -1;
+                } finally {
+                    band.delete();
                 }
+            }
+            for (int channel = 0; channel < colors.length; channel++) {
+                int index = interpreted[channel];
+                if (index == 0) index = named[channel];
+                if (index > 0) selected.add(index);
             }
             if (selected.size() != 3) {
                 selected.clear();
@@ -371,7 +394,7 @@ public final class GdalPreviewRenderer {
             if (display == null) throw new IllegalArgumentException("图像生成失败");
             int count = width * height;
             int[] pixels = new int[count];
-            java.util.Arrays.fill(pixels, 0xff000000);
+            Arrays.fill(pixels, 0xff000000);
             ObjectNode result = json.createObjectNode().put("width", width).put("height", height);
             for (int channel = 0; channel < selected.size(); channel++) {
                 Band original = source.GetRasterBand(selected.get(channel));
@@ -385,7 +408,10 @@ public final class GdalPreviewRenderer {
                     check(mask.ReadRaster(0, 0, width, height, validity));
                     Double[] noData = new Double[1];
                     band.GetNoDataValue(noData);
-                    double[] range = indexedColor ? new double[] {0, 255} : range(original);
+                    double[] range =
+                            indexedColor
+                                    ? new double[] {0, 255}
+                                    : range(original, selected.size() == 3);
                     if (selected.size() == 1
                             && original.GetColorInterpretation()
                                     == gdalconstConstants.GCI_PaletteIndex)
@@ -458,8 +484,8 @@ public final class GdalPreviewRenderer {
         }
     }
 
-    /** 显示范围只在最多65536个抽样像元上计算，禁止隐式全图统计。 */
-    private static double[] range(Band band) {
+    /** 非Byte的RGB采用2%至98%累计裁剪；统计限定在源波段的65536个抽样像元内。 */
+    private static double[] range(Band band, boolean cumulativeCut) {
         if (band.GetRasterDataType() == gdalconstConstants.GDT_Byte) return new double[] {0, 255};
         int width = Math.min(256, band.GetXSize()), height = Math.min(256, band.GetYSize());
         double[] values = new double[width * height];
@@ -492,14 +518,26 @@ public final class GdalPreviewRenderer {
         Double[] noData = new Double[1];
         band.GetNoDataValue(noData);
         double min = Double.POSITIVE_INFINITY, max = Double.NEGATIVE_INFINITY;
+        int validCount = 0;
         for (int i = 0; i < values.length; i++) {
             if (valid[i] == 0
                     || !Double.isFinite(values[i])
                     || noData[0] != null && Double.compare(values[i], noData[0]) == 0) continue;
             min = Math.min(min, values[i]);
             max = Math.max(max, values[i]);
+            values[validCount++] = values[i];
         }
-        if (!Double.isFinite(min)) return new double[] {0, 1};
+        if (validCount == 0) return new double[] {0, 1};
+        if (cumulativeCut) {
+            Arrays.sort(values, 0, validCount);
+            double lower = values[(int) Math.floor((validCount - 1) * 0.02)];
+            double upper = values[(int) Math.floor((validCount - 1) * 0.98)];
+            // 分位值相同时保留抽样范围，避免常量或稀疏影像的显示范围退化。
+            if (lower < upper) {
+                min = lower;
+                max = upper;
+            }
+        }
         return new double[] {min, max == min ? min + Math.max(1, Math.abs(min) * 0.01) : max};
     }
 

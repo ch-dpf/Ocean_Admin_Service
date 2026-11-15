@@ -1,0 +1,38 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ * 基于 Gaia3D/mago-3d-terrainer v1.14.2-release，已为本库同 JVM 执行改造。
+ */
+package com.gaia3d.terrain.structure;
+
+import org.joml.Vector2i;
+
+public record RasterTriangle(Vector2i p1, Vector2i p2, Vector2i p3) {
+    public RasterTriangle(Vector2i p1, Vector2i p2, Vector2i p3) {
+        this.p1 = requireVertex(p1);
+        this.p2 = requireVertex(p2);
+        this.p3 = requireVertex(p3);
+    }
+
+    public RasterTriangle() {
+        this(new Vector2i(), new Vector2i(), new Vector2i());
+    }
+
+    private static Vector2i requireVertex(Vector2i value) {
+        if (value == null) {
+            throw new IllegalArgumentException("RasterTriangle vertices must not be null");
+        }
+        return value;
+    }
+
+    public void setVertices(Vector2i v0, Vector2i v1, Vector2i v2) {
+        this.p1.set(v0);
+        this.p2.set(v1);
+        this.p3.set(v2);
+    }
+
+    public void setVertices(int col0, int row0, int col1, int row1, int col2, int row2) {
+        this.p1.set(col0, row0);
+        this.p2.set(col1, row1);
+        this.p3.set(col2, row2);
+    }
+}

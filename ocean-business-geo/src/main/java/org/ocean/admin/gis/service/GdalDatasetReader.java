@@ -80,12 +80,22 @@ public class GdalDatasetReader {
     /** 处理准备契约在提交和执行阶段共用，避免已知的输入问题进入切片队列。 */
     public record RasterPlan(String purpose, String targetCrs, List<Integer> bands,
                              List<Double> displayRange, double elevationScale, double elevationOffset,
-                             String resampling, boolean palette) { }
+                             String resampling, boolean palette) {
+        /** 自动亮度统计只针对数值颜色通道，透明度继续按满量程转换。 */
+        private boolean needsDisplayRange(JsonNode info) {
+            if (!"IMAGERY".equals(purpose) || palette || displayRange != null) return false;
+            int colors = bands.size() == 2 || bands.size() == 4 ? bands.size() - 1 : bands.size();
+            for (int index = 0; index < colors; index++) {
+                if (!"Byte".equals(info.path("bands").get(bands.get(index) - 1).path("type").asText())) return true;
+            }
+            return false;
+        }
+    }
 
     public static RasterPlan planRaster(JsonNode info, GisProcessingParameters parameters) {
         JsonNode sourceBands = info.path("bands");
         if (!sourceBands.isArray() || sourceBands.isEmpty())
-            throw new IllegalArgumentException("栅格资源缺少波段描述，请重新解析来源");
+            throw new IllegalArgumentException("栅格资源缺少波段描述，请在文件组中重新解析，完成后再次切片，无需重新上传");
         boolean terrain = parameters instanceof TerrainProcessingParameters;
         if (!terrain && !(parameters instanceof ImageryProcessingParameters))
             throw new IllegalArgumentException("栅格只能生成影像或地形输入");
@@ -113,8 +123,8 @@ public class GdalDatasetReader {
             }
         }
         if (selected == null) throw new IllegalArgumentException(terrain
-                ? "数据包含多个波段，无法自动确定高程内容，暂不能生成地形"
-                : "数据没有明确的颜色组合，暂不能自动生成影像");
+                ? "数据包含多个波段，请明确选择一个高程波段"
+                : "数据没有明确的颜色组合，请选择灰度波段或RGB波段组合");
         if (terrain && selected.size() != 1) throw new IllegalArgumentException("地形处理必须选择一个高程波段");
         for (int band : selected) {
             if (band > sourceBands.size()) throw new IllegalArgumentException("选择的波段不存在: " + band);
@@ -124,18 +134,16 @@ public class GdalDatasetReader {
         List<Double> range = selection == null ? null : selection.displayRange();
         boolean palette = selected.size() == 1
                 && "Palette".equals(sourceBands.get(selected.getFirst() - 1).path("colorInterpretation").asText());
-        if (!terrain && !palette && range == null && selected.stream().anyMatch(index ->
-                !"Byte".equals(sourceBands.get(index - 1).path("type").asText())))
-            throw new IllegalArgumentException("数据需要明确的显示数值范围，暂不能自动生成影像");
         double scale = 1;
         double offset = 0;
         if (terrain) {
             JsonNode band = sourceBands.get(selected.getFirst() - 1);
             String unit = band.path("unit").asText("").trim().toLowerCase(Locale.ROOT);
             if (selection != null && selection.elevationScale() != null) scale = selection.elevationScale();
-            else if (Set.of("m", "meter", "meters", "metre", "metres").contains(unit)) scale = 1;
+            // 地形输入未标注单位时按米解释，前端无需补填；已标注单位仍按实际含义换算。
+            else if (unit.isEmpty() || Set.of("m", "meter", "meters", "metre", "metres").contains(unit)) scale = 1;
             else if (Set.of("ft", "foot", "feet").contains(unit)) scale = 0.3048;
-            else throw new IllegalArgumentException("数据未明确高程单位，无法自动换算为米，暂不能生成地形");
+            else throw new IllegalArgumentException("不支持源数据标注的高程单位: " + unit);
             offset = band.path("offset").asDouble(0) * scale
                     + (selection == null || selection.elevationOffset() == null ? 0 : selection.elevationOffset());
             scale *= band.path("scale").asDouble(1);
@@ -186,10 +194,45 @@ public class GdalDatasetReader {
         return prepare(group, members, heartbeat, progress, false, null);
     }
 
-    /** 按任务中固定的用途生成引擎输入，源数据及所有原始波段保持不变。 */
+    /** 准备任务来源；自动影像先统计范围，由completeProcessing汇总后生成引擎输入。 */
     public ReadContext prepareProcessing(GisFileGroup group, List<GisFileMeta> members,
             GisProcessingParameters parameters, Runnable heartbeat, Consumer<ProgressStage> progress) {
         return prepare(group, members, heartbeat, progress, false, parameters);
+    }
+
+    /** 同一任务先汇总所有来源的有效数值范围，再统一转换，避免按文件拉伸产生接缝。 */
+    public void completeProcessing(List<ReadContext> contexts, Consumer<ProgressStage> progress) {
+        double minimum = Double.POSITIVE_INFINITY;
+        double maximum = Double.NEGATIVE_INFINITY;
+        for (ReadContext context : contexts) {
+            if (context.displayRange == null) continue;
+            minimum = Math.min(minimum, context.displayRange.get(0));
+            maximum = Math.max(maximum, context.displayRange.get(1));
+        }
+        List<Double> range = null;
+        if (Double.isFinite(minimum)) {
+            if (minimum == maximum) {
+                double padding = Math.max(1, Math.abs(minimum) * 0.01);
+                minimum -= padding;
+                maximum += padding;
+            }
+            if (!Double.isFinite(minimum) || !Double.isFinite(maximum) || !Double.isFinite(maximum - minimum))
+                throw new IllegalArgumentException("影像数值范围过大，无法自动转换为显示亮度");
+            range = List.of(minimum, maximum);
+        }
+        for (ReadContext context : contexts) {
+            if (context.processingRequest == null) continue;
+            context.verifySources();
+            ObjectNode request = context.processingRequest.deepCopy();
+            request.remove("operation");
+            if (range != null) request.set("automaticDisplayRange", json.valueToTree(range));
+            try {
+                readWithWorker(context, request, progress);
+                context.verifySources();
+                context.processingRequest = null;
+            } catch (ReaderException ex) { throw ex; }
+            catch (Exception ex) { throw failure("NATIVE_READ_FAILED", "自动影像转换失败: " + ex.getMessage()); }
+        }
     }
 
     /** 原始快照与制图转换独立执行，空层或无效制图数据也可留存供检查。 */
@@ -385,7 +428,6 @@ public class GdalDatasetReader {
     /** 主进程只传递受控文件组参数，不在服务 JVM 中加载 JNI。 */
     private void prepareWithWorker(ReadContext context, GisFileFormat format, Path input, String sourceName,
                                    JsonNode options, GisProcessingParameters parameters, Consumer<ProgressStage> progress) throws Exception {
-        Path directory = context.directory();
         ObjectNode request = json.createObjectNode();
         request.put("format", format.name());
         request.put("input", input.toString());
@@ -394,9 +436,19 @@ public class GdalDatasetReader {
         if (parameters != null) {
             request.put("processingType", parameters.processingType().name());
             request.set("parameters", json.valueToTree(parameters));
+            if (parameters instanceof ImageryProcessingParameters
+                    && (parameters.raster() == null || parameters.raster().displayRange() == null)) {
+                request.put("operation", "RASTER_STATISTICS");
+                context.processingRequest = request;
+            }
         }
         request.put("version", properties.getGdalVersion());
         request.put("maxMetadataBytes", properties.getGdalMaxMetadataBytes());
+        readWithWorker(context, request, progress);
+    }
+
+    private void readWithWorker(ReadContext context, ObjectNode request, Consumer<ProgressStage> progress) throws Exception {
+        Path directory = context.directory();
         Path requestFile = directory.resolve("request.json");
         json.writeValue(requestFile.toFile(), request);
         run(context, workerCommand(requestFile), progress);
@@ -409,6 +461,17 @@ public class GdalDatasetReader {
                 error.path("message").asString("GDAL Java 读取失败"));
         if (!result.path("vectors").isArray() || !result.path("rasters").isArray())
             throw failure("INVALID_NATIVE_METADATA", "GDAL 工作进程结果结构无效");
+        if ("RASTER_STATISTICS".equals(request.path("operation").asText())) {
+            JsonNode range = result.path("displayRange");
+            if (!range.isMissingNode()) {
+                if (!range.isArray() || range.size() != 2 || !range.get(0).isNumber() || !range.get(1).isNumber()
+                        || !Double.isFinite(range.get(0).asDouble()) || !Double.isFinite(range.get(1).asDouble())
+                        || range.get(0).asDouble() > range.get(1).asDouble())
+                    throw failure("INVALID_NATIVE_METADATA", "自动显示范围统计无效");
+                context.displayRange = List.of(range.get(0).asDouble(), range.get(1).asDouble());
+            }
+            return;
+        }
         for (JsonNode source : result.path("vectors")) {
             context.vectors.add(new VectorSource(source.path("key").asString(), source.path("name").asString(),
                     resultPath(directory, source), source.path("sourceCrs").asString(null), source.get("sourceExtent"), source.get("metadata")));
@@ -663,6 +726,8 @@ public class GdalDatasetReader {
         private Duration timeout;
         private Path packageOutput;
         private ObjectNode previewRequest;
+        private ObjectNode processingRequest;
+        private List<Double> displayRange;
 
         private ReadContext(Runnable heartbeat) { this.heartbeat = heartbeat; }
         public List<VectorSource> vectors() { return List.copyOf(vectors); }
@@ -832,6 +897,9 @@ public class GdalDatasetReader {
         private final int metadataLimit;
         private final ObjectNode result;
         private final Consumer<ProgressStage> progress;
+        private boolean statisticsOnly;
+        private int selectedRasterCount;
+        private List<Double> automaticDisplayRange;
 
         private Worker(Path directory, int metadataLimit) {
             this.directory = directory; this.metadataLimit = metadataLimit;
@@ -948,6 +1016,10 @@ public class GdalDatasetReader {
                         case "" -> null;
                         default -> throw failure("INVALID_READ_OPTIONS", "栅格处理用途无效");
                     };
+                    worker.statisticsOnly = "RASTER_STATISTICS".equals(request.path("operation").asText());
+                    JsonNode range = request.path("automaticDisplayRange");
+                    if (range.isArray() && range.size() == 2)
+                        worker.automaticDisplayRange = List.of(range.get(0).asDouble(), range.get(1).asDouble());
                     worker.raster(input, request.path("sourceName").asString(), options, drivers, parameters);
                 }
                 worker.writeResult(worker.result);
@@ -1170,6 +1242,9 @@ public class GdalDatasetReader {
                 boolean found = false;
                 JsonNode subdatasets = info.path("metadata").path("SUBDATASETS");
                 boolean hasSubdatasets = subdatasets.propertyNames().stream().anyMatch(field -> field.matches("SUBDATASET_[1-9][0-9]*_NAME"));
+                if (parameters != null && (parameters.raster() == null || parameters.raster().layerKeys() == null)
+                        && subdatasets.propertyNames().stream().filter(field -> field.matches("SUBDATASET_[1-9][0-9]*_NAME")).count() > 1)
+                    throw failure("INPUT_OPTIONS_REQUIRED", "数据包含多个栅格集合，请选择需要切片的集合");
                 if (source.GetRasterCount() > 0 && !hasSubdatasets) {
                     rasterDataset(source, info, "default", sourceName, options, parameters);
                     found = true;
@@ -1190,7 +1265,7 @@ public class GdalDatasetReader {
                     } finally { subset.delete(); }
                 }
                 if (!found) throw failure("EMPTY_RASTER", "数据源没有栅格集合");
-                if (result.path("rasters").isEmpty()) throw failure("INPUT_OPTIONS_REQUIRED", "选定的栅格集合不存在");
+                if (selectedRasterCount == 0) throw failure("INPUT_OPTIONS_REQUIRED", "选定的栅格集合不存在");
             } finally { source.delete(); }
         }
 
@@ -1211,6 +1286,7 @@ public class GdalDatasetReader {
                                    GisProcessingParameters parameters) throws Exception {
             if (parameters != null && parameters.raster() != null && parameters.raster().layerKeys() != null
                     && !parameters.raster().layerKeys().contains(key)) return;
+            selectedRasterCount++;
             String explicit = explicitCrs(options);
             String sourceCrs = explicit != null ? explicit : text(info.path("coordinateSystem").path("wkt"));
             boolean affine = info.path("geoTransform").isArray() && info.path("geoTransform").size() == 6;
@@ -1254,13 +1330,24 @@ public class GdalDatasetReader {
                 } finally { band.delete(); gdal.ErrorReset(); }
             }
             RasterPlan plan = parameters == null ? null : planRaster(info, parameters);
+            if (statisticsOnly) {
+                if (plan != null && plan.needsDisplayRange(info)) collectDisplayRange(source, plan);
+                return;
+            }
+            boolean automaticRange = plan != null && plan.needsDisplayRange(info);
+            if (automaticRange) {
+                if (automaticDisplayRange == null)
+                    throw failure("INPUT_OPTIONS_REQUIRED", "影像缺少自动显示范围统计，请重新提交切片任务");
+                plan = new RasterPlan(plan.purpose(), plan.targetCrs(), plan.bands(), automaticDisplayRange,
+                        plan.elevationScale(), plan.elevationOffset(), plan.resampling(), plan.palette());
+            }
             String filename = "raster-" + result.path("rasters").size() + ".tif";
             Path output = directory.resolve(filename);
             Vector<String> select = new Vector<>(List.of("-of", "VRT"));
             if (explicit != null) select.addAll(List.of("-a_srs", sourceCrs));
             if (plan != null) {
-                // 派生数值可合法等于源NoData；有效性在数值变换前独立保存。
-                select.addAll(List.of("-a_nodata", "none"));
+                // 派生数值可合法等于源NoData；有效性另行保存，避免继承的掩膜阻止创建统一掩膜。
+                select.addAll(List.of("-a_nodata", "none", "-mask", "none"));
                 for (int band : plan.bands()) select.addAll(List.of("-b", Integer.toString(band)));
                 if (plan.palette()) select.addAll(List.of("-expand", "rgba"));
                 if ("IMAGERY".equals(plan.purpose())) {
@@ -1279,7 +1366,8 @@ public class GdalDatasetReader {
                                             default -> 255;
                                         };
                                 select.addAll(List.of("-scale_" + index, "0", Double.toString(maximum), "0", "255"));
-                            } else if (plan.displayRange() != null) {
+                            } else if (plan.displayRange() != null && (!automaticRange
+                                    || !"Byte".equals(info.path("bands").get(plan.bands().get(index - 1) - 1).path("type").asText()))) {
                                 select.addAll(List.of("-scale_" + index, plan.displayRange().get(0).toString(),
                                         plan.displayRange().get(1).toString(), "0", "255", "-exponent_" + index, "1"));
                             }
@@ -1395,6 +1483,62 @@ public class GdalDatasetReader {
                 if (selected != null) selected.delete();
                 selection.delete();
             }
+        }
+
+        /** 分块扫描有效颜色值；忽略NoData、非有限值、掩膜外和完全透明的像元，不写回来源统计。 */
+        private void collectDisplayRange(Dataset source, RasterPlan plan) {
+            int width = source.GetRasterXSize(), height = source.GetRasterYSize();
+            int colors = plan.bands().size() == 2 || plan.bands().size() == 4
+                    ? plan.bands().size() - 1 : plan.bands().size();
+            double minimum = Double.POSITIVE_INFINITY, maximum = Double.NEGATIVE_INFINITY;
+            for (int y = 0; y < height; y += 256) {
+                for (int x = 0; x < width; x += 256) {
+                    int columns = Math.min(256, width - x), rows = Math.min(256, height - y);
+                    boolean[] transparent = new boolean[columns * rows];
+                    for (int index = 1; index <= source.GetRasterCount(); index++) {
+                        var band = source.GetRasterBand(index);
+                        try {
+                            boolean selectedAlpha = colors < plan.bands().size() && index == plan.bands().getLast();
+                            if (!selectedAlpha && band.GetColorInterpretation() != gdalconstConstants.GCI_AlphaBand) continue;
+                            double[] alpha = new double[transparent.length];
+                            if (band.ReadRaster(x, y, columns, rows, alpha) != gdalconstConstants.CE_None)
+                                throw failure("NATIVE_READ_FAILED", "统计显示范围时读取透明度失败");
+                            for (int pixel = 0; pixel < alpha.length; pixel++)
+                                if (!Double.isFinite(alpha[pixel]) || alpha[pixel] <= 0) transparent[pixel] = true;
+                        } finally { band.delete(); }
+                    }
+                    for (int index = 0; index < colors; index++) {
+                        var band = source.GetRasterBand(plan.bands().get(index));
+                        var mask = band.GetMaskBand();
+                        try {
+                            if (band.GetRasterDataType() == gdalconstConstants.GDT_Byte) continue;
+                            double[] values = new double[transparent.length];
+                            byte[] validity = new byte[transparent.length];
+                            Double[] noData = new Double[1];
+                            band.GetNoDataValue(noData);
+                            if (band.ReadRaster(x, y, columns, rows, values) != gdalconstConstants.CE_None
+                                    || mask.ReadRaster(x, y, columns, rows, validity) != gdalconstConstants.CE_None)
+                                throw failure("NATIVE_READ_FAILED", "自动显示范围读取失败");
+                            for (int pixel = 0; pixel < values.length; pixel++) {
+                                double value = values[pixel];
+                                if (transparent[pixel] || validity[pixel] == 0 || !Double.isFinite(value)
+                                        || noData[0] != null && value == noData[0]) continue;
+                                minimum = Math.min(minimum, value);
+                                maximum = Math.max(maximum, value);
+                            }
+                        } finally { mask.delete(); band.delete(); }
+                    }
+                }
+                progress.accept(ProgressStage.determinate("RASTER_STATISTICS", "自动统计影像显示范围",
+                        Math.min(height, y + 256), height, ProgressUnit.OPERATION));
+            }
+            if (!Double.isFinite(minimum)) throw failure("EMPTY_RASTER", "所选影像波段没有可用于切片的有效像元");
+            JsonNode previous = result.path("displayRange");
+            if (previous.isArray()) {
+                minimum = Math.min(minimum, previous.get(0).asDouble());
+                maximum = Math.max(maximum, previous.get(1).asDouble());
+            }
+            result.set("displayRange", json.valueToTree(List.of(minimum, maximum)));
         }
 
         /** 原生按所选波段固定有效性，供轮廓提取和处理转换复用，原始数值不降精度。 */

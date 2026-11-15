@@ -4,7 +4,7 @@ import org.ocean.admin.gis.dto.TerrainProcessingParameters;
 
 import java.util.Locale;
 
-/** mago-3d-terrainer 第一阶段支持的稳定参数。 */
+/** 本库地形引擎支持的切片参数。 */
 public record TerrainOptions(
         int minDepth,
         Integer maxDepth,
@@ -18,7 +18,7 @@ public record TerrainOptions(
         boolean leaveTemp,
         boolean generateLayerJson) {
 
-    /** 与固定版本 mago-3d-terrainer 的默认可用深度规则一致，包含末级细分。 */
+    /** 沿用上游引擎的默认可用深度规则，包含末级细分。 */
     public static int calculateRecommendedMaxZoom(double pixelSizeMeters) {
         if (!Double.isFinite(pixelSizeMeters) || pixelSizeMeters <= 0) {
             throw new IllegalArgumentException("地形像素间距必须为正数");
@@ -104,17 +104,7 @@ public record TerrainOptions(
     }
 
     public enum InterpolationType {
-        NEAREST("nearest"),
-        BILINEAR("bilinear");
-
-        private final String commandValue;
-
-        InterpolationType(String commandValue) {
-            this.commandValue = commandValue;
-        }
-
-        public String commandValue() {
-            return commandValue;
-        }
+        NEAREST,
+        BILINEAR
     }
 }

@@ -1,0 +1,293 @@
+/*
+ * SPDX-License-Identifier: MPL-2.0
+ * 基于 Gaia3D/mago-3d-terrainer v1.14.2-release，已为本库同 JVM 执行改造。
+ */
+package com.gaia3d.terrain.structure;
+
+import com.gaia3d.basic.geometry.GaiaBoundingBox;
+import com.gaia3d.io.BigEndianDataInputStream;
+import com.gaia3d.io.BigEndianDataOutputStream;
+import com.gaia3d.terrain.tile.core.TileIndices;
+import com.gaia3d.terrain.types.TerrainObjectStatus;
+import com.gaia3d.util.CelestialBody;
+import com.gaia3d.util.GlobeUtils;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
+import org.joml.Vector3d;
+import org.joml.Vector3f;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+@Getter
+@Setter
+@Slf4j
+public class TerrainTriangle {
+
+    public TerrainHalfEdge halfEdge = null;
+    private int id = -1;
+    private int halfEdgeId = -1;
+    private Vector3f normal = null;
+    private TileIndices ownerTileIndices = new TileIndices();
+    private TerrainObjectStatus objectStatus = TerrainObjectStatus.ACTIVE;
+    private GaiaBoundingBox myBoundingBox = null;
+    private TerrainPlane myPlane = null;
+    private int splitDepth = 0;
+    private boolean refineChecked = false;
+
+    public void deleteObjects() {
+        halfEdge = null;
+        ownerTileIndices = null;
+        myBoundingBox = null;
+        myPlane = null;
+    }
+
+    public void setHalfEdge(TerrainHalfEdge halfEdge) {
+        this.halfEdge = halfEdge;
+        halfEdge.setTriangleToHEdgesLoop(this);
+    }
+
+    public List<TerrainVertex> getVertices(List<TerrainVertex> resultVertices, List<TerrainHalfEdge> listHalfEdges) {
+        listHalfEdges.clear();
+        this.halfEdge.getHalfEdgesLoop(listHalfEdges);
+        if (resultVertices == null) {resultVertices = new ArrayList<>();}
+        for (TerrainHalfEdge halfEdge : listHalfEdges) {
+            resultVertices.add(halfEdge.getStartVertex());
+        }
+        listHalfEdges.clear();
+        return resultVertices;
+    }
+
+    public List<Vector3d> getPositions(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges) {
+        listHalfEdges.clear();
+        listVertices = this.getVertices(listVertices, listHalfEdges);
+        List<Vector3d> positions = new ArrayList<>();
+        for (TerrainVertex vertex : listVertices) {
+            positions.add(vertex.getPosition());
+        }
+        return positions;
+    }
+
+    public GaiaBoundingBox getBoundingBox(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges) {
+        listHalfEdges.clear();
+        if (this.myBoundingBox == null) {
+            this.myBoundingBox = new GaiaBoundingBox();
+            listVertices.clear();
+            listVertices = this.getVertices(listVertices, listHalfEdges);
+            for (TerrainVertex vertex : listVertices) {
+                this.myBoundingBox.addPoint(vertex.getPosition());
+            }
+        }
+
+        return this.myBoundingBox;
+    }
+
+    public TerrainPlane getPlane(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges) {
+        if (this.myPlane == null) {
+            this.myPlane = new TerrainPlane();
+            listVertices.clear();
+            listHalfEdges.clear();
+            listVertices = this.getVertices(listVertices, listHalfEdges);
+            TerrainVertex vertex0 = listVertices.get(0);
+            TerrainVertex vertex1 = listVertices.get(1);
+            TerrainVertex vertex2 = listVertices.get(2);
+            this.myPlane.set3Points(vertex0.getPosition(), vertex1.getPosition(), vertex2.getPosition());
+        }
+
+        return this.myPlane;
+    }
+
+    public boolean intersectsPointXY(double posX, double posY, List<TerrainHalfEdge> halfEdges, List<TerrainVertex> listVertices, TerrainLine2D line2D) {
+        listVertices.clear();
+        halfEdges.clear();
+        GaiaBoundingBox boundingBox = this.getBoundingBox(listVertices, halfEdges);
+        if (!boundingBox.intersectsPointXY(posX, posY)) {
+            return false;
+        }
+
+        halfEdges.clear();
+        this.halfEdge.getHalfEdgesLoop(halfEdges);
+        double error = 1e-8;
+        int hedgesCount = halfEdges.size();
+        TerrainLine2D line2dAux = null;
+        for (int i = 0; i < hedgesCount; i++) {
+            TerrainHalfEdge hedge = halfEdges.get(i);
+            line2dAux = hedge.getLine2DXY();
+            byte relativePosition2D_linePoint = line2dAux.relativePositionOfPoint(posX, posY, error);
+
+            if (relativePosition2D_linePoint == 2) {
+                halfEdges.clear();
+                return false;
+            }
+        }
+
+        halfEdges.clear();
+        return true;
+    }
+
+    public Vector3d getBarycenter(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges) {
+        Vector3d barycenter = new Vector3d();
+        getBarycenter(listVertices, listHalfEdges, barycenter);
+        return barycenter;
+    }
+
+    public void getBarycenter(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges, Vector3d result) {
+        listVertices.clear();
+        listHalfEdges.clear();
+        listVertices = this.getVertices(listVertices, listHalfEdges);
+        result.zero();
+        for (TerrainVertex vertex : listVertices) {
+            result.add(vertex.getPosition());
+        }
+        result.mul(1.0 / 3.0);
+    }
+
+    public List<Vector3d> getSomePointsToCheckForTriangleRefinement(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges) {
+        List<Vector3d> somePoints = new ArrayList<>();
+
+        listHalfEdges.clear();
+        Vector3d barycenter = this.getBarycenter(listVertices, listHalfEdges);
+        somePoints.add(barycenter);
+
+        listHalfEdges.clear();
+        listVertices = this.getVertices(listVertices, listHalfEdges);
+        for (TerrainVertex vertex : listVertices) {
+            Vector3d pos = vertex.getPosition().add(barycenter).mul(0.5);
+            somePoints.add(pos);
+        }
+
+        return somePoints;
+    }
+
+    public List<Vector3d> getPerimeterPositions(int numInterpolation) {
+        List<Vector3d> perimeterPositions = new ArrayList<>();
+        List<TerrainHalfEdge> halfEdges = new ArrayList<>();
+        this.halfEdge.getHalfEdgesLoop(halfEdges);
+        for (TerrainHalfEdge halfEdge : halfEdges) {
+            halfEdge.getInterpolatedPositions(perimeterPositions, numInterpolation);
+        }
+        halfEdges.clear();
+        return perimeterPositions;
+    }
+
+    public TerrainHalfEdge getLongestHalfEdge(List<TerrainHalfEdge> listHalfEdges) {
+
+        listHalfEdges.clear();
+        if (this.halfEdge == null) {
+            log.warn("Triangle {} has no half-edge assigned. This may indicate a data inconsistency or an issue in the terrain generation process. " +
+                    "TileIndices: {}", this.id, this.ownerTileIndices != null ? this.ownerTileIndices.getString() : "null");
+            return null;
+        }
+        this.halfEdge.getHalfEdgesLoop(listHalfEdges);
+        TerrainHalfEdge longestHalfEdge = null;
+        double maxLength = 0.0;
+        for (TerrainHalfEdge halfEdge : listHalfEdges) {
+            double length = halfEdge.getSquaredLengthXY();
+            if (length > maxLength) {
+                maxLength = length;
+                longestHalfEdge = halfEdge;
+            }
+        }
+        listHalfEdges.clear();
+
+        if (longestHalfEdge == null) {
+            log.debug("Triangle {} has no half-edge with length > 0 (degenerate triangle). " +
+                            "HalfEdges count: {}, TileIndices: {}",
+                    this.id,
+                    listHalfEdges.size(),
+                    this.ownerTileIndices != null ? this.ownerTileIndices.getString() : "null");
+        }
+
+        return longestHalfEdge;
+    }
+
+    public double getTriangleMaxSizeInMeters(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges) {
+        listHalfEdges.clear();
+        GaiaBoundingBox bboxTriangle = this.getBoundingBox(listVertices, listHalfEdges);
+        double triangleMaxLengthDeg = Math.max(bboxTriangle.getLengthX(), bboxTriangle.getLengthY());
+        double triangleMaxLengthRad = Math.toRadians(triangleMaxLengthDeg);
+        return triangleMaxLengthRad * com.gaia3d.util.CelestialBody.EARTH.getEquatorialRadius();
+    }
+
+    public void saveDataOutputStream(BigEndianDataOutputStream dataOutputStream) {
+        try {
+
+            dataOutputStream.writeInt(id);
+
+            if (halfEdge != null) {
+                dataOutputStream.writeInt(halfEdge.getId());
+            } else {
+                dataOutputStream.writeInt(-1);
+            }
+
+            if (ownerTileIndices == null) {
+                dataOutputStream.writeInt(-1);
+                dataOutputStream.writeInt(-1);
+                dataOutputStream.writeInt(-1);
+            } else {
+                ownerTileIndices.saveDataOutputStream(dataOutputStream);
+            }
+
+            dataOutputStream.writeInt(splitDepth);
+
+        } catch (Exception e) {
+            log.error("Error:", e);
+        }
+    }
+
+    public void loadDataInputStream(BigEndianDataInputStream dataInputStream) throws IOException {
+        this.id = dataInputStream.readInt();
+        this.halfEdgeId = dataInputStream.readInt();
+        if (this.ownerTileIndices == null) {
+            this.ownerTileIndices = new TileIndices();
+        }
+        this.ownerTileIndices.loadDataInputStream(dataInputStream);
+
+        this.splitDepth = dataInputStream.readInt();
+    }
+
+    public void calculateNormal(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges) {
+        listHalfEdges.clear();
+        calculateNormalWC(listVertices, listHalfEdges);
+    }
+
+    public Vector3f getNormal() {
+        if (this.normal == null) {
+            List<TerrainVertex> listVertices = new ArrayList<>();
+            List<TerrainHalfEdge> listHalfEdges = new ArrayList<>();
+            return this.getNormal(listVertices, listHalfEdges);
+        }
+        return this.normal;
+    }
+
+    public Vector3f getNormal(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges) {
+        if (this.normal == null) {
+            listHalfEdges.clear();
+            calculateNormalWC(listVertices, listHalfEdges);
+        }
+        return this.normal;
+    }
+
+    public void calculateNormalWC(List<TerrainVertex> listVertices, List<TerrainHalfEdge> listHalfEdges) {
+        if (this.normal == null) {
+            listHalfEdges.clear();
+            listVertices = this.getVertices(listVertices, listHalfEdges);
+            Vector3d p0 = listVertices.get(0).getPosition();
+            Vector3d p1 = listVertices.get(1).getPosition();
+            Vector3d p2 = listVertices.get(2).getPosition();
+
+            CelestialBody body = com.gaia3d.util.CelestialBody.EARTH;
+            Vector3d p0WC = GlobeUtils.geographicToCartesian(p0, body);
+            Vector3d p1WC = GlobeUtils.geographicToCartesian(p1, body);
+            Vector3d p2WC = GlobeUtils.geographicToCartesian(p2, body);
+
+            Vector3d v1 = new Vector3d(p1WC).sub(p0WC);
+            Vector3d v2 = new Vector3d(p2WC).sub(p0WC);
+            Vector3d normalized = new Vector3d(v1).cross(v2).normalize();
+
+            this.normal = new Vector3f((float) normalized.x, (float) normalized.y, (float) normalized.z);
+        }
+    }
+}

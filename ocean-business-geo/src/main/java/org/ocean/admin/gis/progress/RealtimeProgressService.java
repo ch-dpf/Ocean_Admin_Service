@@ -31,7 +31,8 @@ import static org.ocean.admin.gis.progress.ProgressSnapshot.*;
 @Service
 @Slf4j
 public class RealtimeProgressService {
-    private static final String PREFIX = "ocean-admin:progress:";
+    private static final String PROGRESS_PREFIX = "ocean-admin:gis:progress:";
+    private static final String UPLOAD_LOCK_PREFIX = "ocean-admin:gis:upload-lock:";
     private static final Duration RETENTION = Duration.ofMinutes(30);
     private static final Duration ACTIVE_RETENTION = Duration.ofHours(6);
     private static final DefaultRedisScript<Long> CAS = new DefaultRedisScript<>("""
@@ -85,8 +86,8 @@ public class RealtimeProgressService {
         boolean created = true;
         try {
             if (existing == null) {
-                created = Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(PREFIX + id, json.writeValueAsString(snapshot), ACTIVE_RETENTION));
-            } else redis.opsForValue().set(PREFIX + id, json.writeValueAsString(snapshot), ACTIVE_RETENTION);
+                created = Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(PROGRESS_PREFIX + id, json.writeValueAsString(snapshot), ACTIVE_RETENTION));
+            } else redis.opsForValue().set(PROGRESS_PREFIX + id, json.writeValueAsString(snapshot), ACTIVE_RETENTION);
         } catch (DataAccessException ex) {
             unavailable(id, ex);
             return snapshot.handle();
@@ -107,7 +108,7 @@ public class RealtimeProgressService {
         if (System.nanoTime() < redisRetryAfter && durable(id)) return null;
         String value;
         try {
-            value = redis.opsForValue().get(PREFIX + id);
+            value = redis.opsForValue().get(PROGRESS_PREFIX + id);
         } catch (DataAccessException ex) {
             unavailable(id, ex);
             return null;
@@ -139,7 +140,7 @@ public class RealtimeProgressService {
         snapshot = provider.rebuild(id);
         if (snapshot == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "进度已过期，请查询文件接入结果");
         try {
-            redis.opsForValue().setIfAbsent(PREFIX + id, json.writeValueAsString(snapshot),
+            redis.opsForValue().setIfAbsent(PROGRESS_PREFIX + id, json.writeValueAsString(snapshot),
                     snapshot.status().isTerminal() ? RETENTION : ACTIVE_RETENTION);
         } catch (DataAccessException ex) {
             unavailable(id, ex);
@@ -180,7 +181,7 @@ public class RealtimeProgressService {
     }
 
     private Runnable acquireExecutionLock(String id) {
-        String key = PREFIX + "execution:" + id;
+        String key = UPLOAD_LOCK_PREFIX + id;
         String token = UUID.randomUUID().toString();
         if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, token, Duration.ofSeconds(60)))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "接入正在处理，请稍后重试");
@@ -198,7 +199,7 @@ public class RealtimeProgressService {
 
     public void assertExecutionLock(String id) {
         String token = executions.get(id);
-        if (token == null || !token.equals(redis.opsForValue().get(PREFIX + "execution:" + id)))
+        if (token == null || !token.equals(redis.opsForValue().get(UPLOAD_LOCK_PREFIX + id)))
             throw new IllegalStateException("接入执行权已失效，请重新录入");
     }
 
@@ -206,7 +207,7 @@ public class RealtimeProgressService {
     public void renewExecutions() {
         executions.forEach((id, token) -> {
             try {
-                if (!Long.valueOf(1).equals(redis.execute(RENEW, List.of(PREFIX + "execution:" + id), token, "60000")))
+                if (!Long.valueOf(1).equals(redis.execute(RENEW, List.of(UPLOAD_LOCK_PREFIX + id), token, "60000")))
                     executions.remove(id, token);
             } catch (RuntimeException ex) {
                 executions.remove(id, token);
@@ -220,7 +221,7 @@ public class RealtimeProgressService {
         for (int attempt = 0; attempt < 100; attempt++) {
             String before;
             try {
-                before = redis.opsForValue().get(PREFIX + id);
+                before = redis.opsForValue().get(PROGRESS_PREFIX + id);
             } catch (DataAccessException ex) {
                 unavailable(id, ex);
                 return null;
@@ -232,7 +233,7 @@ public class RealtimeProgressService {
             long ttl = (next.status().isTerminal() ? RETENTION : ACTIVE_RETENTION).toMillis();
             Long changed;
             try {
-                changed = redis.execute(CAS, List.of(PREFIX + id), before,
+                changed = redis.execute(CAS, List.of(PROGRESS_PREFIX + id), before,
                         json.writeValueAsString(next), Long.toString(ttl));
             } catch (DataAccessException ex) {
                 unavailable(id, ex);

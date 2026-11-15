@@ -4,93 +4,39 @@ import org.ocean.admin.gis.terrain.engine.TerrainEngine;
 import org.ocean.admin.gis.terrain.engine.TerrainGenerationRequest;
 import org.ocean.admin.gis.terrain.engine.TerrainGenerationResult;
 import org.ocean.admin.gis.terrain.engine.TerrainProgressListener;
-import tools.jackson.databind.ObjectMapper;
-
+import org.ocean.admin.gis.progress.ProgressStage;
+import org.ocean.admin.gis.progress.ProgressUnit;
+import org.ocean.terrain.TerrainTilingService;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Duration;
-import java.util.List;
 
-/** 通过独立 Java 子进程调用 mago-3d-terrainer。 */
+/** 直接调用本库地形模块，参数、异常和进度在此映射到 GIS 契约。 */
 public class MagoTerrainEngine implements TerrainEngine {
-
     private final MagoTerrainProperties properties;
-    private final MagoCommandBuilder commandBuilder;
-    private final MagoProcessRunner processRunner;
-    private final ObjectMapper objectMapper;
+    private final TerrainTilingService service;
 
-    public MagoTerrainEngine(
-            MagoTerrainProperties properties,
-            MagoCommandBuilder commandBuilder,
-            MagoProcessRunner processRunner,
-            ObjectMapper objectMapper) {
+    public MagoTerrainEngine(MagoTerrainProperties properties, TerrainTilingService service) {
         this.properties = properties;
-        this.commandBuilder = commandBuilder;
-        this.processRunner = processRunner;
-        this.objectMapper = objectMapper;
+        this.service = service;
     }
 
-    @Override
-    public TerrainGenerationResult generate(
-            TerrainGenerationRequest request,
+    @Override public TerrainGenerationResult generate(TerrainGenerationRequest request,
             TerrainProgressListener progressListener) {
-        validateRequest(request);
-        prepareDirectories(request);
-        List<String> command = commandBuilder.build(properties, request);
-        MagoProcessRunner.ProcessResult generationResult;
-        try (MagoTerrainProgressMonitor monitor = new MagoTerrainProgressMonitor(
-                request.outputPath(), objectMapper, progressListener)) {
-            monitor.start();
-            generationResult = processRunner.run(
-                    command,
-                    properties.getProcessTimeout(),
-                    monitor::onOutput);
-            monitor.generationFinished();
-        }
-        Duration elapsed = generationResult.elapsed();
-        if (request.options().generateLayerJson()) {
-            double[] sourceBounds = MagoLayerJsonMetadata.readValidBounds(request.outputPath());
-            MagoProcessRunner.ProcessResult layerJsonResult = processRunner.run(
-                    commandBuilder.buildLayerJson(properties, request),
-                    properties.getProcessTimeout(),
-                    ignored -> { });
-            MagoLayerJsonMetadata.restoreBounds(request.outputPath(), sourceBounds);
-            elapsed = elapsed.plus(layerJsonResult.elapsed());
-        }
-        return new TerrainGenerationResult(
-                request.outputPath().toAbsolutePath().normalize(),
-                elapsed,
-                generationResult.exitCode());
-    }
-
-    private void validateRequest(TerrainGenerationRequest request) {
-        if (!properties.isEnabled()) {
-            throw new MagoTerrainException("mago 地形引擎未启用");
-        }
-        Path jarPath = properties.getJarPath().toAbsolutePath().normalize();
-        if (!Files.isRegularFile(jarPath)) {
-            throw new MagoTerrainException("mago JAR 不存在: " + jarPath);
-        }
-        for (Path inputPath : request.inputPaths()) {
-            Path input = inputPath.toAbsolutePath().normalize();
-            if (!Files.isRegularFile(input) && !Files.isDirectory(input)) {
-                throw new MagoTerrainException("地形输入不存在: " + input);
-            }
-        }
-    }
-
-    private void prepareDirectories(TerrainGenerationRequest request) {
+        if (!properties.isEnabled()) throw new MagoTerrainException("地形引擎未启用");
+        var options = request.options();
+        var input = new TerrainTilingService.Request(request.inputPaths(), request.outputPath(),
+                request.tempPath(), request.logPath(), new TerrainTilingService.Options(
+                options.minDepth(), options.maxDepth(), options.geoid(), options.noDataValue(),
+                options.interpolationType().name(), options.rasterMaxSize(), options.mosaicSize(),
+                options.calculateNormals(), options.continuePrevious(), options.leaveTemp(), options.generateLayerJson()));
+        TerrainProgressListener listener = progressListener == null ? TerrainProgressListener.NO_OP : progressListener;
+        var progress = ProgressStage.throttled(listener::onProgress);
         try {
-            Files.createDirectories(request.outputPath().toAbsolutePath().normalize());
-            if (request.tempPath() != null) {
-                Files.createDirectories(request.tempPath().toAbsolutePath().normalize());
-            }
-            if (request.logPath() != null && request.logPath().getParent() != null) {
-                Files.createDirectories(request.logPath().toAbsolutePath().normalize().getParent());
-            }
-        } catch (IOException ex) {
-            throw new MagoTerrainException("无法创建 mago 工作目录", ex);
+            var result = service.generate(input, event -> progress.accept(event.completed() == null
+                    ? ProgressStage.indeterminate(event.phase(), event.message())
+                    : new ProgressStage(event.phase(), event.message(), event.completed(), event.total(), ProgressUnit.TILE)));
+            return new TerrainGenerationResult(result.outputPath(), result.elapsed());
+        } catch (IOException | RuntimeException ex) {
+            throw new MagoTerrainException("地形切片失败: " + ex.getMessage(), ex);
         }
     }
 }

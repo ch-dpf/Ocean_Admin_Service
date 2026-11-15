@@ -113,10 +113,10 @@ gis:
   terrain:
     mago:
       enabled: ${GIS_TERRAIN_MAGO_ENABLED:true}
-      java-command: ${GIS_TERRAIN_MAGO_JAVA_COMMAND:java}
-      jar-path: ${GIS_TERRAIN_MAGO_JAR_PATH:ocean-business-geo/tools/mago/mago-3d-terrainer-1.14.2-release.jar}
-      max-heap: ${GIS_TERRAIN_MAGO_MAX_HEAP:8g}
-      process-timeout: ${GIS_TERRAIN_MAGO_PROCESS_TIMEOUT:72h}
+      # 切片与主服务共用 JVM，缓存预算不代表任务的堆内存硬上限。
+      task-timeout: 72h
+      max-concurrent-tasks: 1
+      raster-cache-bytes: 268435456
 
 ocean:
   audit:

@@ -18,6 +18,7 @@
     <name>Ocean Admin Service</name>
 
     <modules>
+        <module>ocean-terrain-engine</module>
         <module>ocean-kernel</module>
         <module>ocean-platform-core</module>
         <module>ocean-bootstrap</module>

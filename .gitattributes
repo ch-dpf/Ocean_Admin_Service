@@ -1,1 +1,1 @@
-ocean-business-geo/tools/mago/*.jar filter=lfs diff=lfs merge=lfs -text
+ocean-terrain-engine/src/main/resources/geoid/*.tif filter=lfs diff=lfs merge=lfs -text
